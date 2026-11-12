@@ -11,7 +11,7 @@ import type {
 } from "../server/src/agent-protocol";
 import type { CommandRunner, MissionResponse } from "./port";
 
-export async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
+async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const response = await fetch(url, { signal });
   if (!response.ok)
     throw Error(
@@ -19,11 +19,18 @@ export async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
     );
   return response.json();
 }
-export const getMission = (id: string, signal?: AbortSignal) =>
-  get<MissionResponse>(
+export const getAppView = async (signal?: AbortSignal, after?: number) =>
+  (await getJson(
+    after === undefined ? "/api/view" : `/api/view?after=${after}`,
+    signal,
+  )) as AppView;
+export const getAgentsView = async (signal?: AbortSignal) =>
+  (await getJson("/api/agents/view", signal)) as AgentsView;
+export const getMission = async (id: string, signal?: AbortSignal) =>
+  (await getJson(
     `/api/agents/missions/${encodeURIComponent(id)}`,
     signal,
-  );
+  )) as MissionResponse;
 export const uid = () => crypto.randomUUID();
 const appCodes = {
   invalid_command: true,
@@ -64,7 +71,13 @@ export function createRunner(
     document.querySelector<HTMLMetaElement>('meta[name="mino-csrf"]')
       ?.content ?? "",
 ): CommandRunner {
-  async function post(command: Command | AgentCommand, agent: boolean) {
+  async function post(
+    command: Command | AgentCommand,
+    agent: boolean,
+  ): Promise<
+    | { kind: "unknown"; message: string }
+    | { kind: "response"; data: Record<string, unknown>; status: number }
+  > {
     try {
       const response = await transport(
         agent ? "/api/agents/commands" : "/api/commands",
@@ -82,13 +95,13 @@ export function createRunner(
         data = await response.json();
       } catch {
         return {
-          kind: "unknown" as const,
+          kind: "unknown",
           message: "Réponse illisible. Réessayez avec le même envoi.",
         };
       }
       if (response.status >= 500)
         return {
-          kind: "unknown" as const,
+          kind: "unknown",
           message:
             isRecord(data) && typeof data.message === "string"
               ? data.message
@@ -96,13 +109,13 @@ export function createRunner(
         };
       if (!isRecord(data))
         return {
-          kind: "unknown" as const,
+          kind: "unknown",
           message: "Réponse inattendue du service.",
         };
-      return { kind: "response" as const, data, status: response.status };
+      return { kind: "response", data, status: response.status };
     } catch {
       return {
-        kind: "unknown" as const,
+        kind: "unknown",
         message:
           "Connexion interrompue. Le résultat est inconnu. Réessayez avec le même envoi.",
       };
@@ -173,18 +186,6 @@ export function createRunner(
       };
     },
   };
-}
-export class CommandRefusal extends Error {}
-export async function command(
-  input: Command | AgentCommand,
-  agent = false,
-): Promise<AppView | AgentsView> {
-  const runner = createRunner({ app() {}, agents() {} });
-  const result = agent
-    ? await runner.agents(input as AgentCommand)
-    : await runner.app(input as Command);
-  if (result.kind !== "accepted") throw new CommandRefusal(result.message);
-  return result.view;
 }
 export const statuses: Record<string, string> = {
   pending: "En attente",

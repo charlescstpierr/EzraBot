@@ -33,7 +33,21 @@ jobs:
         run: npm ci --prefix server
       - name: Check TypeScript
         run: npm run typecheck
+      - name: Verify mobile protocol
+        run: node server/mobile/scripts/sync-contract.mjs --check
       - name: Build production bundles
         run: npm run build
       - name: Test server with controlled engines
         run: node --test --test-concurrency=1 'server/dist/test/*.test.js'
+      - name: Install browser for interface tests
+        run: npx playwright install --with-deps chromium
+      - name: Test interface without provider calls
+        run: npx playwright test
+      - name: Keep interface evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interface-evidence-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14

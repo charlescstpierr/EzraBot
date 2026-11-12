@@ -28,7 +28,7 @@ npm run test:ui
 
 La compilation produit `server/dist/` et inclut le bundle React et son CSS. `npm start --prefix server` reconstruit également React ; installer les dépendances racine et serveur avant d’utiliser cette commande.
 
-Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de nouvelles bases SQLite et un moteur volontairement indisponible. Aucun appel fournisseur n’est effectué. Les tests serveur emploient leurs moteurs contrôlés. Le workflow GitHub Actions compile et exécute les tests serveur sur chaque push et pull request. Les essais navigateur restent disponibles en local.
+Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de nouvelles bases SQLite et un moteur volontairement indisponible. Aucun appel fournisseur n’est effectué. Les tests serveur emploient leurs moteurs contrôlés. Le workflow GitHub Actions compile et exécute les tests serveur sur chaque push et pull request. Les essais navigateur et les copies de protocoles mobiles sont aussi vérifiés dans GitHub Actions. Les captures et vidéos restent dans ses artefacts.
 
 ## Ce que cette version apporte
 
@@ -39,7 +39,7 @@ Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de
 - Personnalisation des noms/couleurs et gestion des souvenirs de chaque personnage.
 - Interface adaptative, clavier IME, dialogues avec gestion du focus et navigation clavier.
 
-Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Le seul changement serveur de routage concerne la page React et ses deux assets. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source mentionné par PROVENANCE.json.
+Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Les adaptations serveur exposent la page React et le type de réponse de mission. La mémoire accepte une base de modification pour refuser les écritures concurrentes périmées. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source mentionné par PROVENANCE.json.
 
 ## Limites explicites
 
@@ -47,4 +47,8 @@ Ce lot livre le client web PC. Le client natif Expo de référence reste dans `s
 
 Les tests contrôlés ne prouvent ni une réponse réelle de Codex ni une connexion physique de téléphone. Les erreurs de moteur sont visibles. La présente copie ne configure pas Tailscale ou les certificats HTTPS et n’effectue aucune migration d’une installation personnelle existante.
 
-La fiche React couvre le nom, la couleur et la mémoire. Les paramètres avancés du moteur, la suppression définitive des personnages, les modifications d’objectif/précisions et les conflits documentaires avancés sont accessibles via le client de référence sur `/advanced` ; leur présentation React reste à compléter. Leurs contrats et implémentations de référence sont conservés dans `server/`. Une validation ne publie pas un résultat sur Internet.
+Les six parcours sont disponibles dans React : envoi et invitations par identité, tâches et conflits documentaires, missions et décisions, projets avec contrôle, personnages avec mémoire protégée, recherche globale et lecture isolée des résultats. Les réglages du moteur, les formes, la suppression confirmée et le nettoyage des brouillons sont accessibles depuis Personnages. Le client de référence reste disponible sur `/advanced`.
+
+Les réponses IA réelles, les appareils physiques et les accès externes restent hors de la recette automatique. Les commandes incertaines des panneaux restent reprenables tant que leur panneau est ouvert. Le composeur conserve aussi son envoi après rechargement. Une validation ne publie pas un résultat sur Internet.
+
+Les apports retenus et les exclusions sont décrits dans [Apports et reste à vérifier](docs/apports-et-reste.md). Le journal de cette reprise est dans [Décisions](docs/decisions.tsv).

@@ -1,0 +1,144 @@
+.projects-page {
+  width: min(100%, 1000px);
+  margin: auto;
+  padding: 28px;
+  color: #171717;
+  overflow-wrap: anywhere;
+}
+.projects-page header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.projects-page h1 {
+  font-size: 32px;
+  margin: 8px 0;
+}
+.projects-page h2 {
+  font-size: 21px;
+}
+.projects-page p {
+  line-height: 1.6;
+}
+.projects-page button {
+  border: 1px solid #bcbcbc;
+  border-radius: 9px;
+  background: #fff;
+  color: #171717;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.projects-page button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.projects-empty {
+  padding: 60px 20px;
+  text-align: center;
+}
+.projects-empty .mascot {
+  display: inline-block;
+}
+.projects-list {
+  display: grid;
+  gap: 18px;
+}
+.projects-card {
+  border: 1px solid #dedede;
+  border-radius: 14px;
+  padding: 22px;
+  background: #fff;
+  min-width: 0;
+}
+.projects-path {
+  font-family: monospace;
+  color: #555;
+}
+.projects-page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f6f6f6;
+  padding: 12px;
+}
+.projects-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.projects-page label {
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+}
+.projects-page fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.projects-page input {
+  font: inherit;
+  color: #171717;
+  background: #fff;
+  border: 1px solid #bcbcbc;
+  border-radius: 8px;
+  padding: 11px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.projects-page form {
+  margin: 18px 0;
+}
+.projects-confirm,
+.projects-error {
+  border-left: 3px solid #222;
+  padding: 14px;
+  margin-block: 16px;
+}
+.projects-confirm button {
+  margin-right: 8px;
+}
+.projects-dialog::backdrop {
+  background: #0005;
+}
+.projects-dialog {
+  border: 1px solid #ddd;
+  box-sizing: border-box;
+  color: #171717;
+  width: min(calc(100% - 32px), 530px);
+  max-height: 90dvh;
+  overflow: auto;
+  border-radius: 16px;
+  padding: 24px;
+  background: #fff;
+  box-shadow: 0 16px 70px #0002;
+}
+.projects-page ul {
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.projects-page li button {
+  width: 100%;
+  text-align: left;
+}
+@media (max-width: 650px) {
+  .projects-page {
+    padding: 18px;
+  }
+  .projects-page header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .projects-card {
+    padding: 16px;
+  }
+  .projects-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
