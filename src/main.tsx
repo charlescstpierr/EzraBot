@@ -1,10 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ArrowUp,
   ArrowRight,
   Plus,
-  Search,
   MessageCircle,
   Folder,
   BookOpen,
@@ -13,115 +11,226 @@ import {
   PanelLeft,
   ChevronDown,
   X,
-  Check,
-  ArrowDown,
   Download,
-  Square,
   MoreHorizontal,
   Sparkles,
-  FileText,
+  Users,
 } from "lucide-react";
-import MarkdownIt from "markdown-it";
-import type {
-  AppView,
-  BotView,
-  Command,
-  MessageView,
-  WorkView,
-} from "../server/src/protocol";
-import type {
-  AgentsView,
-  MissionDetail,
-  AgentCommand,
-} from "../server/src/agent-protocol";
-import { command, get, uid, statuses, CommandRefusal } from "./api";
+import type { AppView, CommandOf } from "../server/src/protocol";
+import type { AgentsView } from "../server/src/agent-protocol";
+import { openDrafts, type KeyValueStorage } from "../server/web/drafts";
+import { forgetSearch } from "../server/web/search";
+import { createRunner, getAppView, getAgentsView, uid } from "./api";
+import type { CommandRunner, Port, Route } from "./port";
+import {
+  AgentOutboxProvider,
+  AgentRecovery,
+  OUTBOX_KEY,
+  commandOwners,
+  openAgentOutbox,
+} from "./agent-outbox";
 import { Mascot } from "./Mascot";
-import { storage, storageUnavailable } from "./storage";
+import { Markdown } from "./Markdown";
+import { ChatPage } from "./chat";
+import { storageWrite } from "./chat/pending";
+import { SearchBox } from "./search";
+import { TaskCard, DocumentPanel } from "./documents";
+import { MissionProposal, MissionList, MissionPanel } from "./missions";
+import { ProjectsPage } from "./projects";
+import { CharacterPanel, CharacterCreate } from "./characters";
 import "./style.css";
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
-function Markdown({ text }: { text: string }) {
-  return (
-    <div
-      className="markdown"
-      dangerouslySetInnerHTML={{ __html: md.render(text) }}
-    />
-  );
-}
-function mentions(text: string, bots: BotView[]) {
-  return bots
-    .flatMap((b) => {
-      const result: { botId: string; start: number; end: number }[] = [];
-      let at = 0;
-      while ((at = text.indexOf("@" + b.name, at)) !== -1) {
-        const end = at + b.name.length + 1;
-        if (
-          (at === 0 || /\s/.test(text[at - 1])) &&
-          (end === text.length || /[\s.,!?]/.test(text[end]))
-        )
-          result.push({ botId: b.id, start: at, end });
-        at = end;
-      }
-      return result;
-    })
-    .sort((a, b) => a.start - b.start);
+function browserStorage(
+  kind: "localStorage" | "sessionStorage",
+): KeyValueStorage | null {
+  try {
+    return window[kind];
+  } catch {
+    return null;
+  }
 }
 function App() {
   const [view, setView] = useState<AppView | null>(null),
     [agents, setAgents] = useState<AgentsView | null>(null),
     [offline, setOffline] = useState(""),
     [error, setError] = useState(""),
-    [botId, setBotId] = useState(""),
-    [page, setPage] = useState("chat"),
     [sidebar, setSidebar] = useState(false),
-    [search, setSearch] = useState(""),
-    [dialog, setDialog] = useState<string | null>(null),
+    [dialog, setDialog] = useState<"computer" | "settings" | null>(null),
     [fan, setFan] = useState(false),
-    [invite, setInvite] = useState(false),
-    [sending, setSending] = useState(false),
-    [draft, setDraft] = useState(""),
-    [last, setLast] = useState(true),
-    [mission, setMission] = useState<MissionDetail | null>(null),
-    [workId, setWorkId] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    path: "",
-    goal: "",
-    projectId: "",
-    memory: "",
-    leadBotId: "",
-  });
-  const [proposal, setProposal] = useState<MessageView | null>(null);
-  const scroll = useRef<HTMLDivElement>(null),
-    textarea = useRef<HTMLTextAreaElement>(null),
-    follow = useRef(true),
-    sendLock = useRef(false),
+    [route, setRoute] = useState<Route>({ page: "chat", botId: "" });
+  const [selectionPending, setSelectionPending] =
+    useState<CommandOf<"bot.select"> | null>(null);
+  const drafts = useMemo(
+    () =>
+      openDrafts({
+        local: browserStorage("localStorage"),
+        session: browserStorage("sessionStorage"),
+      }),
+    [],
+  );
+  const retiredSpaces = useRef(new Set<string>()),
+    currentSpace = useRef<string | null>(null),
     press = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyApp = useCallback(
+    (next: AppView) => {
+      if (retiredSpaces.current.has(next.spaceId)) return;
+      if (
+        currentSpace.current !== null &&
+        currentSpace.current !== next.spaceId
+      )
+        retiredSpaces.current.add(currentSpace.current);
+      currentSpace.current = next.spaceId;
+      drafts.useSpace(next.spaceId);
+      setView((previous) =>
+        previous?.spaceId === next.spaceId && previous.rev > next.rev
+          ? previous
+          : next,
+      );
+    },
+    [drafts],
+  );
+  const applyAgents = useCallback(
+    (next: AgentsView) =>
+      setAgents((previous) =>
+        previous && previous.rev > next.rev ? previous : next,
+      ),
+    [],
+  );
+  const runner = useMemo(
+    () => createRunner({ app: applyApp, agents: applyAgents }),
+    [applyApp, applyAgents],
+  );
   useEffect(() => {
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let polling = false;
     async function poll() {
-      try {
-        const [v, a] = await Promise.all([
-          get<AppView>("/api/view", abort.signal),
-          get<AgentsView>("/api/agents/view", abort.signal),
-        ]);
-        setView(v);
-        setAgents(a);
-        setOffline("");
-      } catch (e) {
-        if (!abort.signal.aborted) setOffline((e as Error).message);
+      if (polling || abort.signal.aborted) return;
+      polling = true;
+      const responses = await Promise.allSettled([
+        getAppView(abort.signal),
+        getAgentsView(abort.signal),
+      ]);
+      if (abort.signal.aborted) {
+        polling = false;
+        return;
       }
-      if (!abort.signal.aborted) timer = setTimeout(poll, 1800);
+      const [app, agent] = responses;
+      if (app.status === "fulfilled") applyApp(app.value);
+      if (agent.status === "fulfilled") applyAgents(agent.value);
+      const failure = responses.find((r) => r.status === "rejected");
+      setOffline(
+        failure?.status === "rejected"
+          ? failure.reason instanceof Error
+            ? failure.reason.message
+            : "Connexion interrompue"
+          : "",
+      );
+      polling = false;
+      timer = setTimeout(poll, 1200);
     }
     void poll();
+    const foreground = () => {
+      if (!document.hidden) {
+        clearTimeout(timer);
+        void poll();
+      }
+    };
+    document.addEventListener("visibilitychange", foreground);
     return () => {
       abort.abort();
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", foreground);
     };
-  }, []);
+  }, [applyApp, applyAgents]);
+  const space = view?.spaceId;
+  const outbox = useMemo(
+    () =>
+      space === undefined
+        ? null
+        : openAgentOutbox({
+            spaceId: space,
+            storage: browserStorage("localStorage"),
+            send: runner.agents,
+          }),
+    [space, runner],
+  );
+  const shown = useRef({ view, agents });
+  shown.current = { view, agents };
+  const run = useMemo<CommandRunner | null>(
+    () =>
+      outbox && {
+        app: runner.app,
+        agents: (command) =>
+          outbox.run(
+            command,
+            commandOwners(command, {
+              messages: shown.current.view?.messages ?? [],
+              missions: shown.current.agents?.missions ?? [],
+            }),
+          ),
+      },
+    [runner, outbox],
+  );
+  useEffect(() => {
+    if (!outbox) return;
+    const changed = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith(OUTBOX_KEY)) outbox.sync();
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [outbox]);
+  useEffect(() => {
+    if (!view) return;
+    drafts.useSpace(view.spaceId);
+    setRoute(
+      view.activeBotId
+        ? { page: "chat", botId: view.activeBotId }
+        : { page: "characters" },
+    );
+    setFan(false);
+    setDialog(null);
+    setSelectionPending(null);
+  }, [space, drafts]);
+  useEffect(() => {
+    if (!view) return;
+    const scopes = [
+      ...view.purged.botIds.map((botId) => ({
+        kind: "prompt" as const,
+        botId,
+      })),
+      ...view.purged.workIds.map((workId) => ({
+        kind: "version" as const,
+        workId,
+      })),
+    ];
+    drafts.purge(view.spaceId, scopes);
+    outbox?.purge(view.purged.botIds);
+    if (scopes.length) {
+      forgetSearch();
+      for (const id of view.purged.botIds) {
+        storageWrite(`mimobot:${view.spaceId}:${id}:draft`, null);
+        storageWrite(`mimobot:${view.spaceId}:${id}:pending`, null);
+      }
+      if (route.page === "chat" && !view.bots.some((b) => b.id === route.botId))
+        setRoute(
+          view.activeBotId
+            ? { page: "chat", botId: view.activeBotId }
+            : { page: "characters" },
+        );
+      if (
+        route.page === "characters" &&
+        route.botId &&
+        !view.bots.some((b) => b.id === route.botId)
+      )
+        setRoute({ page: "characters" });
+    }
+  }, [view, drafts, outbox, route]);
   useEffect(() => {
     if (!dialog) return;
-    const previous = document.activeElement as HTMLElement | null;
+    const previous =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const modal = document.querySelector<HTMLElement>(".modal");
     const focusables = () =>
       Array.from(
@@ -130,156 +239,82 @@ function App() {
         ) ?? [],
       );
     focusables()[0]?.focus();
-    const handler = (e: KeyboardEvent) => {
+    const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") setDialog(null);
       if (e.key === "Tab") {
-        const items = focusables();
-        const first = items[0],
-          end = items.at(-1);
+        const items = focusables(),
+          first = items[0],
+          last = items.at(-1);
         if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
-          end?.focus();
-        } else if (!e.shiftKey && document.activeElement === end) {
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
           e.preventDefault();
           first?.focus();
         }
       }
     };
-    document.addEventListener("keydown", handler);
+    document.addEventListener("keydown", key);
     return () => {
-      document.removeEventListener("keydown", handler);
+      document.removeEventListener("keydown", key);
       previous?.focus();
     };
   }, [dialog]);
-  const bot = view?.bots.find((b) => b.id === (botId || view.activeBotId));
-  const key = view && bot ? `mimobot:${view.spaceId}:${bot.id}` : "";
-  const currentKey = useRef(key);
-  currentKey.current = key;
-  useEffect(() => {
-    setDraft(key ? (storage.getItem(key + ":draft") ?? "") : "");
-  }, [key]);
-  useEffect(() => {
-    if (textarea.current) {
-      textarea.current.style.height = "auto";
-      textarea.current.style.height =
-        Math.min(128, textarea.current.scrollHeight) + "px";
-    }
-  }, [draft]);
-  function changeDraft(value: string) {
-    setDraft(value);
-    if (key) storage.setItem(key + ":draft", value);
-  }
-  const messages =
-    view?.messages.filter((m) => m.threadBotId === bot?.id) ?? [];
-  useEffect(() => {
-    if (follow.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [view?.rev, bot?.id, page]);
-  useEffect(() => {
-    if (!mission) return;
-    const abort = new AbortController();
-    const t = setInterval(() => {
-      void get<{ mission: MissionDetail }>(
-        `/api/agents/missions/${mission.id}`,
-        abort.signal,
-      )
-        .then((r) => setMission(r.mission))
-        .catch(() => {});
-    }, 1700);
-    return () => {
-      clearInterval(t);
-      abort.abort();
-    };
-  }, [mission?.id]);
-  async function run(c: Command | AgentCommand, agent = false) {
-    setError("");
-    try {
-      const v = await command(c, agent);
-      agent ? setAgents(v as AgentsView) : setView(v as AppView);
-      return true;
-    } catch (e) {
-      setError((e as Error).message);
-      return false;
+  async function select(command: CommandOf<"bot.select">) {
+    const result = await runner.app(command);
+    if (result.kind === "unknown") {
+      setError(result.message);
+      setSelectionPending(command);
+    } else {
+      setSelectionPending(null);
+      if (result.kind !== "accepted") {
+        setError(result.message);
+        if (result.kind === "refused" && result.code === "not_found")
+          setRoute({ page: "chat", botId: result.view.activeBotId });
+      } else setError("");
     }
   }
-  function select(b: BotView) {
-    setBotId(b.id);
-    setPage("chat");
-    setFan(false);
+  function go(next: Route) {
+    setRoute(next);
     setSidebar(false);
-    follow.current = true;
+    setDialog(null);
+    setFan(false);
+    if (next.page === "chat" && next.botId && next.botId !== view?.activeBotId)
+      void select({ type: "bot.select", requestId: uid(), botId: next.botId });
   }
-  async function send() {
-    if (!bot || !key || sendLock.current) return;
-    let pending: Command | null = null;
-    try {
-      pending = JSON.parse(storage.getItem(key + ":pending") ?? "null");
-    } catch {}
-    if (!pending && !draft.trim()) return;
-    const input = pending ?? {
-      type: "message.say" as const,
-      requestId: uid(),
-      botId: bot.id,
-      text: draft.trim(),
-      attachments: [],
-      mentions: mentions(draft.trim(), view?.bots ?? []),
-    };
-    const submitted = "text" in input ? input.text : "";
-    sendLock.current = true;
-    setSending(true);
-    storage.setItem(key + ":pending", JSON.stringify(input));
-    try {
-      const v = await command(input);
-      setView(v as AppView);
-      storage.removeItem(key + ":pending");
-      if (storage.getItem(key + ":draft") === submitted) {
-        storage.removeItem(key + ":draft");
-        if (currentKey.current === key) setDraft("");
-      }
-      setError("");
-      follow.current = true;
-    } catch (e) {
-      if (e instanceof CommandRefusal) storage.removeItem(key + ":pending");
-      setError(
-        (e as Error).message +
-          (e instanceof CommandRefusal
-            ? ""
-            : " Réessayez : le même envoi sera repris sans doublon."),
-      );
-    } finally {
-      sendLock.current = false;
-      setSending(false);
-    }
-  }
-  async function openMission(id: string) {
-    try {
-      const r = await get<{ mission: MissionDetail }>(
-        `/api/agents/missions/${id}`,
-      );
-      setMission(r.mission);
-      setDialog("mission");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  const active =
-    view?.works.filter(
-      (w) =>
-        w.threadBotId === bot?.id && ["pending", "running"].includes(w.state),
-    ) ?? [];
-  const work = view?.works.find((w) => w.id === workId);
+  const port: Port | null = view && run ? { view, agents, run, go } : null;
+  const selectedBot = view?.bots.find(
+    (b) =>
+      b.id ===
+      (route.page === "chat"
+        ? route.botId
+        : route.page === "characters"
+          ? route.botId
+          : view.activeBotId),
+  );
   const nav = [
     { id: "chat", label: "Conversation", Icon: MessageCircle },
     { id: "missions", label: "Missions", Icon: Sparkles },
     { id: "projects", label: "Projets", Icon: Folder },
     { id: "carnet", label: "Carnet", Icon: BookOpen },
+    { id: "characters", label: "Personnages", Icon: Users },
   ];
-  return (
+  function openHome() {
+    const bot = view?.bots.find((b) => b.id === "mino");
+    go(
+      bot
+        ? { page: "chat", botId: bot.id }
+        : view?.activeBotId
+          ? { page: "chat", botId: view.activeBotId }
+          : { page: "characters" },
+    );
+  }
+  const shell = (
     <div className="app">
       <aside className={sidebar ? "sidebar open" : "sidebar"}>
         <a href="/" className="brand">
           <span className="brand-icon">
-            m<span>·</span>
+            e<span>·</span>
           </span>{" "}
           ezrabot<span className="local-label">LOCAL</span>
         </a>
@@ -290,80 +325,61 @@ function App() {
         >
           <X size={20} />
         </button>
-        <button
-          className="new-chat"
-          onClick={() => {
-            const mino = view?.bots.find((b) => b.id === "mino");
-            if (mino) select(mino);
-            setPage("chat");
-            setSidebar(false);
-            textarea.current?.focus();
-          }}
-        >
-          <Plus size={18} /> Parler à Mino <ArrowRight size={16} />
+        <button className="new-chat" onClick={openHome}>
+          <Plus size={18} />
+          Parler à Mino
+          <ArrowRight size={16} />
         </button>
-        <div className="search">
-          <Search size={16} />
-          <input
-            aria-label="Rechercher"
-            placeholder="Rechercher…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <kbd>⌕</kbd>
-        </div>
+        {port && <SearchBox port={port} />}
         <nav>
           {nav.map(({ id, label, Icon }) => (
             <button
               key={id}
-              className={page === id ? "nav-item selected" : "nav-item"}
+              className={route.page === id ? "nav-item selected" : "nav-item"}
               onClick={() => {
-                setPage(id);
-                setSidebar(false);
+                if (id === "chat") openHome();
+                else if (id === "missions") go({ page: "missions" });
+                else if (id === "projects") go({ page: "projects" });
+                else if (id === "characters")
+                  go({
+                    page: "characters",
+                    botId: view?.activeBotId || undefined,
+                  });
+                else go({ page: "carnet" });
               }}
             >
               <Icon size={18} />
               {label}
-              {id === "missions" && !!agents?.missions.length && (
-                <span className="count">{agents.missions.length}</span>
-              )}
             </button>
           ))}
         </nav>
         <div className="section-label">
-          CONVERSATIONS <span>{view?.bots.length ?? "—"}</span>
+          CONVERSATIONS<span>{view?.bots.length ?? "—"}</span>
         </div>
         <div className="threads">
-          {view?.bots
-            .filter((b) =>
-              `${b.name} ${view.messages.filter((m) => m.threadBotId === b.id).at(-1)?.text ?? ""}`
-                .toLowerCase()
-                .includes(search.toLowerCase()),
-            )
-            .map((b) => (
-              <button
-                key={b.id}
-                className={
-                  b.id === bot?.id && page === "chat"
-                    ? "thread current"
-                    : "thread"
-                }
-                onClick={() => select(b)}
-              >
-                <Mascot shape={b.shape} color={b.color} size={34} />
-                <span>
-                  <strong>{b.name}</strong>
-                  <small>
-                    {view.messages.filter((m) => m.threadBotId === b.id).at(-1)
-                      ?.text ??
-                      (b.id === "mino"
-                        ? "Votre compagnon au quotidien"
-                        : "Une nouvelle conversation")}
-                  </small>
-                </span>
-                {b.id === bot?.id && <span className="thread-dot" />}
-              </button>
-            ))}
+          {view?.bots.map((bot) => (
+            <button
+              key={bot.id}
+              className={
+                route.page === "chat" && route.botId === bot.id
+                  ? "thread current"
+                  : "thread"
+              }
+              onClick={() => go({ page: "chat", botId: bot.id })}
+            >
+              <Mascot shape={bot.shape} color={bot.color} size={34} />
+              <span>
+                <strong>{bot.name}</strong>
+                <small>
+                  {view.messages.filter((m) => m.threadBotId === bot.id).at(-1)
+                    ?.text ?? bot.title}
+                </small>
+              </span>
+              {route.page === "chat" && route.botId === bot.id && (
+                <span className="thread-dot" />
+              )}
+            </button>
+          ))}
         </div>
         <div className="sidebar-bottom">
           <button className="computer" onClick={() => setDialog("computer")}>
@@ -384,7 +400,8 @@ function App() {
             <ChevronDown size={14} />
           </button>
           <button className="settings" onClick={() => setDialog("settings")}>
-            <Settings size={17} /> Préférences <span>↗</span>
+            <Settings size={17} />
+            Préférences<span>↗</span>
           </button>
         </div>
       </aside>
@@ -405,15 +422,14 @@ function App() {
             >
               <PanelLeft size={20} />
             </button>
-            {page === "chat" && bot ? (
+            {selectedBot && route.page === "chat" ? (
               <button
                 className="bot-title"
-                onClick={() => setDialog("profile")}
+                onClick={() =>
+                  go({ page: "characters", botId: selectedBot.id })
+                }
                 onPointerDown={() => {
-                  press.current = setTimeout(() => {
-                    setInvite(false);
-                    setFan(true);
-                  }, 550);
+                  press.current = setTimeout(() => setFan(true), 550);
                 }}
                 onPointerUp={() => {
                   if (press.current) clearTimeout(press.current);
@@ -422,17 +438,26 @@ function App() {
                   if (press.current) clearTimeout(press.current);
                 }}
               >
-                <Mascot shape={bot.shape} color={bot.color} size={30} />
-                <strong>{bot.name}</strong>
+                <Mascot
+                  shape={selectedBot.shape}
+                  color={selectedBot.color}
+                  size={30}
+                />
+                <strong>{selectedBot.name}</strong>
                 <ChevronDown size={13} />
               </button>
             ) : (
-              <strong>{nav.find((n) => n.id === page)?.label}</strong>
+              <strong>
+                {route.page === "document"
+                  ? "Document"
+                  : nav.find((n) => n.id === route.page)?.label}
+              </strong>
             )}
           </div>
           <div className="header-right">
             <span className="private">
-              <span className="lock-dot" /> Espace personnel
+              <span className="lock-dot" />
+              Espace personnel
             </span>
             <button
               className="icon"
@@ -450,15 +475,17 @@ function App() {
             </button>
           </div>
         </header>
-        {storageUnavailable && (
-          <div className="error" role="status">
-            Stockage du navigateur indisponible : les brouillons restent en
-            mémoire jusqu’à la fermeture.
-          </div>
-        )}
         {(error || offline) && (
           <div className="error" role="alert">
             {error || offline}
+            {selectionPending && (
+              <button
+                className="outline"
+                onClick={() => void select(selectionPending)}
+              >
+                Réessayer la sélection
+              </button>
+            )}
             <button
               className="icon"
               aria-label="Fermer l’erreur"
@@ -468,451 +495,167 @@ function App() {
             </button>
           </div>
         )}
-        {page === "chat" ? (
-          <>
-            <div
-              className="chat-scroll"
-              ref={scroll}
-              onScroll={() => {
-                const el = scroll.current!;
-                follow.current =
-                  el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-                setLast(follow.current);
+        {view?.erasure === "incomplete" && (
+          <div className="error" role="status">
+            Le nettoyage des copies locales n’est pas terminé.
+            <button
+              className="outline"
+              onClick={async () => {
+                const result = await runner.app({
+                  type: "storage.purge",
+                  requestId: uid(),
+                });
+                if (result.kind !== "accepted") setError(result.message);
               }}
             >
-              {!messages.length ? (
-                <div className="welcome">
-                  <div className="eyebrow">
-                    <span className="tiny-spark">✳</span> VOS IDÉES ONT DE LA
-                    COMPAGNIE
-                  </div>
-                  <button
-                    className="hero-mascot"
-                    aria-label="Personnaliser le personnage"
-                    onClick={() => setDialog("profile")}
-                  >
-                    {bot && (
-                      <Mascot
-                        shape={bot.shape}
-                        color={bot.color}
-                        size={148}
-                        animated
-                      />
-                    )}
-                  </button>
-                  <h1>
-                    {bot
-                      ? `Salut, moi c’est ${bot.name}.`
-                      : "Bienvenue chez vous."}
-                  </h1>
-                  <p>
-                    Une idée en tête ? Un projet à faire avancer ?<br />
-                    On s’y met ensemble.
-                  </p>
-                  <div className="suggestions">
-                    {[
-                      {
-                        icon: FileText,
-                        title: "Mettre mes idées au clair",
-                        text: "Peux-tu m’aider à structurer mes idées ?",
-                      },
-                      {
-                        icon: Folder,
-                        title: "Avancer sur un projet",
-                        text: "J’aimerais avancer sur un projet. Aide-moi à préciser mon objectif.",
-                      },
-                      {
-                        icon: Sparkles,
-                        title: "Préparer quelque chose",
-                        text: "J’aimerais préparer un document. Peux-tu m’aider à définir ce dont tu as besoin ?",
-                      },
-                    ].map((s) => (
-                      <button
-                        key={s.title}
-                        onClick={() => {
-                          changeDraft(s.text);
-                          textarea.current?.focus();
-                        }}
-                      >
-                        <s.icon size={19} />
-                        <span>{s.title}</span>
-                        <ArrowUp size={15} />
-                      </button>
-                    ))}
-                  </div>
-                  <div className="welcome-note">
-                    <span /> Un petit compagnon. De grandes possibilités.
-                  </div>
-                </div>
+              Réessayer le nettoyage
+            </button>
+          </div>
+        )}
+        {port && <AgentRecovery port={port} />}
+        {!port ? (
+          <div className="empty">
+            <h2>Connexion à votre ordinateur…</h2>
+            <p>
+              Les échanges ne sont affichés qu’après la réponse du service
+              local.
+            </p>
+          </div>
+        ) : route.page === "chat" ? (
+          <ChatPage
+            port={port}
+            botId={route.botId}
+            focusMessageId={route.messageId}
+            drafts={drafts}
+            slots={{
+              task: (message) => <TaskCard port={port} message={message} />,
+              mission: (message) => (
+                <MissionProposal port={port} message={message} />
+              ),
+            }}
+          />
+        ) : (
+          <div className="app-page">
+            {route.page === "document" ? (
+              <DocumentPanel
+                key={`${port.view.spaceId}:${route.workId}`}
+                port={port}
+                workId={route.workId}
+                drafts={drafts}
+                versionId={route.versionId}
+              />
+            ) : route.page === "projects" ? (
+              <ProjectsPage port={port} />
+            ) : route.page === "missions" ? (
+              route.missionId ? (
+                <MissionPanel port={port} missionId={route.missionId} />
               ) : (
-                <div className="messages">
-                  <div className="date-divider">
-                    {new Date(messages[0].createdAt).toLocaleDateString(
-                      "fr-CA",
-                      { day: "numeric", month: "long" },
-                    )}
-                  </div>
-                  {messages.map((m) => {
-                    const author = view?.bots.find((b) => b.id === m.botId);
-                    const linked = agents?.missions.find(
-                      (x) => x.originMessageId === m.id,
-                    );
-                    return (
-                      <article key={m.id} className={`message ${m.role}`}>
-                        {m.role === "assistant" && (
-                          <div className="author">
-                            <Mascot
-                              shape={author?.shape}
-                              color={author?.color}
-                              size={25}
-                            />
-                            <strong>
-                              {author?.name ?? "Personnage supprimé"}
-                            </strong>
-                            <time>
-                              {new Date(m.createdAt).toLocaleTimeString(
-                                "fr-CA",
-                                { hour: "2-digit", minute: "2-digit" },
-                              )}
-                            </time>
-                          </div>
-                        )}
-                        <Markdown text={m.text} />
-                        {m.handoff && (
-                          <div className="mission-card">
-                            <span className="card-label">
-                              <Sparkles size={15} /> UNE MISSION POUR VOTRE PC
-                            </span>
-                            <h3>{m.handoff.goal}</h3>
-                            <p>{m.handoff.why}</p>
-                            <button
-                              className="black"
-                              onClick={() => {
-                                if (linked) {
-                                  void openMission(linked.id);
-                                } else {
-                                  setProposal(m);
-                                  setForm((f) => ({
-                                    ...f,
-                                    goal: m.handoff!.goal,
-                                    projectId: "",
-                                  }));
-                                  setDialog("prepare");
-                                }
-                              }}
-                            >
-                              {linked
-                                ? "Suivre la mission"
-                                : "Examiner la proposition"}
-                              <ArrowRight size={16} />
-                            </button>
-                          </div>
-                        )}
-                        {view?.works
-                          .filter(
-                            (w) =>
-                              w.requestMessageId === m.id && w.versions.length,
-                          )
-                          .map((w) => (
-                            <button
-                              className="document-row"
-                              key={w.id}
-                              onClick={() => {
-                                setWorkId(w.id);
-                                setDialog("work");
-                              }}
-                            >
-                              <FileText size={22} />
-                              <span>
-                                <strong>{w.title}</strong>
-                                <small>
-                                  {statuses[w.state]} · {w.versions.length}{" "}
-                                  version(s)
-                                </small>
-                              </span>
-                              <ArrowRight size={17} />
-                            </button>
-                          ))}
-                      </article>
-                    );
-                  })}
-                  {active.map((w) => (
-                    <div className="working" key={w.id}>
-                      <span className="pulse" />
-                      {w.attempt?.stage === "writing"
-                        ? "Rédaction en cours…"
-                        : "Travail en cours…"}
+                <MissionList port={port} />
+              )
+            ) : route.page === "characters" ? (
+              <>
+                <div className="character-tabs">
+                  {port.view.bots.map((bot) => (
+                    <button
+                      className="outline"
+                      key={bot.id}
+                      onClick={() => go({ page: "characters", botId: bot.id })}
+                    >
+                      <Mascot shape={bot.shape} color={bot.color} size={25} />
+                      {bot.name}
+                    </button>
+                  ))}
+                  <button
+                    className="outline"
+                    onClick={() => go({ page: "characters" })}
+                  >
+                    <Plus size={16} />
+                    Nouveau personnage
+                  </button>
+                </div>
+                {route.botId ? (
+                  <CharacterPanel
+                    key={route.botId}
+                    port={port}
+                    botId={route.botId}
+                  />
+                ) : (
+                  <CharacterCreate port={port} />
+                )}
+              </>
+            ) : (
+              <div className="content-page">
+                <div className="eyebrow">VOTRE CARNET LOCAL</div>
+                <h1>Les idées à garder.</h1>
+                {port.view.carnet.map((publication) => (
+                  <article key={publication.id} className="publication">
+                    <span className="card-label">
+                      PUBLIÉ · VERSION {publication.versionN} ·{" "}
+                      {new Date(publication.createdAt).toLocaleDateString(
+                        "fr-CA",
+                      )}
+                    </span>
+                    <h2>{publication.title}</h2>
+                    <Markdown text={publication.body} />
+                    <div className="actions">
+                      <a
+                        className="outline"
+                        href={`/api/publications/${publication.id}/download`}
+                      >
+                        <Download size={16} />
+                        Télécharger
+                      </a>
                       <button
+                        className="outline"
                         onClick={() =>
-                          void run({
-                            type: "work.cancel",
-                            requestId: uid(),
-                            workId: w.id,
+                          go({
+                            page: "document",
+                            workId: publication.workId,
+                            versionId: publication.versionId,
                           })
                         }
                       >
-                        <Square size={12} /> Arrêter
+                        Ouvrir la version publiée
+                        <ArrowRight size={16} />
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="composer-area">
-              {!last && (
-                <button
-                  className="latest"
-                  onClick={() => {
-                    scroll.current?.scrollTo({
-                      top: scroll.current.scrollHeight,
-                      behavior: "smooth",
-                    });
-                    follow.current = true;
-                  }}
-                >
-                  <ArrowDown size={16} /> Derniers messages
-                </button>
-              )}
-              <form
-                className={draft.trim() ? "composer filled" : "composer"}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void send();
-                }}
-              >
-                <button
-                  type="button"
-                  className="mention"
-                  aria-label="Inviter un personnage"
-                  onClick={() => {
-                    setInvite(true);
-                    setFan(!fan);
-                  }}
-                >
-                  ＠
-                </button>
-                <textarea
-                  maxLength={6000}
-                  ref={textarea}
-                  aria-label="Message"
-                  placeholder={`Qu’est-ce qu’on fait aujourd’hui${bot ? " " + bot.name : ""} ?`}
-                  value={draft}
-                  disabled={!bot}
-                  rows={1}
-                  onChange={(e) => changeDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (
-                      e.key === "Enter" &&
-                      !e.shiftKey &&
-                      !e.nativeEvent.isComposing
-                    ) {
-                      e.preventDefault();
-                      void send();
-                    }
-                  }}
-                />
-                <button
-                  className="send"
-                  aria-label="Envoyer le message"
-                  disabled={
-                    sending ||
-                    !bot ||
-                    (!draft.trim() && !storage.getItem(key + ":pending"))
-                  }
-                >
-                  <ArrowUp size={21} />
-                </button>
-              </form>
-              <div className="composer-note">
-                <span>
-                  {view?.engine.state === "ready"
-                    ? "Codex · session locale"
-                    : view?.engine.state === "unavailable"
-                      ? "Moteur indisponible · brouillon conservé"
-                      : "Connexion au moteur…"}
-                </span>
-                <span>Vos échanges restent sur votre ordinateur.</span>
-              </div>
-              {fan && (
-                <div className="bot-fan">
-                  <div className="fan-heading">
-                    {invite ? "Inviter dans ce fil" : "Changer de compagnon"}
-                    <button
-                      className="icon"
-                      onClick={() => setFan(false)}
-                      aria-label="Fermer"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                  {view?.bots.map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={() => {
-                        if (invite) {
-                          changeDraft(draft + ` @${b.name} `);
-                          setFan(false);
-                          textarea.current?.focus();
-                        } else select(b);
-                      }}
-                    >
-                      <Mascot shape={b.shape} color={b.color} size={48} />
-                      {b.name}
-                    </button>
-                  ))}
-                  <small>
-                    {invite
-                      ? "Un invité ne partage pas ses souvenirs privés."
-                      : "Chaque compagnon garde sa propre conversation."}
-                  </small>
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="content-page">
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">VOTRE ESPACE</div>
-                <h1>
-                  {page === "projects"
-                    ? "Un endroit pour chaque idée."
-                    : page === "missions"
-                      ? "Les choses avancent."
-                      : "Les idées à garder."}
-                </h1>
-                <p>
-                  {page === "projects"
-                    ? "Les dossiers que vous confiez à votre compagnon."
-                    : page === "missions"
-                      ? "Retrouvez le travail confié à votre ordinateur."
-                      : "Les documents que vous avez publiés dans votre carnet local."}
-                </p>
-              </div>
-              {page === "projects" && (
-                <button className="black" onClick={() => setDialog("project")}>
-                  <Plus size={17} /> Ajouter un dossier
-                </button>
-              )}
-            </div>
-            {page === "projects" && (
-              <div className="project-grid">
-                {agents?.projects
-                  .filter(
-                    (p) =>
-                      !p.archived &&
-                      p.name.toLowerCase().includes(search.toLowerCase()),
-                  )
-                  .map((p) => (
-                    <div className="project-card" key={p.id}>
-                      <Folder size={26} />
-                      <h3>{p.name}</h3>
-                      <code>{p.path}</code>
-                      <small>
-                        {
-                          agents.missions.filter((m) => m.projectId === p.id)
-                            .length
-                        }{" "}
-                        mission(s)
-                      </small>
-                      <button
-                        onClick={() => {
-                          setProposal(null);
-                          setForm((f) => ({ ...f, goal: "", projectId: p.id }));
-                          setDialog("prepare");
-                        }}
-                      >
-                        Préparer une mission <ArrowRight size={15} />
-                      </button>
-                    </div>
-                  ))}
-              </div>
-            )}
-            {page === "missions" &&
-              agents?.missions
-                .filter(
-                  (m) =>
-                    !m.parentId &&
-                    m.title.toLowerCase().includes(search.toLowerCase()),
-                )
-                .map((m) => (
-                  <button
-                    className="list-row"
-                    key={m.id}
-                    onClick={() => void openMission(m.id)}
-                  >
-                    <span className="row-symbol">
-                      <Sparkles size={22} />
-                    </span>
-                    <span>
-                      <strong>{m.title}</strong>
-                      <small>
-                        {
-                          agents.projects.find((p) => p.id === m.projectId)
-                            ?.name
-                        }{" "}
-                        · {new Date(m.createdAt).toLocaleDateString("fr-CA")}
-                      </small>
-                    </span>
-                    <span className={`badge ${m.status}`}>
-                      {statuses[m.status] ?? m.status}
-                    </span>
-                    <ArrowRight size={18} />
-                  </button>
+                  </article>
                 ))}
-            {page === "carnet" &&
-              view?.carnet.map((p) => (
-                <div className="publication" key={p.id}>
-                  <span className="card-label">
-                    DOCUMENT · VERSION {p.versionN}
-                  </span>
-                  <h2>{p.title}</h2>
-                  <Markdown text={p.body} />
-                  <a
-                    className="outline"
-                    href={`/api/publications/${p.id}/download`}
-                  >
-                    <Download size={16} /> Télécharger
-                  </a>
-                </div>
-              ))}
-            {((page === "projects" &&
-              !agents?.projects.some((p) => !p.archived)) ||
-              (page === "missions" && !agents?.missions.length) ||
-              (page === "carnet" && !view?.carnet.length)) && (
-              <div className="empty">
-                <BookOpen size={38} strokeWidth={1} />
-                <h3>
-                  {page === "projects"
-                    ? "Tout commence par un dossier."
-                    : page === "missions"
-                      ? "La place pour votre prochaine mission."
-                      : "Votre carnet attend ses premières idées."}
-                </h3>
-                <p>
-                  {page === "projects"
-                    ? "Ajoutez un dossier depuis cet ordinateur pour y travailler ensemble."
-                    : "Parlez à Mino pour préparer la suite."}
-                </p>
-                <button
-                  className="outline"
-                  onClick={() =>
-                    page === "projects"
-                      ? setDialog("project")
-                      : (() => {
-                          const mino = view?.bots.find((b) => b.id === "mino");
-                          if (mino) select(mino);
-                          setPage("chat");
-                        })()
-                  }
-                >
-                  {page === "projects"
-                    ? "Ajouter un dossier"
-                    : "Retrouver Mino"}
-                  <ArrowRight size={16} />
-                </button>
+                {!port.view.carnet.length && (
+                  <div className="empty">
+                    <BookOpen size={38} />
+                    <h3>Votre carnet attend ses premières idées.</h3>
+                    <p>
+                      Un document doit être confirmé avant sa publication
+                      locale.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
+          </div>
+        )}
+        {fan && (
+          <div className="shell-fan">
+            <div className="fan-heading">
+              Changer de compagnon
+              <button
+                className="icon"
+                onClick={() => setFan(false)}
+                aria-label="Fermer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {view?.bots.map((bot) => (
+              <button
+                key={bot.id}
+                onClick={() => go({ page: "chat", botId: bot.id })}
+              >
+                <Mascot shape={bot.shape} color={bot.color} size={45} />
+                {bot.name}
+              </button>
+            ))}
           </div>
         )}
         <footer>
@@ -932,22 +675,22 @@ function App() {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Détails"
+            aria-label="Préférences et connexion"
           >
             <button
               className="modal-close icon"
-              onClick={() => setDialog(null)}
               aria-label="Fermer"
+              onClick={() => setDialog(null)}
             >
               <X size={20} />
             </button>
-            {dialog === "computer" && (
+            {dialog === "computer" ? (
               <>
                 <Monitor size={32} />
                 <h2>Votre ordinateur, votre espace.</h2>
                 <p>
-                  Le service local conserve vos échanges et exécute les missions
-                  acceptées. Il doit rester allumé pendant le travail.
+                  Le PC conserve les échanges et exécute les missions acceptées.
+                  Il doit rester allumé pendant le travail.
                 </p>
                 <div className="info-row">
                   <span>Service PC</span>
@@ -967,552 +710,54 @@ function App() {
                   <p className="notice">{view.engine.message}</p>
                 )}
                 <a className="black" href="/devices">
-                  Connecter mon téléphone <ArrowRight size={16} />
+                  Connecter mon téléphone
+                  <ArrowRight size={16} />
                 </a>
                 <small>
                   Connexion privée HTTPS et Tailscale requise. L’association
                   doit être approuvée sur le PC.
                 </small>
               </>
-            )}
-            {dialog === "settings" && (
+            ) : (
               <>
                 <Settings size={28} />
                 <h2>Votre espace personnel</h2>
                 <p>
-                  React et Three.js, avec le moteur et les données conservés sur
-                  votre PC.
+                  React et Three.js avec les données conservées sur votre PC.
                 </p>
                 <a
                   className="outline"
-                  href={`/api/export?threadBotId=${encodeURIComponent(bot?.id ?? "")}`}
+                  href={`/api/export?threadBotId=${encodeURIComponent(view?.activeBotId ?? "")}`}
                 >
-                  <Download size={16} /> Exporter cette conversation
+                  <Download size={16} />
+                  Exporter la conversation
                 </a>
-                <button
-                  className="outline"
-                  onClick={() => setDialog("profile")}
-                >
-                  Personnaliser {bot?.name}
-                  <ArrowRight size={16} />
-                </button>
+                {selectedBot && (
+                  <button
+                    className="outline"
+                    onClick={() =>
+                      go({ page: "characters", botId: selectedBot.id })
+                    }
+                  >
+                    Personnaliser {selectedBot.name}
+                    <ArrowRight size={16} />
+                  </button>
+                )}
                 <a className="outline" href="/advanced">
-                  Ouvrir les fonctions avancées
+                  Client de référence
                   <ArrowRight size={16} />
                 </a>
                 <p className="notice">
-                  Les animations suivent la préférence « mouvement réduit » de
-                  votre système.
+                  Les animations suivent le mouvement réduit du système. Aucun
+                  secret n’est stocké dans le client.
                 </p>
               </>
-            )}
-            {dialog === "profile" && bot && <Profile bot={bot} run={run} />}
-            {dialog === "project" && (
-              <>
-                <Folder size={30} />
-                <h2>Un nouveau projet.</h2>
-                <p>
-                  Choisissez explicitement le dossier autorisé sur ce PC. Aucun
-                  travail ne démarre à cette étape.
-                </p>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (
-                      await run(
-                        {
-                          type: "project.add",
-                          requestId: uid(),
-                          name: form.name,
-                          path: form.path,
-                        },
-                        true,
-                      )
-                    ) {
-                      setDialog(null);
-                      setPage("projects");
-                    }
-                  }}
-                >
-                  <label>
-                    Nom du projet
-                    <input
-                      required
-                      value={form.name}
-                      onChange={(e) =>
-                        setForm({ ...form, name: e.target.value })
-                      }
-                      placeholder="Mon prochain projet"
-                    />
-                  </label>
-                  <label>
-                    Chemin absolu du dossier
-                    <input
-                      required
-                      value={form.path}
-                      onChange={(e) =>
-                        setForm({ ...form, path: e.target.value })
-                      }
-                      placeholder="/home/…/mon-projet"
-                    />
-                  </label>
-                  <button className="black">
-                    Ajouter ce dossier
-                    <Plus size={16} />
-                  </button>
-                </form>
-              </>
-            )}
-            {dialog === "prepare" && (
-              <>
-                <Sparkles size={30} />
-                <h2>On prépare la mission.</h2>
-                <p>
-                  Vérifiez l’objectif et le dossier avant de confier le travail
-                  à votre ordinateur.
-                </p>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (
-                      await run(
-                        {
-                          type: "mission.create",
-                          requestId: uid(),
-                          projectId: form.projectId,
-                          goal: form.goal,
-                          model: null,
-                          effort: null,
-                          ...(proposal
-                            ? {
-                                origin: { messageId: proposal.id },
-                                mode: proposal.handoff?.coordinated
-                                  ? "coordinated"
-                                  : "direct",
-                                ...(proposal.handoff?.coordinated
-                                  ? { leadBotId: form.leadBotId }
-                                  : {}),
-                              }
-                            : {}),
-                        },
-                        true,
-                      )
-                    ) {
-                      setDialog(null);
-                      setPage("missions");
-                    }
-                  }}
-                >
-                  <label>
-                    Objectif exact
-                    <textarea
-                      required
-                      value={form.goal}
-                      onChange={(e) =>
-                        setForm({ ...form, goal: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Dossier autorisé
-                    <select
-                      required
-                      value={form.projectId}
-                      onChange={(e) =>
-                        setForm({ ...form, projectId: e.target.value })
-                      }
-                    >
-                      <option value="">Choisir un dossier…</option>
-                      {agents?.projects
-                        .filter((p) => !p.archived)
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} — {p.path}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  {proposal?.handoff?.coordinated && (
-                    <label>
-                      Responsable
-                      <select
-                        required
-                        value={form.leadBotId}
-                        onChange={(e) =>
-                          setForm({ ...form, leadBotId: e.target.value })
-                        }
-                      >
-                        <option value="">Choisir un responsable…</option>
-                        {view?.bots
-                          .filter((b) => b.id !== "mino")
-                          .map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                  )}
-                  <p className="notice">
-                    Le travail peut modifier les fichiers du dossier. Le bac à
-                    sable ne garantit pas un confinement de lecture à ce seul
-                    dossier.
-                  </p>
-                  <button className="black">
-                    Confirmer et démarrer
-                    <ArrowRight size={16} />
-                  </button>
-                </form>
-              </>
-            )}
-            {dialog === "mission" && mission && (
-              <>
-                <span className="badge">{statuses[mission.status]}</span>
-                <h2>{mission.title}</h2>
-                <p>{mission.goals.at(-1)?.text}</p>
-                <div className="info-row">
-                  <span>Dossier</span>
-                  <code>
-                    {
-                      agents?.projects.find((p) => p.id === mission.projectId)
-                        ?.path
-                    }
-                  </code>
-                </div>
-                <div className="info-row">
-                  <span>Essais</span>
-                  {mission.attemptsUsed} / {mission.maxAttempts}
-                </div>
-                {mission.live && (
-                  <p className="notice">
-                    {mission.live.activity ?? "Travail en cours"}
-                    {mission.live.text}
-                  </p>
-                )}
-                {mission.attempts.map((a) => (
-                  <details key={a.id}>
-                    <summary>
-                      Essai {a.n} · {a.state}
-                    </summary>
-                    <h4>Rapport de l’exécutant</h4>
-                    <Markdown
-                      text={
-                        a.finalText ?? a.errorMessage ?? "Aucun rapport reçu."
-                      }
-                    />
-                    <h4>Fichiers constatés</h4>
-                    <pre>
-                      {a.observed
-                        ? JSON.stringify(a.observed, null, 2)
-                        : "Aucun constat reçu."}
-                    </pre>
-                    <h4>Résultat du contrôle</h4>
-                    <pre>
-                      {a.check
-                        ? JSON.stringify(a.check, null, 2)
-                        : "Aucun contrôle reçu."}
-                    </pre>
-                  </details>
-                ))}
-                <div className="actions">
-                  {(["stop", "resume", "review", "budget"] as const)
-                    .filter((a) => mission.can[a])
-                    .map((a) => (
-                      <button
-                        className="outline"
-                        key={a}
-                        onClick={() =>
-                          void run(
-                            {
-                              type: `mission.${a}`,
-                              requestId: uid(),
-                              missionId: mission.id,
-                            } as AgentCommand,
-                            true,
-                          )
-                        }
-                      >
-                        {
-                          {
-                            stop: "Demander l’arrêt",
-                            resume: "Reprendre",
-                            review: "Contrôler",
-                            budget: "Ajouter des essais",
-                          }[a]
-                        }
-                      </button>
-                    ))}
-                  {mission.can.accept && (
-                    <button
-                      className="black"
-                      onClick={() =>
-                        void run(
-                          {
-                            type: "mission.accept",
-                            requestId: uid(),
-                            missionId: mission.id,
-                            attemptId: mission.can.accept!,
-                          },
-                          true,
-                        )
-                      }
-                    >
-                      Valider le résultat
-                      <Check size={16} />
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-            {dialog === "work" && work && (
-              <DocumentPanel work={work} run={run} />
-            )}
-            {error && (
-              <p className="notice" role="alert">
-                {error}
-              </p>
             )}
           </section>
         </div>
       )}
     </div>
   );
-}
-function Profile({
-  bot,
-  run,
-}: {
-  bot: BotView;
-  run: (c: Command) => Promise<boolean>;
-}) {
-  const [name, setName] = useState(bot.name),
-    [color, setColor] = useState(bot.color),
-    [text, setText] = useState("");
-  return (
-    <>
-      <Mascot shape={bot.shape} color={color} size={80} animated />
-      <h2>Un compagnon à votre image.</h2>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run({
-            type: "bot.update",
-            requestId: uid(),
-            botId: bot.id,
-            name,
-            color,
-          });
-        }}
-      >
-        <label>
-          Son petit nom
-          <input
-            maxLength={24}
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <label>
-          Sa couleur
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-          />
-        </label>
-        <button className="black">
-          Enregistrer
-          <Check size={16} />
-        </button>
-      </form>
-      <h3>Sa mémoire</h3>
-      <p>Ces souvenirs appartiennent uniquement à {bot.name}.</p>
-      {bot.memories.map((m) => (
-        <div className="memory" key={m.id}>
-          <span>{m.text}</span>
-          <button
-            className="icon"
-            aria-label="Supprimer ce souvenir"
-            onClick={() =>
-              void run({
-                type: "memory.delete",
-                requestId: uid(),
-                botId: bot.id,
-                memoryId: m.id,
-              })
-            }
-          >
-            <X size={16} />
-          </button>
-        </div>
-      ))}
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (
-            await run({
-              type: "memory.create",
-              requestId: uid(),
-              botId: bot.id,
-              text,
-            })
-          )
-            setText("");
-        }}
-      >
-        <label>
-          Un souvenir à garder
-          <input
-            required
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Quelque chose à retenir…"
-          />
-        </label>
-        <button className="outline">
-          Ajouter à sa mémoire
-          <Plus size={16} />
-        </button>
-      </form>
-    </>
-  );
-}
-function DocumentPanel({
-  work,
-  run,
-}: {
-  work: WorkView;
-  run: (c: Command) => Promise<boolean>;
-}) {
-  const latest = work.versions.at(-1);
-  const [base, setBase] = useState(latest?.id),
-    [title, setTitle] = useState(latest?.title ?? ""),
-    [body, setBody] = useState(latest?.body ?? "");
-  return (
-    <>
-      <span className="card-label">DOCUMENT · {statuses[work.state]}</span>
-      <h2>{work.title}</h2>
-      {latest && (
-        <>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (
-                base &&
-                (await run({
-                  type: "version.edit",
-                  requestId: uid(),
-                  workId: work.id,
-                  baseVersionId: base,
-                  title,
-                  body,
-                }))
-              ) {
-                const next = await get<AppView>("/api/view");
-                const saved = next.works
-                  .find((w) => w.id === work.id)
-                  ?.versions.at(-1);
-                if (saved?.title === title && saved.body === body)
-                  setBase(saved.id);
-              }
-            }}
-          >
-            <label>
-              Titre
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Contenu
-              <textarea
-                className="document-editor"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                required
-              />
-            </label>
-            <button className="black">
-              Enregistrer une version
-              <Check size={16} />
-            </button>
-          </form>
-          <div className="actions">
-            <a className="outline" href={`/api/versions/${latest.id}/download`}>
-              <Download size={16} /> Télécharger
-            </a>
-            <button
-              className="outline"
-              onClick={() =>
-                void run({
-                  type: "publication.propose",
-                  requestId: uid(),
-                  workId: work.id,
-                  versionId: latest.id,
-                  destination: "carnet",
-                })
-              }
-            >
-              Préparer la publication
-            </button>
-          </div>
-          <h3>Historique</h3>
-          {work.versions.map((v) => (
-            <details key={v.id}>
-              <summary>
-                Version {v.n} · {v.source}
-              </summary>
-              <Markdown text={v.body} />
-              <button
-                className="outline"
-                onClick={() =>
-                  void run({
-                    type: "version.restore",
-                    requestId: uid(),
-                    workId: work.id,
-                    versionId: v.id,
-                  })
-                }
-              >
-                Restaurer dans une nouvelle version
-              </button>
-            </details>
-          ))}
-          {work.proposals
-            .filter((p) => p.state === "open")
-            .map((p) => (
-              <div className="mission-card" key={p.id}>
-                <h3>Publier dans le carnet local ?</h3>
-                <strong>{p.title}</strong>
-                <Markdown text={p.body} />
-                <small>
-                  Version {p.versionN} · Empreinte {p.payloadSha256}
-                </small>
-                <button
-                  className="black"
-                  onClick={() =>
-                    void run({
-                      type: "publication.approve",
-                      requestId: uid(),
-                      proposalId: p.id,
-                      action: p.action,
-                      destination: p.destination,
-                      versionId: p.versionId,
-                      payloadSha256: p.payloadSha256,
-                    })
-                  }
-                >
-                  Confirmer cette publication
-                  <Check size={16} />
-                </button>
-              </div>
-            ))}
-        </>
-      )}
-    </>
-  );
+  return <AgentOutboxProvider value={outbox}>{shell}</AgentOutboxProvider>;
 }
 createRoot(document.getElementById("root")!).render(<App />);

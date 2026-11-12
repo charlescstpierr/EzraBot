@@ -168,6 +168,8 @@ export const CommandSchema = z.discriminatedUnion('type', [
     botId: id,
     memoryId: id,
     text: text(LIMITS.memoryChars),
+    /** The memory's `updatedAt` when its editor opened it: any other current value refuses with `stale_base`. Absent, the last write wins. */
+    baseUpdatedAt: z.iso.datetime({ precision: 3 }).optional(),
   }),
   z.strictObject({ type: z.literal('memory.delete'), requestId, botId: id, memoryId: id }),
 ]);

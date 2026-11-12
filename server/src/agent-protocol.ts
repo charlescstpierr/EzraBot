@@ -235,3 +235,5 @@ export type AgentsView = {
   engine: AgentEngineStatus;
   queue: string[];
 };
+
+export type MissionResponse = { rev: number; mission: MissionDetail; project: ProjectView | null };

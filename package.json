@@ -7,7 +7,7 @@
     "setup": "npm install && npm ci --prefix server",
     "build": "npm run build --prefix server",
     "start": "npm run build && node server/dist/src/main.js",
-    "typecheck": "tsc --noEmit && npm run typecheck --prefix server",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && npm run typecheck --prefix server",
     "test": "npm test --prefix server",
     "test:ui": "npm run build && playwright test"
   },

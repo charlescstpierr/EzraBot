@@ -641,6 +641,11 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function nextUpdatedAt(previous: string, clock: string): string {
+  const floor = Date.parse(previous) + 1;
+  return Date.parse(clock) < floor ? new Date(floor).toISOString() : clock;
+}
+
 function isBusy(error: unknown): boolean {
   if (!(error instanceof Error) || !('errcode' in error)) return false;
   const code = error.errcode;
@@ -1143,8 +1148,12 @@ export function openStore(options: StoreOptions): Store {
       }
       case 'memory.update': {
         const memory = requireMemory(command.botId, command.memoryId);
+        const current = str(memory, 'updated_at');
+        if (command.baseUpdatedAt !== undefined && command.baseUpdatedAt !== current) {
+          throw new Refusal('stale_base', 'Ce souvenir a changé entre-temps, par exemple dans un autre onglet. Rien n’a été écrasé.');
+        }
         requireMemoryRoom(command.botId, Array.from(str(memory, 'text')).length, command.text);
-        run('UPDATE memories SET text = ?, updated_at = ? WHERE id = ?', command.text, now(), command.memoryId);
+        run('UPDATE memories SET text = ?, updated_at = ? WHERE id = ?', command.text, nextUpdatedAt(current, now()), command.memoryId);
         return { kind: 'memory', memoryId: command.memoryId };
       }
       case 'memory.delete': {

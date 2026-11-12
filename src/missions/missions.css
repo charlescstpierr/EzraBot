@@ -1,0 +1,172 @@
+.missions-page {
+  width: min(100%, 1000px);
+  margin: auto;
+  padding: 28px;
+  color: #171717;
+}
+.missions-page header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.missions-page h1 {
+  font-size: 32px;
+  margin: 8px 0;
+}
+.missions-page h2 {
+  font-size: 21px;
+}
+.missions-page h3 {
+  font-size: 17px;
+}
+.missions-page p {
+  line-height: 1.6;
+}
+.missions-page button,
+.missions-proposal button {
+  border: 1px solid #bcbcbc;
+  border-radius: 9px;
+  background: #fff;
+  color: #171717;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.missions-page button:disabled,
+.missions-proposal button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.missions-list {
+  display: grid;
+  gap: 12px;
+}
+.missions-card,
+.missions-proposal {
+  border: 1px solid #dedede;
+  border-radius: 14px;
+  padding: 20px;
+  background: #fff;
+  margin: 16px 0;
+}
+.missions-list .missions-card {
+  display: flex;
+  align-items: flex-start;
+  text-align: left;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.missions-proposal h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.missions-form {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+}
+.missions-form fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.missions-form label {
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+}
+.missions-form input,
+.missions-form textarea,
+.missions-form select {
+  font: inherit;
+  color: #171717;
+  background: #fff;
+  border: 1px solid #bcbcbc;
+  border-radius: 8px;
+  padding: 11px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.missions-form textarea {
+  resize: vertical;
+  min-height: 95px;
+}
+.missions-form .missions-check {
+  display: flex;
+  align-items: center;
+}
+.missions-check input {
+  width: auto;
+}
+.missions-actions,
+.missions-budget,
+.missions-lead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.missions-budget {
+  font-size: 13px;
+  border-block: 1px solid #eee;
+}
+.missions-page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f6f6f6;
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 450px;
+  overflow: auto;
+}
+.missions-page details {
+  margin-block: 14px;
+}
+.missions-page summary {
+  cursor: pointer;
+  line-height: 1.6;
+}
+.missions-error {
+  border-left: 3px solid #222;
+  padding-left: 14px;
+}
+.missions-attempt {
+  padding: 14px;
+  border-bottom: 1px solid #ddd;
+}
+.missions-eyebrow {
+  font-size: 13px;
+  color: #555;
+}
+.missions-evidence {
+  font-size: 14px;
+}
+.missions-page,
+.missions-proposal {
+  overflow-wrap: anywhere;
+}
+.missions-proposal {
+  min-width: 0;
+}
+@media (max-width: 650px) {
+  .missions-page {
+    padding: 18px;
+  }
+  .missions-page header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .missions-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .missions-card,
+  .missions-proposal {
+    padding: 15px;
+  }
+}

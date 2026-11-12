@@ -90,14 +90,22 @@ test("an accepted retry keeps a newer draft and changing threads during send is 
   let release!: () => void;
   const hold = new Promise<void>((r) => (release = r));
   await page.route("**/api/commands", async (route) => {
+    if (route.request().postDataJSON().type !== "message.say")
+      return route.continue();
     await hold;
     await route.fulfill({ response: await route.fetch() });
   });
+  const sent = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/commands") &&
+      r.request().postDataJSON().type === "message.say",
+  );
   await page.getByRole("button", { name: "Envoyer le message" }).click();
   await input.fill("Brouillon suivant");
   await page.locator(".threads").getByRole("button", { name: /Nova/ }).click();
   await input.fill("Texte privé de Nova");
   release();
+  await sent;
   await expect(
     page.getByRole("button", { name: "Envoyer le message" }),
   ).toBeEnabled();

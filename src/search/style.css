@@ -1,0 +1,100 @@
+.ez-search {
+  position: relative;
+  margin: 14px 0;
+  color: #222;
+}
+.ez-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+.ez-search-field input {
+  border: 0;
+  background: none;
+  outline: none;
+  min-width: 0;
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+}
+.ez-search-navigation {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  margin-top: 6px;
+}
+.ez-search-navigation span {
+  margin-right: auto;
+}
+.ez-search button {
+  cursor: pointer;
+}
+.ez-search-navigation button,
+.ez-search-heading button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 5px;
+  padding: 3px 8px;
+}
+.ez-search-navigation button:disabled {
+  opacity: 0.4;
+}
+.ez-search-results {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: 100%;
+  width: min(460px, 80vw);
+  max-height: 55vh;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px #0002;
+  padding: 8px;
+}
+.ez-search-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #777;
+  font-size: 11px;
+  padding: 6px;
+}
+.ez-search-results > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+  color: #222;
+}
+.ez-search-results > button:hover,
+.ez-search-results > .ez-search-current {
+  background: #f3f3f3;
+}
+.ez-search-results strong {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.ez-search-results span {
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ez-search-results mark {
+  background: #ddd;
+  color: #111;
+}
+.ez-search-results p {
+  font-size: 12px;
+  padding: 10px;
+}
