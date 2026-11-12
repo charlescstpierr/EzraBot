@@ -15,6 +15,9 @@ import { createAgentRoutes } from './agent-http.js';
 import { createAgentWorker } from './agent-worker.js';
 import { MissionsLockedError, openMissions } from './missions.js';
 import { buildMissionChatContext } from './mission-context.js';
+import { takeProviderKey } from './child-env.js';
+import { createComposioProvider, createComposioSdk } from './composio.js';
+import { createActionDesk } from './tool-desk.js';
 
 const VERSION = '0.1.0';
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -28,6 +31,8 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/** Read before anything else runs, then gone from this process: no child and no later code can see it. */
+const providerKey = takeProviderKey(process.env);
 const port = Number(process.env.MINO_PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) fail('MINO_PORT doit être un numéro de port entre 1024 et 65535.');
 const dataDir = resolve(process.env.MINO_DATA_DIR ?? join(root, 'data'));
@@ -36,7 +41,7 @@ mkdirSync(workDir, { recursive: true });
 
 function open(): Store {
   try {
-    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions) });
+    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
     throw error;
@@ -62,9 +67,15 @@ const agentEngine = createAgentEngine({ command: engineOptions.command, tmpDir: 
 const agentWorker = createAgentWorker({ missions, engine: agentEngine, log, onFatal: () => fail('Le registre des missions a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
 const agents = createAgentRoutes({ missions, worker: agentWorker, engine: agentEngine,
   coordination: { bot: botId => store.leadCandidate(botId), origin: messageId => store.missionOrigin(messageId) } });
-const engine = createCodexEngine(engineOptions);
+// Only the chat engine can register service tools, and only when the provider is configured. Documents and missions never can.
+const engine = createCodexEngine({ ...engineOptions, ...(providerKey ? { dynamicTools: true as const } : {}) });
 const docEngine = createCodexEngine(engineOptions);
-const worker = createWorker({ store, engines: { chat: engine, doc: docEngine }, log, onFatal: () => fail('Le stockage du travail a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
+const desk = createActionDesk({
+  store, port, log,
+  provider: providerKey ? createComposioProvider({ sdk: createComposioSdk(providerKey), ownerId: store.tools.ownerId }) : null,
+  wake: () => worker.kick(),
+});
+const worker = createWorker({ store, engines: { chat: engine, doc: docEngine }, tools: desk, log, onFatal: () => fail('Le stockage du travail a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
 let devices: Devices | undefined;
 let browserAdmission: BrowserAdmission | undefined;
 let deviceServer: ReturnType<typeof createDeviceServer> | undefined;
@@ -93,6 +104,7 @@ const server = createHttpServer({
   ...(devices ? { devices } : {}),
   ...(browserAdmission ? { browserAdmission } : {}),
   agents,
+  actions: desk,
   csrfToken: randomBytes(32).toString('hex'),
 });
 
@@ -102,6 +114,7 @@ server.listen(port, '127.0.0.1', () => {
   void engine.catalog().then(status => log({ event: 'engine', state: status.state }));
   worker.kick();
   agentWorker.kick();
+  desk.kick();
 });
 
 let stopping = false;
@@ -112,7 +125,7 @@ async function shutdown(): Promise<void> {
   server.close();
   deviceServer?.closeAllConnections();
   deviceServer?.close();
-  await Promise.all([worker.close(), agentWorker.close()]);
+  await Promise.all([worker.close(), agentWorker.close(), desk.close()]);
   await Promise.all([engine.close(), docEngine.close(), agentEngine.close()]);
   const interrupted = store.recoverInterrupted();
   store.close();

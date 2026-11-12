@@ -16,6 +16,7 @@ import {
   type AccountStatus,
   type ExecutionView,
   type GrantView,
+  type LinkView,
   type StaleReason,
   type ToolCommand,
   type ToolCommandOf,
@@ -95,11 +96,13 @@ export type LedgerKit = {
 };
 
 export type ToolLedger = {
+  /** Stable private identity of this space at the provider. It stays on the server. */
+  readonly ownerId: string;
   view(status: ToolsStatus): ToolsView;
   /** Applies one PC command. The same `requestId` with the same content returns the first receipt. */
   apply(command: ToolCommand, live: LiveFacts | null): ToolOutcome;
   recordLink(link: { linkId: string; toolkit: string; accountId: string }): void;
-  link(linkId: string): { toolkit: string; accountId: string } | null;
+  link(linkId: string): LinkView | null;
   /** The only way an account or a link becomes active: facts re-read from the provider. */
   observeAccount(account: AccountFacts): void;
   account(accountId: string): AccountFacts | null;
@@ -107,7 +110,7 @@ export type ToolLedger = {
   /** Records the one proposal of a running turn. Nothing is sent. */
   propose(turn: TurnIdentity, call: ToolCall): ToolReply;
   peek(proposalId: string): Pin | null;
-  nextApproved(): string | null;
+  nextApproved(): { executionId: string; pin: Pin } | null;
   /** Consumes the approval durably before any network call, or voids it when a check fails. */
   claimDispatch(executionId: string, reading: AccountReading): DispatchPermit | null;
   settle(permit: DispatchPermit, result: SendResult): void;
@@ -703,17 +706,19 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     return {
       status,
       accounts: all('SELECT * FROM tool_accounts ORDER BY toolkit, alias, id').map(row => ({ ...accountOf(row), checkedAt: str(row, 'checked_at') })),
-      links: all(`SELECT * FROM tool_links WHERE state IS NOT 'active' ORDER BY created_at DESC, rowid DESC LIMIT 10`).map(row => ({
-        id: str(row, 'id'), toolkit: str(row, 'toolkit'), accountId: str(row, 'account_id'), state: oneOf(row, 'state', ['pending', 'active', 'failed'] as const), createdAt: str(row, 'created_at'),
-      })),
+      links: all(`SELECT * FROM tool_links WHERE state IS NOT 'active' ORDER BY created_at DESC, rowid DESC LIMIT 10`).map(linkOf),
       grants,
       proposals,
     };
   }
 
   const purgeScope = (erasedWorks: string) => `bot_id = ? OR work_id IN (${erasedWorks})`;
+  const linkOf = (row: Row): LinkView => ({
+    id: str(row, 'id'), toolkit: str(row, 'toolkit'), accountId: str(row, 'account_id'), state: oneOf(row, 'state', ['pending', 'active', 'failed'] as const), createdAt: str(row, 'created_at'),
+  });
 
   return {
+    ownerId,
     view,
     apply,
     recordLink(link) {
@@ -721,8 +726,8 @@ export function createToolLedger(kit: LedgerKit, receipts: {
       kit.changed();
     },
     link(linkId) {
-      const row = get('SELECT toolkit, account_id FROM tool_links WHERE id = ?', linkId);
-      return row ? { toolkit: str(row, 'toolkit'), accountId: str(row, 'account_id') } : null;
+      const row = get('SELECT * FROM tool_links WHERE id = ?', linkId);
+      return row ? linkOf(row) : null;
     },
     observeAccount(account) {
       kit.transaction(() => observe(account));
@@ -749,8 +754,8 @@ export function createToolLedger(kit: LedgerKit, receipts: {
       return row ? pinOf(row) : null;
     },
     nextApproved() {
-      const row = get(`SELECT id FROM tool_executions WHERE state = 'approved' ORDER BY rowid LIMIT 1`);
-      return row ? str(row, 'id') : null;
+      const row = get(`SELECT p.*, e.id AS execution_id FROM tool_executions e JOIN tool_proposals p ON p.id = e.proposal_id WHERE e.state = 'approved' ORDER BY e.rowid LIMIT 1`);
+      return row ? { executionId: str(row, 'execution_id'), pin: pinOf(row) } : null;
     },
     claimDispatch,
     settle,

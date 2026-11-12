@@ -164,7 +164,8 @@ export const AvailableToolSchema = z.strictObject({
 });
 export type AvailableTool = z.infer<typeof AvailableToolSchema>;
 
-export const LinkRequestSchema = z.strictObject({ serviceId: providerId });
+/** `alias` is the name the person gives this account. It is what an approval card later shows. */
+export const LinkRequestSchema = z.strictObject({ serviceId: providerId, alias: z.string().trim().min(1).max(40) });
 export const AvailableQuerySchema = z.strictObject({ accountId: providerId });
 export const toolkitSlug = toolkit;
 

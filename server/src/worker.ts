@@ -1,5 +1,5 @@
 import { engineFailure } from './domain.js';
-import type { AgentText, Engine } from './engine.js';
+import type { AgentText, Engine, TurnTools } from './engine.js';
 import { LANES, type Lane } from './protocol.js';
 import type { Claim, Store } from './store.js';
 
@@ -32,6 +32,8 @@ type LaneRunner = {
 export function createWorker(options: {
   store: Store;
   engines: Record<Lane, Engine>;
+  /** Service tools for a chat turn. The document lane never asks. */
+  tools?: { forClaim(claim: Claim): TurnTools | undefined };
   log?: (entry: WorkerEvent) => void;
   onFatal?: () => void;
   progressIntervalMs?: number;
@@ -74,7 +76,9 @@ export function createWorker(options: {
         pending = null;
         if (text) guarded(() => store.recordProgress(claim, text));
       };
+      const offered = name === 'chat' ? options.tools?.forClaim(claim) : undefined;
       const outcome = await engine.run({
+        ...(offered ? { tools: offered } : {}),
         turn: claim.turn,
         choice: claim.choice,
         signal: controller.signal,

@@ -641,6 +641,8 @@ export type StoreOptions = {
   mascots: MascotCatalogue;
   now?: () => string;
   missionContext?: () => NonNullable<ContextSource['missions']>;
+  /** True when the server can reach the provider. Without it no turn is given a service tool, whatever rights exist. */
+  serviceTools?: boolean;
 };
 
 export function openStore(options: StoreOptions): Store {
@@ -1488,7 +1490,7 @@ export function openStore(options: StoreOptions): Store {
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
   } | null, purpose: Claim['purpose'] = { kind: 'request' }): Claim {
-    const toolGrants = lane === 'chat' && purpose.kind === 'request' ? tools.grantsFor(prepared.botId) : [];
+    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),

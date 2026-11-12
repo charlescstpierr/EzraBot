@@ -69,7 +69,7 @@ test('the tool tables arrive on the oldest and on the current schema with valid 
   seed.exec(readFileSync(new URL('../../test/fixtures/schema-v0.sql', import.meta.url), 'utf8'));
   seed.close();
   for (const path of [legacy, tempPath()]) {
-    const store = openStore({ path, mascots });
+    const store = openStore({ path, mascots, serviceTools: true });
     try {
       assert.deepEqual(store.tools.view({ state: 'missing_key' }), { status: { state: 'missing_key' }, accounts: [], links: [], grants: {}, proposals: [] });
       assert.deepEqual(store.tools.grantsFor('nova'), []);
@@ -96,15 +96,15 @@ test('the private owner identity is stable across restarts and differs from the 
       db.close();
     }
   };
-  openStore({ path, mascots }).close();
+  openStore({ path, mascots, serviceTools: true }).close();
   const first = read();
-  openStore({ path, mascots }).close();
+  openStore({ path, mascots, serviceTools: true }).close();
   assert.deepEqual(read(), first);
   assert.notEqual(first.owner, first.space);
 });
 
 test('a grant needs live provider facts: meta tools, tools without a version, foreign or inactive accounts are refused with a reason', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     assert.equal(code(store.tools.apply({ type: 'tools.grant', requestId: rid(), botId: 'nova', accountId: ACCOUNT_A.id, toolSlugs: ['GMAIL_SEND_EMAIL'] }, null)), 'provider_unavailable');
     const meta = grant(store, 'nova', ['COMPOSIO_MULTI_EXECUTE_TOOL']);
@@ -129,7 +129,7 @@ test('a grant needs live provider facts: meta tools, tools without a version, fo
 
 test('the database itself refuses a meta tool, a second account for the same bot and service, and any edit of a grant', () => {
   const path = tempPath();
-  const store = openStore({ path, mascots });
+  const store = openStore({ path, mascots, serviceTools: true });
   done(grant(store));
   store.tools.observeAccount(ACCOUNT_B);
   store.close();
@@ -150,7 +150,7 @@ test('the database itself refuses a meta tool, a second account for the same bot
 
 test('one turn records one immutable proposal: the same call replays it, any other call is refused, and nothing is visible before the turn answers', () => {
   const path = tempPath();
-  const store = openStore({ path, mascots });
+  const store = openStore({ path, mascots, serviceTools: true });
   try {
     done(grant(store));
     const claim = claimFor(store);
@@ -193,7 +193,7 @@ test('one turn records one immutable proposal: the same call replays it, any oth
 
 test('a source turn that fails, is cancelled or is interrupted leaves its proposal stale, never open', () => {
   const path = tempPath();
-  const store = openStore({ path, mascots });
+  const store = openStore({ path, mascots, serviceTools: true });
   try {
     done(grant(store));
     const failed = claimFor(store);
@@ -223,7 +223,7 @@ test('a source turn that fails, is cancelled or is interrupted leaves its propos
 });
 
 test('approval is exact: a changed fingerprint is a mismatch, and stale grant, account, version or schema close the proposal with nothing to send', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     done(grant(store));
     const { proposal } = proposed(store);
@@ -253,7 +253,7 @@ test('approval is exact: a changed fingerprint is a mismatch, and stale grant, a
 });
 
 test('revoking or replacing a right closes its open proposals at once, and a revocation after approval voids the send', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     const granted = done(grant(store));
     const grantId = granted.kind === 'grants' ? granted.grantIds[0] ?? '' : '';
@@ -286,7 +286,7 @@ test('revoking or replacing a right closes its open proposals at once, and a rev
 });
 
 test('two decisions and two dispatch claims give one execution and one permit', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     done(grant(store));
     const { proposal } = proposed(store);
@@ -299,7 +299,7 @@ test('two decisions and two dispatch claims give one execution and one permit', 
     assert.equal(code(store.tools.apply({ type: 'tools.refuse', requestId: rid(), proposalId: proposal.id }, null)), 'proposal_closed');
     assert.equal(code(store.tools.apply({ type: 'tools.refuse', requestId, proposalId: proposal.id }, null)), 'request_conflict');
 
-    const executionId = store.tools.nextApproved();
+    const executionId = store.tools.nextApproved()?.executionId;
     assert(executionId);
     const permit = store.tools.claimDispatch(executionId, { kind: 'found', account: ACCOUNT_A });
     assert(permit, 'the first claim consumes the approval');
@@ -314,7 +314,7 @@ test('two decisions and two dispatch claims give one execution and one permit', 
 
 test('before any send, an unreachable provider, an inactive account or a deleted right void the approval; the database forbids going back', () => {
   const path = tempPath();
-  const store = openStore({ path, mascots });
+  const store = openStore({ path, mascots, serviceTools: true });
   try {
     done(grant(store));
     const voided = (reading: Parameters<Store['tools']['claimDispatch']>[1]) => {
@@ -345,7 +345,7 @@ test('before any send, an unreachable provider, an inactive account or a deleted
 
 test('a crash after the permit is consumed leaves the result unknown and is never sent again', () => {
   const path = tempPath();
-  const first = openStore({ path, mascots });
+  const first = openStore({ path, mascots, serviceTools: true });
   done(grant(first));
   const { proposal } = proposed(first);
   const approved = done(approve(first, proposal));
@@ -353,7 +353,7 @@ test('a crash after the permit is consumed leaves the result unknown and is neve
   assert(first.tools.claimDispatch(executionId, { kind: 'found', account: ACCOUNT_A }));
   first.close();
 
-  const second = openStore({ path, mascots });
+  const second = openStore({ path, mascots, serviceTools: true });
   try {
     second.recoverInterrupted();
     const execution = only(second).execution;
@@ -367,14 +367,14 @@ test('a crash after the permit is consumed leaves the result unknown and is neve
 
 test('a crash before the permit is consumed keeps one approval to send once after restart', () => {
   const path = tempPath();
-  const first = openStore({ path, mascots });
+  const first = openStore({ path, mascots, serviceTools: true });
   done(grant(first));
   done(approve(first, proposed(first).proposal));
   first.close();
-  const second = openStore({ path, mascots });
+  const second = openStore({ path, mascots, serviceTools: true });
   try {
     second.recoverInterrupted();
-    const executionId = second.tools.nextApproved();
+    const executionId = second.tools.nextApproved()?.executionId;
     assert(executionId);
     assert(second.tools.claimDispatch(executionId, { kind: 'found', account: ACCOUNT_A }));
     assert.equal(second.tools.nextApproved(), null);
@@ -396,7 +396,7 @@ function settled(store: Store, result: Parameters<Store['tools']['settle']>[1], 
 }
 
 test('the receipt is reported by the same work in the same thread, without tools, deliverable or new request, and the work returns to its state', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     done(grant(store));
     const { workId } = settled(store, { kind: 'completed', data: { id: 'resultat_synthetique', refresh_token: 'jeton-synthetique' }, error: null, logId: 'log_1' },
@@ -437,7 +437,7 @@ test('the receipt is reported by the same work in the same thread, without tools
 });
 
 test('a failed report is retried only as a summary: the execution state and the send count never move', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     done(grant(store));
     const { workId, executionId } = settled(store, { kind: 'failed', data: {}, error: null, logId: 'log_2' });
@@ -469,7 +469,7 @@ function refusedRetry(store: Store, workId: string): string {
 }
 
 test('unknown, blocked and input-required outcomes are recorded as such and reported, never as a success', () => {
-  const store = openStore({ path: tempPath(), mascots });
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true });
   try {
     done(grant(store));
     const reported = (result: Parameters<Store['tools']['settle']>[1]) => {
@@ -494,7 +494,7 @@ test('unknown, blocked and input-required outcomes are recorded as such and repo
 
 test('cancelling or interrupting a report turn keeps the receipt and the earlier work state', () => {
   const path = tempPath();
-  const store = openStore({ path, mascots });
+  const store = openStore({ path, mascots, serviceTools: true });
   done(grant(store));
   const first = settled(store, { kind: 'completed', data: {}, error: null, logId: 'log_4' });
   const running = store.claimNext('chat');
@@ -507,7 +507,7 @@ test('cancelling or interrupting a report turn keeps the receipt and the earlier
   const second = settled(store, { kind: 'completed', data: {}, error: null, logId: 'log_5' });
   assert(store.claimNext('chat'));
   store.close();
-  const reopened = openStore({ path, mascots });
+  const reopened = openStore({ path, mascots, serviceTools: true });
   try {
     reopened.recoverInterrupted();
     assert.equal(reopened.view().works.find(w => w.id === second.workId)?.state, 'done', 'an interrupted report does not turn a finished work into a failure');
@@ -520,7 +520,7 @@ test('cancelling or interrupting a report turn keeps the receipt and the earlier
 
 test('deleting a bot waits for an approved send, then erases its rights, proposals and receipts with valid links and no late report', () => {
   const path = tempPath();
-  const store = openStore({ path, mascots });
+  const store = openStore({ path, mascots, serviceTools: true });
   try {
     done(grant(store));
     const { proposal } = proposed(store);
