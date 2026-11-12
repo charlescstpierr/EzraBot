@@ -1,0 +1,46 @@
+{
+  "name": "mino-native-client",
+  "description": "Native Mino companion. Execution and persistence remain on the paired PC.",
+  "license": "0BSD",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@expo/metro-runtime": "~58.0.17",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "58.0.23",
+    "expo-camera": "~58.0.14",
+    "expo-crypto": "~58.0.7",
+    "expo-secure-store": "~58.0.2",
+    "expo-status-bar": "~58.0.4",
+    "expo-system-ui": "~58.0.7",
+    "markdown-it": "15.0.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-svg": "15.16.0",
+    "react-native-web": "^0.21.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/node": "^26.6.6",
+    "@types/react": "~19.3.0",
+    "ignore": "5.3.2",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit && tsc -p tests/tsconfig.json",
+    "test": "tsx --test tests/*.test.ts",
+    "sync-contract": "node scripts/sync-contract.mjs",
+    "export:all": "expo export --platform all --output-dir dist",
+    "check:eas-archive": "node scripts/check-eas-archive.mjs",
+    "test:eas-archive": "node --test scripts/check-eas-archive.test.mjs"
+  },
+  "private": true
+}

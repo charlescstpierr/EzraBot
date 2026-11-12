@@ -1,0 +1,125 @@
+{
+  "shapes": [
+    {
+      "id": "sprout",
+      "label": "Pousse",
+      "symbol": "profile-sprout",
+      "defaultColor": "#8de343"
+    },
+    {
+      "id": "garlic",
+      "label": "Bulbe",
+      "symbol": "profile-garlic",
+      "defaultColor": "#f3ecd7"
+    },
+    {
+      "id": "radish",
+      "label": "Radis",
+      "symbol": "profile-radish",
+      "defaultColor": "#ff2b76"
+    },
+    {
+      "id": "carrot",
+      "label": "Carotte",
+      "symbol": "profile-carrot",
+      "defaultColor": "#ff850b"
+    },
+    {
+      "id": "eggplant",
+      "label": "Aubergine",
+      "symbol": "profile-eggplant",
+      "defaultColor": "#833bf0"
+    },
+    {
+      "id": "mushroom",
+      "label": "Champignon",
+      "symbol": "profile-mushroom",
+      "defaultColor": "#ffd529"
+    },
+    {
+      "id": "tomato",
+      "label": "Tomate",
+      "symbol": "profile-tomato",
+      "defaultColor": "#ff2938"
+    },
+    {
+      "id": "broccoli",
+      "label": "Brocoli",
+      "symbol": "profile-broccoli",
+      "defaultColor": "#0fbc8c"
+    },
+    {
+      "id": "corn",
+      "label": "Maïs",
+      "symbol": "profile-corn",
+      "defaultColor": "#ffe13a"
+    },
+    {
+      "id": "potato",
+      "label": "Patate",
+      "symbol": "profile-potato",
+      "defaultColor": "#bd7029"
+    },
+    {
+      "id": "onion",
+      "label": "Oignon",
+      "symbol": "profile-onion",
+      "defaultColor": "#ff4b85"
+    },
+    {
+      "id": "cabbage",
+      "label": "Chou",
+      "symbol": "profile-cabbage",
+      "defaultColor": "#21c64b"
+    },
+    {
+      "id": "pepper",
+      "label": "Piment",
+      "symbol": "profile-pepper",
+      "defaultColor": "#ff253c"
+    },
+    {
+      "id": "turnip",
+      "label": "Navet",
+      "symbol": "profile-turnip",
+      "defaultColor": "#2054f5"
+    },
+    {
+      "id": "pumpkin",
+      "label": "Citrouille",
+      "symbol": "profile-pumpkin",
+      "defaultColor": "#ff850b"
+    },
+    {
+      "id": "peas",
+      "label": "Petits pois",
+      "symbol": "profile-peas",
+      "defaultColor": "#21c840"
+    },
+    {
+      "id": "leek",
+      "label": "Poireau",
+      "symbol": "profile-leek",
+      "defaultColor": "#f3ecd7"
+    },
+    {
+      "id": "cap",
+      "label": "Bonnet",
+      "symbol": "profile-cap",
+      "defaultColor": "#1857f5"
+    }
+  ],
+  "colors": [
+    "#f3ecd7",
+    "#895931",
+    "#ff2236",
+    "#ff5c03",
+    "#fe8c03",
+    "#02c369",
+    "#06b49e",
+    "#1179fe",
+    "#8850ff",
+    "#ff2a92",
+    "#808080"
+  ]
+}

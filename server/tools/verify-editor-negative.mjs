@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const isolated = mkdtempSync(join(tmpdir(), 'mino-editor-negative-'));
+for (const folder of ['dist', 'assets', 'web', 'tools']) cpSync(join(root, folder), join(isolated, folder), { recursive: true });
+cpSync(join(root, 'package.json'), join(isolated, 'package.json'));
+symlinkSync(join(root, 'node_modules'), join(isolated, 'node_modules'), 'dir');
+mkdirSync(join(isolated, 'docs/evidence'), { recursive: true });
+const file = join(isolated, 'dist/web/app.js');
+const original = readFileSync(file, 'utf8');
+const signature = 'async function dispatch(draft) {';
+const from = original.indexOf(signature) + signature.length;
+const to = original.indexOf('const body = JSON.stringify', from);
+assert(from >= signature.length && to > from);
+assert(original.slice(from, to).includes('protectedWorkId'));
+writeFileSync(file, original.slice(0, from) + '\n    ' + original.slice(to));
+const result = spawnSync(process.execPath, [join(isolated, 'tools/verify-editor.mjs')], { cwd: isolated, encoding: 'utf8', timeout: 30_000 });
+assert.notEqual(result.status, 0, 'Le contrôle doit échouer quand la garde est retirée');
+assert.match(result.stderr, /Condition non atteinte: validation bloquée/, 'Le contrôle doit échouer sur la validation du tiroir');
+const proof = { checkedAt: new Date().toISOString(), scope: 'Throwaway compiled copy only; repository code unchanged', removedGuard: 'central unsaved-draft guard', detected: true, expectedFailure: 'drawer validation was not blocked', processExitCode: result.status };
+writeFileSync(new URL('docs/evidence/editor-negative-control.json', import.meta.url.replace('/tools/verify-editor-negative.mjs', '/')), JSON.stringify(proof, null, 2) + '\n');
+console.log(JSON.stringify(proof));

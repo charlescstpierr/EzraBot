@@ -1,0 +1,31 @@
+{
+  "name": "mino",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mino, un fil local o\u00f9 des bots r\u00e9pondent avec Codex.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p web/tsconfig.json && esbuild web/app.ts web/device-admin.ts --bundle --format=esm --target=es2022 --legal-comments=eof --log-level=warning --outdir=dist/web && node ../scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json",
+    "test": "npm run build && node --test --test-concurrency=1 'dist/test/*.test.js'",
+    "start": "npm run build && node dist/src/main.js",
+    "verify:real": "npm run build && node tools/verify-real.mjs",
+    "compare:context": "npm run build && node tools/compare-context.mjs"
+  },
+  "dependencies": {
+    "markdown-it": "15.0.3",
+    "qrcode": "^1.5.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "14.2.0",
+    "@types/node": "24.19.2",
+    "@types/qrcode": "^1.5.6",
+    "esbuild": "0.28.2",
+    "jsqr": "1.4.0",
+    "typescript": "5.9.3"
+  }
+}
