@@ -83,16 +83,13 @@ export async function toolsRequest<K extends ToolsReply["kind"]>(
 ): Promise<ToolsReplyOf<K>> {
   const response = await fetch(`/api/tools/${route}`, {
     cache: "no-store",
+    headers: {
+      "x-mino-csrf": csrfToken(),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
     ...(body === undefined
       ? {}
-      : {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-mino-csrf": csrfToken(),
-          },
-          body: JSON.stringify(body),
-        }),
+      : { method: "POST", body: JSON.stringify(body) }),
   });
   const data: unknown = await response.json().catch(() => null);
   if (!isRecord(data) || data.ok !== true) {

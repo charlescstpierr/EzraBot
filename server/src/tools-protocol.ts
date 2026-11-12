@@ -6,7 +6,6 @@ import type { AppView } from './protocol.js';
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,80}$/);
 const requestId = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
 const providerId = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
-const toolkit = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/);
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** A provider action name. It is also the name of the function the model may call. */
@@ -76,7 +75,6 @@ export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export const AccountViewSchema = z.strictObject({
   id: z.string(), toolkit: z.string(), alias: z.string(), status: z.enum(ACCOUNT_STATUSES), checkedAt: z.string(),
 });
-export type AccountView = z.infer<typeof AccountViewSchema>;
 
 export const LinkViewSchema = z.strictObject({
   id: z.string(), toolkit: z.string(), accountId: z.string(), state: z.enum(['pending', 'active', 'failed']), createdAt: z.string(),
@@ -90,9 +88,7 @@ export const GrantViewSchema = z.strictObject({
 export type GrantView = z.infer<typeof GrantViewSchema>;
 
 export const EXECUTION_STATES = ['approved', 'dispatching', 'completed', 'failed', 'blocked', 'unknown', 'voided'] as const;
-export type ExecutionState = (typeof EXECUTION_STATES)[number];
 export const REPORT_STATES = ['none', 'queued', 'running', 'done', 'failed', 'suppressed'] as const;
-export type ReportState = (typeof REPORT_STATES)[number];
 
 export const ExecutionViewSchema = z.strictObject({
   id: z.string(),
@@ -106,9 +102,6 @@ export const ExecutionViewSchema = z.strictObject({
   updatedAt: z.string(),
 });
 export type ExecutionView = z.infer<typeof ExecutionViewSchema>;
-
-export const PROPOSAL_STATES = ['drafted', 'open', 'approved', 'refused', 'stale'] as const;
-export type ProposalState = (typeof PROPOSAL_STATES)[number];
 
 export const ToolProposalViewSchema = z.strictObject({
   id: z.string(),
@@ -167,7 +160,6 @@ export type AvailableTool = z.infer<typeof AvailableToolSchema>;
 /** `alias` is the name the person gives this account. It is what an approval card later shows. */
 export const LinkRequestSchema = z.strictObject({ serviceId: providerId, alias: z.string().trim().min(1).max(40) });
 export const AvailableQuerySchema = z.strictObject({ accountId: providerId });
-export const toolkitSlug = toolkit;
 
 export const ToolsReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('catalog'), services: z.array(ServiceOptionSchema) }),

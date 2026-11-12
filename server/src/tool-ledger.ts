@@ -298,7 +298,7 @@ function compileValidator(schema: Record<string, unknown>): Validator | null {
   }
 }
 
-export type ToolAssessment =
+type ToolAssessment =
   | { ok: true; version: string; schemaSha256: string; inputSchema: Record<string, unknown>; description: string }
   | { ok: false; reason: string };
 

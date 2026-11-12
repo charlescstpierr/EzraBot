@@ -58,6 +58,7 @@ async function start(options: Options = {}) {
     method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-mino-csrf': CSRF, ...headers }, body: JSON.stringify(body),
   });
   const view = async (): Promise<PcView> => (await (await fetch(`${base}/api/view`)).json()) as PcView;
+  const read = (route: string) => fetch(`${base}/api/tools/${route}`, { headers: { 'x-mino-csrf': CSRF } });
   const until = async (check: (v: PcView) => boolean, what: string): Promise<PcView> => {
     for (let i = 0; i < 400; i += 1) {
       const current = await view();
@@ -105,7 +106,7 @@ async function start(options: Options = {}) {
     store.recoverInterrupted();
     store.close();
   };
-  return { base, path, store, provider, desk, worker, logs, post, view, until, tools, command, say, connect, proposal, approve, stop };
+  return { base, path, store, provider, desk, worker, logs, post, read, view, until, tools, command, say, connect, proposal, approve, stop };
 }
 
 const find = (view: PcView, id: string) => {
@@ -121,7 +122,7 @@ test('from a chat message to a real bot report: connect, grant, propose, approve
     const first = await app.view();
     assert.deepEqual([first.tools.status.state, first.tools.accounts, first.tools.grants], ['ready', [], {}]);
 
-    const catalog = await app.tools('catalog', await fetch(`${app.base}/api/tools/catalog`));
+    const catalog = await app.tools('catalog', await app.read('catalog'));
     assert.deepEqual(catalog.services.map(s => [s.toolkit, s.connectable]), [['gmail', true], ['slack', true], ['notion', false]]);
     assert.match(catalog.services[2]?.reason ?? '', /OAuth 2/);
 
@@ -151,7 +152,7 @@ test('from a chat message to a real bot report: connect, grant, propose, approve
     assert.equal(checked.link.state, 'active');
     assert.deepEqual((await app.view()).tools.accounts.map(a => [a.alias, a.status]), [['Courriel en attente', 'ACTIVE']]);
 
-    const available = await app.tools('available', await fetch(`${app.base}/api/tools/available?accountId=${accountId}`));
+    const available = await app.tools('available', await app.read(`available?accountId=${accountId}`));
     assert.deepEqual(available.tools.map(t => [t.slug, t.grantable]), [['GMAIL_SEND_EMAIL', true], ['GMAIL_FETCH_EMAILS', true], ['GMAIL_LIST_LABELS', false]]);
     assert.match(available.tools[2]?.reason ?? '', /version/);
     assert.deepEqual((await app.view()).tools.grants, {}, 'listing actions grants nothing');
@@ -208,7 +209,12 @@ test('tool routes are PC-only: wrong origin or token is refused, and the synced 
     assert.equal((await app.post('/api/tools/commands', body, { origin: 'http://evil.example' })).status, 403);
     assert.equal((await app.post('/api/tools/commands', body, { 'x-mino-csrf': 'x'.repeat(64) })).status, 403);
     assert.equal((await app.post('/api/tools/link', { serviceId: 'ac_synthetique_gmail', alias: 'X' }, { origin: 'http://evil.example' })).status, 403);
-    assert.equal((await fetch(`${app.base}/api/tools/commands`)).status, 404);
+    assert.equal((await app.read('commands')).status, 404);
+    const reads = app.provider?.reads;
+    for (const route of ['catalog', `available?accountId=${open.accountId}`]) {
+      assert.equal((await fetch(`${app.base}/api/tools/${route}`)).status, 403, 'a read that calls the provider needs the session token');
+    }
+    assert.equal(app.provider?.reads, reads, 'a refused read never reaches the provider');
     assert.equal((await app.post('/api/tools/commands', { ...body, extra: true })).status, 422);
     const viaChatRoute = await app.post('/api/commands', body);
     assert.deepEqual([viaChatRoute.status, (await viaChatRoute.json() as { code: string }).code], [422, 'invalid_command'], 'the ordinary command route does not approve');
@@ -238,7 +244,7 @@ test('without a provider key the view says so, every tools route refuses, and a 
   try {
     assert.equal((await app.view()).tools.status.state, 'missing_key');
     for (const response of [
-      await fetch(`${app.base}/api/tools/catalog`),
+      await app.read('catalog'),
       await app.post('/api/tools/link', { serviceId: 'ac_synthetique_gmail', alias: 'X' }),
       await app.command({ type: 'tools.grant', botId: 'nova', accountId: ACCOUNT_A.id, toolSlugs: ['GMAIL_SEND_EMAIL'] }),
     ]) {

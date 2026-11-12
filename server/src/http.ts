@@ -213,6 +213,10 @@ export function createHttpServer(options: HttpOptions): Server {
     if (path.startsWith('/api/tools/')) {
       if (req.method === 'POST') requireLocalPost(req);
       else if (req.method !== 'GET') throw new HttpRefusal(405, 'Méthode refusée.');
+      // These reads call the provider. Another site can send a plain GET here but cannot add this header.
+      else if (path !== '/api/tools/callback' && !sameSecret(typeof req.headers['x-mino-csrf'] === 'string' ? req.headers['x-mino-csrf'] : undefined, csrfToken)) {
+        throw new HttpRefusal(403, 'Session expirée. Rechargez la page.');
+      }
       const reply = await options.actions?.route({ method: req.method, route: path.slice('/api/tools/'.length), query: url.searchParams, body: req.method === 'POST' ? await readJson(req) : null });
       if (!reply) throw new HttpRefusal(404, 'Introuvable.');
       if ('page' in reply) return send(res, reply.status, 'text/html; charset=utf-8', reply.page, { 'content-security-policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
