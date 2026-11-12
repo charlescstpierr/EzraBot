@@ -16,6 +16,8 @@
     "compare:context": "npm run build && node tools/compare-context.mjs"
   },
   "dependencies": {
+    "@composio/core": "0.29.0",
+    "ajv": "8.20.0",
     "markdown-it": "15.0.3",
     "qrcode": "^1.5.4",
     "zod": "4.6.7"

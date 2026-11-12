@@ -37,7 +37,7 @@ test('Mino receives current registry facts at claim, before the persisted contex
     assert.equal(reads, 1);
     const view = store.view().works.find(w => w.id === claim.workId);
     assert.ok(view?.attempt?.plan, 'the recorded attempt carries the composed context plan');
-    assert.equal(view?.attempt?.plan?.policyVersion, 7);
+    assert.equal(view?.attempt?.plan?.policyVersion, 8);
     const bot = store.view().bots.find(b => b.id === 'mino'); assert.ok(bot);
     const expected = composeContext({ bot, memories: [], exchanges: [], request: { text: 'Un statut ?', attachments: [] }, orchestrator: true, missions: { state: 'unavailable' } });
     assert.deepEqual(claim.turn, expected.turn);

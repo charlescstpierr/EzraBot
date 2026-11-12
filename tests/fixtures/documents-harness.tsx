@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createRunner, getAppView } from "../../src/api";
-import type { AppView } from "../../server/src/protocol";
+import type { PcView } from "../../server/src/tools-protocol";
 import type { Port, Route } from "../../src/port";
 import { openDrafts } from "../../server/web/drafts";
 import { DocumentPanel, TaskCard } from "../../src/documents";
@@ -15,13 +15,13 @@ const routeOf = (): Route => {
     : { page: "chat", botId: "mino" };
 };
 function Harness() {
-  const [view, setView] = useState<AppView | null>(null);
+  const [view, setView] = useState<PcView | null>(null);
   const [route, setRoute] = useState<Route>(routeOf);
   const drafts = useMemo(
     () => openDrafts({ local: localStorage, session: sessionStorage }),
     [],
   );
-  const newer = (next: AppView) =>
+  const newer = (next: PcView) =>
     setView((seen) => (!seen || next.rev >= seen.rev ? next : seen));
   const run = useMemo(() => createRunner({ app: newer, agents() {} }), []);
   useEffect(() => {

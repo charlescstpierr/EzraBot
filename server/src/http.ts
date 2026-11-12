@@ -4,13 +4,15 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path';
 import { resolveChoice } from './domain.js';
 import type { Engine } from './engine.js';
-import { CommandSchema, LIMITS, type AppView, type DispatchOutcome, type RefusalCode } from './protocol.js';
+import { CommandSchema, LIMITS, type DispatchOutcome, type RefusalCode } from './protocol.js';
 import type { DownloadFile, Store } from './store.js';
 import type { Worker } from './worker.js';
 import { DeviceError, type Devices } from './devices.js';
 import { z } from 'zod';
 import type { BrowserAdmission } from './web-admission.js';
 import type { AgentRoutes } from './agent-http.js';
+import type { ActionDesk } from './tool-desk.js';
+import type { PcView } from './tools-protocol.js';
 
 export type HttpOptions = {
   store: Store;
@@ -22,6 +24,8 @@ export type HttpOptions = {
   devices?: Devices;
   browserAdmission?: BrowserAdmission;
   agents?: AgentRoutes;
+  /** Connected services. Without it the PC view says the provider key is missing and the tools routes are closed. */
+  actions?: ActionDesk;
   longPollMs?: number;
   log?: (entry: { event: 'command'; type: string; ok: boolean; code?: RefusalCode }) => void;
 };
@@ -108,7 +112,8 @@ export function createHttpServer(options: HttpOptions): Server {
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   const indexHtml = readFileSync(join(root, 'web/react.html'), 'utf8').replace('__MINO_CSRF__', csrfToken);
-  const appView = (): AppView => ({ ...store.view(), engine: engine.status() });
+  /** The PC view only. Paired devices get their own projection, which has no tools field. */
+  const appView = (): PcView => ({ ...store.view(), engine: engine.status(), tools: options.actions?.view() ?? store.tools.view({ state: 'missing_key' }) });
 
   function waitForChange(after: number, req: IncomingMessage): Promise<void> {
     if (store.rev !== after) return Promise.resolve();
@@ -204,6 +209,19 @@ export function createHttpServer(options: HttpOptions): Server {
       if (req.method === 'POST') requireLocalPost(req);
       else if (req.method !== 'GET') throw new HttpRefusal(405, 'Méthode refusée.');
       if (await options.agents.handle(req, res, url, 'pc')) return;
+    }
+    if (path.startsWith('/api/tools/')) {
+      if (req.method === 'POST') requireLocalPost(req);
+      else if (req.method !== 'GET') throw new HttpRefusal(405, 'Méthode refusée.');
+      // These reads call the provider. Another site can send a plain GET here but cannot add this header.
+      else if (path !== '/api/tools/callback' && !sameSecret(typeof req.headers['x-mino-csrf'] === 'string' ? req.headers['x-mino-csrf'] : undefined, csrfToken)) {
+        throw new HttpRefusal(403, 'Session expirée. Rechargez la page.');
+      }
+      const reply = await options.actions?.route({ method: req.method, route: path.slice('/api/tools/'.length), query: url.searchParams, body: req.method === 'POST' ? await readJson(req) : null });
+      if (!reply) throw new HttpRefusal(404, 'Introuvable.');
+      if ('page' in reply) return send(res, reply.status, 'text/html; charset=utf-8', reply.page, { 'content-security-policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+      if ('outcome' in reply) return sendJson(res, reply.status, { ...reply.outcome, view: appView() });
+      return sendJson(res, reply.status, reply.body);
     }
     if (req.method === 'POST' && path === '/api/commands') return command(req, res);
     if (req.method !== 'GET') throw new HttpRefusal(405, 'Méthode refusée.');

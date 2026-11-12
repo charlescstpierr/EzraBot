@@ -21,6 +21,7 @@ import type { Port } from "../port";
 import { Mascot } from "../Mascot";
 import { Markdown } from "../Markdown";
 import {
+  isSendable,
   readPending,
   storageRead,
   storageWrite,
@@ -36,6 +37,7 @@ type Props = {
   slots: {
     task(message: MessageView): ReactNode;
     mission(message: MessageView): ReactNode;
+    tools(message: MessageView): ReactNode;
   };
 };
 const empty = (): PromptContent => ({ text: "", files: [], mentions: [] });
@@ -93,6 +95,11 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
   const sending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** Offered only when this bot has service rights. On by default; every action still waits for the person's approval. */
+  const canUseServices =
+    port.view.tools.status.state === "ready" &&
+    (port.view.tools.grants[botId]?.length ?? 0) > 0;
+  const [useServices, setUseServices] = useState(true);
   const [storageError, setStorageError] = useState(false);
   const [fan, setFan] = useState(false);
   const [hideQuery, setHideQuery] = useState(false);
@@ -173,14 +180,14 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
       const trimmed = trimForSend(raw.text, raw.mentions ?? []);
       if (!trimmed.text) return;
       const command = CommandSchema.safeParse({
-        type: "message.say",
+        type: canUseServices && useServices ? "message.send" : "message.say",
         requestId: uid(),
         botId,
         text: trimmed.text,
         attachments: raw.files,
         mentions: trimmed.spans,
       });
-      if (!command.success || command.data.type !== "message.say") {
+      if (!command.success || !isSendable(command.data)) {
         setError(
           "Le message ou les pièces jointes dépassent les limites autorisées.",
         );
@@ -412,6 +419,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
               )}
               {slots.task(m)}
               {slots.mission(m)}
+              {slots.tools(m)}
             </article>
           );
         })}
@@ -578,6 +586,24 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
               Fermer
             </button>
           </div>
+        )}
+        {canUseServices && (
+          <label className="ez-chat-services">
+            <input
+              type="checkbox"
+              checked={useServices}
+              disabled={busy || pending !== null}
+              onChange={(e) => setUseServices(e.target.checked)}
+            />
+            <span>
+              Utiliser les services connectés
+              <small>
+                {useServices
+                  ? ` Ce message reste dans la conversation : ${bot.name} peut proposer une action, que vous confirmez.`
+                  : " Une demande de document part en mode document, sans service."}
+              </small>
+            </span>
+          </label>
         )}
         <label className="ez-chat-attachment">
           Joindre des fichiers texte

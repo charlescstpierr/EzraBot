@@ -168,3 +168,25 @@ test('a large snapshot cannot hide the receipt of a committed command', async ()
     assert.equal(original().messages.filter(m => m.role === 'user').length, 2);
   } finally { await f.close(); }
 });
+
+test('a paired device cannot grant, approve, refuse or retry a service action, and its snapshot carries no tools field', async () => {
+  const f = await fixture();
+  try {
+    await f.pair();
+    for (const command of [
+      { type: 'tools.grant', requestId: 'mobile-tools-1', botId: 'mino', accountId: 'ca_synthetique_a', toolSlugs: ['GMAIL_SEND_EMAIL'] },
+      { type: 'tools.approve', requestId: 'mobile-tools-2', proposalId: 'tp_1', fingerprint: 'a'.repeat(64) },
+      { type: 'tools.refuse', requestId: 'mobile-tools-3', proposalId: 'tp_1' },
+      { type: 'tools.revoke', requestId: 'mobile-tools-4', botId: 'mino', grantId: 'tg_1' },
+      { type: 'tools.report.retry', requestId: 'mobile-tools-5', executionId: 'tx_1' },
+    ]) {
+      const refused = await f.call('/m/commands', command, f.auth);
+      assert.deepEqual([refused.status, z.object({ code: z.string() }).parse(refused.body).code], [422, 'invalid_command'], command.type);
+    }
+    for (const path of ['/m/tools/commands', '/m/tools/catalog', '/api/tools/catalog']) assert.equal((await f.call(path, undefined, f.auth)).status, 404, path);
+    assert.equal((await f.call('/m/tools/commands', { type: 'tools.refuse', requestId: 'mobile-tools-6', proposalId: 'tp_1' }, f.auth)).status, 404);
+    const snapshot = z.record(z.string(), z.unknown()).parse((await f.call('/m/view', undefined, f.auth)).body);
+    assert.equal('tools' in snapshot, false);
+    MobileSnapshotSchema.parse(snapshot);
+  } finally { await f.close(); }
+});

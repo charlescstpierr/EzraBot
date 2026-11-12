@@ -30,6 +30,12 @@ La compilation produit `server/dist/` et inclut le bundle React et son CSS. `npm
 
 Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de nouvelles bases SQLite et un moteur volontairement indisponible. Aucun appel fournisseur n’est effectué. Les tests serveur emploient leurs moteurs contrôlés. Le workflow GitHub Actions compile et exécute les tests serveur sur chaque push et pull request. Les essais navigateur et les copies de protocoles mobiles sont aussi vérifiés dans GitHub Actions. Les captures et vidéos restent dans ses artefacts.
 
+## Services connectés (Composio)
+
+Un personnage peut proposer une action sur un service relié. Vous confirmez chaque action exacte sur le PC, puis le serveur l’envoie une seule fois. La clé se donne au serveur avec `COMPOSIO_API_KEY`. Sans clé, cette fonction est désactivée et le reste ne change pas. Voir [docs/composio.md](docs/composio.md) pour la configuration, les preuves simulées et ce qui n’est pas vérifié avec le vrai service.
+
+Les tests navigateur de cette fonction utilisent un second service temporaire sur 127.0.0.1:4398, avec un faux fournisseur et un faux moteur. Toutes ses données sont synthétiques.
+
 ## Ce que cette version apporte
 
 - Chat Mino, Markdown sans HTML exécutable, invitations @, fils séparés et retours aux messages récents.

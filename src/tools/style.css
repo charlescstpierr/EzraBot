@@ -1,0 +1,153 @@
+.ez-tools {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.modal .ez-tools {
+  border-top: 1px solid #e6ebdf;
+  margin-top: 22px;
+  padding-top: 6px;
+  width: 100%;
+}
+.ez-tools-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 8px;
+}
+.ez-tools-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  border: 1px solid #e6ebdf;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #56634a;
+}
+.ez-tools-list li strong {
+  color: #26301e;
+}
+.ez-tools-list li button {
+  margin-left: auto;
+}
+.ez-tools small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #7b8770;
+}
+.ez-tools fieldset {
+  border: 0;
+  padding: 0;
+  margin: 14px 0 0;
+  min-width: 0;
+}
+.ez-tools legend {
+  font-weight: 550;
+  padding: 0;
+  margin-bottom: 8px;
+}
+.ez-tools .ez-tools-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0;
+}
+.ez-tools .ez-tools-choice input {
+  width: auto;
+  margin-top: 3px;
+  flex: none;
+}
+.ez-tools-card {
+  border: 1px solid #cfdcc0;
+  border-radius: 14px;
+  background: #fbfdf7;
+  padding: 14px 16px;
+  margin-top: 12px;
+  max-width: 640px;
+  overflow-wrap: anywhere;
+}
+.ez-tools-card[data-state="unknown"],
+.ez-tools-card[data-state="failed"],
+.ez-tools-card[data-state="blocked"] {
+  border-color: #e0b98a;
+  background: #fffaf2;
+}
+.ez-tools-card dl {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+}
+.ez-tools-card dl div {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+}
+.ez-tools-card dt {
+  width: 72px;
+  flex: none;
+  color: #7b8770;
+}
+.ez-tools-card dd {
+  margin: 0;
+  color: #26301e;
+  font-weight: 550;
+}
+.ez-tools-arguments-title {
+  font-size: 12px;
+  color: #7b8770;
+  margin: 8px 0 4px;
+}
+.ez-tools-arguments {
+  background: #f1f5ea;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+}
+.ez-tools-outcome {
+  font-size: 13px;
+  margin: 10px 0;
+  color: #3d4a31;
+}
+.ez-tools-card small,
+.ez-tools-card details {
+  display: block;
+  font-size: 12px;
+  color: #7b8770;
+  margin-top: 8px;
+}
+.ez-chat-services {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: #56634a;
+  margin: 6px 4px 0;
+}
+.ez-chat-services input {
+  margin-top: 2px;
+}
+.ez-connection-details {
+  margin: 12px 0;
+}
+.ez-tools summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #56634a;
+}
+.ez-tools select,
+.ez-tools input {
+  max-width: 100%;
+  min-width: 0;
+}
+.ez-tools .notice button,
+.ez-tools .notice a {
+  margin: 4px 6px 4px 0;
+}

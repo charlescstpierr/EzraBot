@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createCodexEngine, type AgentText, type Engine } from '../src/engine.js';
+import { createCodexEngine, type AgentText, type Engine, type ToolCall, type ToolReply, type TurnTools } from '../src/engine.js';
 import { composeContext } from '../src/context.js';
 import type { EngineOutcome } from '../src/domain.js';
 import type { BotChoice } from '../src/protocol.js';
@@ -19,8 +19,9 @@ const { turn } = composeContext({
 });
 const defaultChoice: BotChoice = { model: null, effort: null, speed: 'standard' };
 
-function engineFor(scenario: string, overrides: { command?: string; turnTimeoutMs?: number } = {}): Engine {
+function engineFor(scenario: string, overrides: { command?: string; turnTimeoutMs?: number; dynamicTools?: true } = {}): Engine {
   return createCodexEngine({
+    ...(overrides.dynamicTools ? { dynamicTools: true as const } : {}),
     command: overrides.command ?? process.execPath,
     args: overrides.command ? [] : [fixture, scenario],
     workDir,
@@ -188,5 +189,102 @@ test('two engine instances run two turns at the same time, each on its own conne
     assert.deepEqual(order, ['chat', 'doc']);
   } finally {
     await Promise.all([chat.close(), doc.close()]);
+  }
+});
+
+const SPEC = { name: 'GMAIL_SEND_EMAIL', description: 'Action synthétique de test.', inputSchema: { type: 'object', properties: {} } };
+const MAIL = { to: 'personne@exemple.invalid', subject: 'Bonjour', body: 'Texte synthétique du faux moteur.' };
+
+function gateway(answer: (call: ToolCall) => ToolReply | Promise<ToolReply> = () => ({ success: true, text: 'PROPOSITION-ENREGISTRÉE' })) {
+  const events: string[] = [];
+  const calls: ToolCall[] = [];
+  const tools: TurnTools = {
+    specs: [SPEC],
+    async call(call) {
+      events.push('call');
+      calls.push(call);
+      await new Promise(resolve => setTimeout(resolve, 15));
+      return answer(call);
+    },
+  };
+  return { events, calls, tools };
+}
+
+async function runWithTools(scenario: string, tools: TurnTools | undefined, events: string[] = [], dynamicTools = true): Promise<EngineOutcome> {
+  const engine = engineFor(scenario, dynamicTools ? { dynamicTools: true } : {});
+  try {
+    return await engine.run({ turn, choice: defaultChoice, signal: new AbortController().signal, onStage: () => {}, onThread: () => {}, onTurn: () => events.push('turn'), ...(tools ? { tools } : {}) });
+  } finally {
+    await engine.close();
+  }
+}
+
+const replyText = (outcome: EngineOutcome): string => {
+  assert.equal(outcome.kind, 'succeeded', outcome.kind === 'failed' ? outcome.code : outcome.kind);
+  return outcome.kind === 'succeeded' ? outcome.reply.reply : '';
+};
+
+test('a registered tool call is answered exactly once, with a string or a number request id, and the model gets that answer before it replies', async () => {
+  for (const scenario of ['tool-call', 'tool-call-number-id']) {
+    const { calls, tools } = gateway();
+    assert.match(replyText(await runWithTools(scenario, tools)), /Réponse de l’outil \(true, 1 réponse\) : PROPOSITION-ENREGISTRÉE/, scenario);
+    assert.deepEqual(calls, [{ callId: 'call-1', tool: 'GMAIL_SEND_EMAIL', arguments: MAIL }], scenario);
+  }
+});
+
+test('service tools are directly visible in their owned namespace while the code execution host stays disabled', async () => {
+  const { calls, tools } = gateway();
+  assert.match(replyText(await runWithTools('tool-call-owned-namespace', tools)), /PROPOSITION-ENREGISTRÉE/);
+  assert.equal(calls.length, 1);
+});
+
+test('a tool call that arrives before the turn is acknowledged waits for the turn identity, then is answered once', async () => {
+  const { calls, events, tools } = gateway();
+  assert.match(replyText(await runWithTools('tool-call-early', tools, events)), /\(true, 1 réponse\) : PROPOSITION-ENREGISTRÉE/);
+  assert.deepEqual(events, ['turn', 'call']);
+  assert.equal(calls.length, 1);
+});
+
+test('a tool call for another turn, another thread, a namespace or an unregistered tool is refused and stops the turn without reaching the gateway', async () => {
+  for (const scenario of ['tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-no-namespace', 'tool-call-unknown-tool']) {
+    const { calls, tools } = gateway();
+    assert.equal(failureCode(await runWithTools(scenario, tools)), 'request_refused', scenario);
+    assert.equal(calls.length, 0, scenario);
+  }
+});
+
+test('with tools registered, a native approval request is still refused and a foreign tool item still blocks the turn', async () => {
+  const approval = gateway();
+  assert.equal(failureCode(await runWithTools('tool-then-approval', approval.tools)), 'request_refused');
+  assert.equal(approval.calls.length, 1);
+  for (const scenario of ['tool-item-foreign', 'tool-item-foreign-namespace', 'tool-item-no-namespace']) {
+    const foreign = gateway();
+    assert.equal(failureCode(await runWithTools(scenario, foreign.tools)), 'tool_blocked');
+    assert.equal(foreign.calls.length, 0);
+  }
+});
+
+test('every call goes to the gateway, whose refusal or failure is returned to the model as a failed tool answer', async () => {
+  const twice = gateway(call => call.callId === 'call-1' ? { success: true, text: 'PREMIÈRE' } : { success: false, text: 'UNE SEULE' });
+  assert.match(replyText(await runWithTools('tool-call-twice', twice.tools)), /PREMIÈRE \| deuxième appel : false/);
+  assert.deepEqual(twice.calls.map(call => call.callId), ['call-1', 'call-2']);
+  const broken = gateway(() => { throw new Error('panne synthétique'); });
+  assert.match(replyText(await runWithTools('tool-call', broken.tools)), /\(false, 1 réponse\) : Action refusée/);
+});
+
+test('an engine without the tool option keeps the experimental API off and refuses a run that offers tools before any thread starts', async () => {
+  const probe = join(workDir, 'init-probe.json');
+  process.env.MINO_TEST_INIT_PROBE = probe;
+  try {
+    assert.equal(replyText(await runWithTools('reply', undefined, [], false)), 'Bonjour depuis le faux moteur.');
+    assert.deepEqual(JSON.parse(readFileSync(probe, 'utf8')), { experimentalApi: false });
+    const { calls, tools } = gateway();
+    assert.equal(failureCode(await runWithTools('tool-call', tools, [], false)), 'rpc_refused');
+    assert.equal(calls.length, 0);
+    assert.equal(replyText(await runWithTools('tool-call', undefined)), 'Bonjour depuis le faux moteur.', 'no tool offered, no tool registered');
+    assert.deepEqual(JSON.parse(readFileSync(probe, 'utf8')), { experimentalApi: true }, 'only the instance created for tools announces the experimental API');
+    assert.equal(failureCode(await runWithTools('reply', gateway().tools)), 'rpc_refused', 'the fake refuses tools in every scenario that does not expect them');
+  } finally {
+    delete process.env.MINO_TEST_INIT_PROBE;
   }
 });

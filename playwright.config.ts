@@ -15,9 +15,18 @@ export default defineConfig({
       ],
     },
   },
-  webServer: {
-    command: "node scripts/test-server.mjs",
-    url: "http://127.0.0.1:4399",
-    reuseExistingServer: false,
-  },
+  webServer: [
+    {
+      command: "node scripts/test-server.mjs",
+      url: "http://127.0.0.1:4399",
+      reuseExistingServer: false,
+    },
+    {
+      // Connected services with a fake provider and a fake App Server. Used by tests/composio-parcours.spec.ts only.
+      command: "node scripts/test-server.mjs",
+      env: { MINO_QA_PORT: "4398", MINO_QA_TOOLS: "1" },
+      url: "http://127.0.0.1:4398",
+      reuseExistingServer: false,
+    },
+  ],
 });
