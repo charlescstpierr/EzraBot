@@ -97,7 +97,7 @@ function toolArguments(tool: string, request: string): Record<string, unknown> {
 
 const EARLY_ID = 'outil-précoce';
 const TOOL_SCENARIOS = new Set(['tool-call', 'tool-call-number-id', 'tool-call-early', 'tool-call-twice', 'tool-call-then-fail', 'tool-call-hang',
-  'tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool', 'tool-item-foreign', 'tool-then-approval']);
+  'tool-call-owned-namespace', 'tool-call-no-namespace', 'tool-item-foreign-namespace', 'tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool', 'tool-item-foreign', 'tool-then-approval']);
 
 /**
  * A turn that calls one registered tool, waits for Mino's real answer, and only then writes its reply.
@@ -110,11 +110,11 @@ async function toolTurn(threadId: string, turnId: string, input: string, early: 
   const params = {
     threadId: scenario === 'tool-call-wrong-thread' ? 'thread-elsewhere' : threadId,
     turnId: scenario === 'tool-call-wrong-turn' ? 'turn-elsewhere' : turnId,
-    callId: 'call-1', namespace: scenario === 'tool-call-namespace' ? 'autre' : null, tool, arguments: toolArguments(tool, request),
+    callId: 'call-1', namespace: scenario === 'tool-call-namespace' ? 'autre' : scenario === 'tool-call-no-namespace' ? null : 'ezrabot_services', tool, arguments: toolArguments(tool, request),
   };
-  const item = { type: 'dynamicToolCall', id: 'tool-1', namespace: null, tool: scenario === 'tool-item-foreign' ? 'shell' : registered[0] ?? tool, arguments: params.arguments, status: 'inProgress', contentItems: null, success: null, durationMs: null };
+  const item = { type: 'dynamicToolCall', id: 'tool-1', namespace: scenario === 'tool-item-foreign-namespace' ? 'autre' : 'ezrabot_services', tool: scenario === 'tool-item-foreign' ? 'shell' : registered[0] ?? tool, arguments: params.arguments, status: 'inProgress', contentItems: null, success: null, durationMs: null };
   notify('item/started', { threadId, turnId, item });
-  if (scenario === 'tool-item-foreign') return;
+  if (scenario === 'tool-item-foreign' || scenario === 'tool-item-foreign-namespace') return;
   const id = scenario === 'tool-call-number-id' ? serverRequestId++ : `outil-${serverRequestId++}`;
   const answer = await (early ?? ask(id, 'item/tool/call', params));
   const answered = early ? EARLY_ID : id;
@@ -166,7 +166,7 @@ function startTurn(params: Record<string, unknown>) {
   const withTools = TOOL_SCENARIOS.has(scenario) && (threadTools.get(threadId)?.length ?? 0) > 0;
   // Sent before this function returns, so it reaches Mino before the answer to turn/start.
   const early = scenario === 'tool-call-early' && withTools
-    ? ask(EARLY_ID, 'item/tool/call', { threadId, turnId, callId: 'call-1', namespace: null, tool: threadTools.get(threadId)?.[0], arguments: toolArguments(threadTools.get(threadId)?.[0] ?? '', first.split('\n').at(-1) ?? '') })
+    ? ask(EARLY_ID, 'item/tool/call', { threadId, turnId, callId: 'call-1', namespace: 'ezrabot_services', tool: threadTools.get(threadId)?.[0], arguments: toolArguments(threadTools.get(threadId)?.[0] ?? '', first.split('\n').at(-1) ?? '') })
     : null;
   if (scenario === 'usage-before-wrong-turn') usage(threadId, 'turn-elsewhere', 9000);
   if (scenario === 'early-item') agentMessage(threadId, turnId, REPLY);
@@ -271,9 +271,12 @@ function handle(method: string, params: Record<string, unknown>): unknown {
       const dynamicTools = Array.isArray(params.dynamicTools) ? params.dynamicTools : [];
       // Like the real App Server: tools are refused without the experimental capability, and no scenario outside the tool ones expects any.
       if (dynamicTools.length && (!experimentalApi || !TOOL_SCENARIOS.has(scenario))) throw new Error('dynamicTools refused');
-      if (dynamicTools.some(tool => !isRecord(tool) || tool.type !== 'function' || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !isRecord(tool.inputSchema))) throw new Error('bad tool spec');
+      if (scenario === 'tool-call-owned-namespace' && (!process.argv.includes('features.code_mode={enabled=false,direct_only_tool_namespaces=["ezrabot_services"]}') || !dynamicTools.some(tool => isRecord(tool) && tool.type === 'namespace' && tool.name === 'ezrabot_services'))) throw new Error('service tools need their directly visible namespace');
+      if (dynamicTools.some(tool => !isRecord(tool) || tool.type !== 'namespace' || tool.name !== 'ezrabot_services' || !Array.isArray(tool.tools))) throw new Error('bad tool namespace');
+      const functions = dynamicTools.flatMap(tool => isRecord(tool) && Array.isArray(tool.tools) ? tool.tools : []);
+      if (functions.some((tool: unknown) => !isRecord(tool) || tool.type !== 'function' || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !isRecord(tool.inputSchema))) throw new Error('bad tool spec');
       const threadId = `thread-${Date.now()}-${serverRequestId++}`;
-      threadTools.set(threadId, dynamicTools.map(tool => isRecord(tool) ? String(tool.name) : ''));
+      threadTools.set(threadId, functions.map((tool: unknown) => isRecord(tool) ? String(tool.name) : ''));
       return { thread: { id: threadId }, model: params.model, modelProvider: 'openai', serviceTier: null };
     }
     case 'turn/start': {

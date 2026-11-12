@@ -232,6 +232,12 @@ test('a registered tool call is answered exactly once, with a string or a number
   }
 });
 
+test('service tools are directly visible in their owned namespace while the code execution host stays disabled', async () => {
+  const { calls, tools } = gateway();
+  assert.match(replyText(await runWithTools('tool-call-owned-namespace', tools)), /PROPOSITION-ENREGISTRÉE/);
+  assert.equal(calls.length, 1);
+});
+
 test('a tool call that arrives before the turn is acknowledged waits for the turn identity, then is answered once', async () => {
   const { calls, events, tools } = gateway();
   assert.match(replyText(await runWithTools('tool-call-early', tools, events)), /\(true, 1 réponse\) : PROPOSITION-ENREGISTRÉE/);
@@ -240,7 +246,7 @@ test('a tool call that arrives before the turn is acknowledged waits for the tur
 });
 
 test('a tool call for another turn, another thread, a namespace or an unregistered tool is refused and stops the turn without reaching the gateway', async () => {
-  for (const scenario of ['tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool']) {
+  for (const scenario of ['tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-no-namespace', 'tool-call-unknown-tool']) {
     const { calls, tools } = gateway();
     assert.equal(failureCode(await runWithTools(scenario, tools)), 'request_refused', scenario);
     assert.equal(calls.length, 0, scenario);
@@ -251,9 +257,11 @@ test('with tools registered, a native approval request is still refused and a fo
   const approval = gateway();
   assert.equal(failureCode(await runWithTools('tool-then-approval', approval.tools)), 'request_refused');
   assert.equal(approval.calls.length, 1);
-  const foreign = gateway();
-  assert.equal(failureCode(await runWithTools('tool-item-foreign', foreign.tools)), 'tool_blocked');
-  assert.equal(foreign.calls.length, 0);
+  for (const scenario of ['tool-item-foreign', 'tool-item-foreign-namespace']) {
+    const foreign = gateway();
+    assert.equal(failureCode(await runWithTools(scenario, foreign.tools)), 'tool_blocked');
+    assert.equal(foreign.calls.length, 0);
+  }
 });
 
 test('every call goes to the gateway, whose refusal or failure is returned to the model as a failed tool answer', async () => {

@@ -13,7 +13,7 @@ Le personnage reçoit le résultat et vous en rend compte dans le même fil.
 
 Rien n’est exécuté sans votre confirmation. Cela vaut aussi pour les lectures.
 
-**État de la preuve : doublures seulement. Aucune connexion réelle à Composio n’est prouvée.**
+**État de la preuve : parcours Composio simulés et transport d’outil vérifié avec le vrai Codex. Aucune connexion réelle à Composio n’est prouvée.**
 Aucune clé n’a été fournie pendant ce travail. Voir les sections 4 et 8.
 
 ## 2. Ce qui est installé
@@ -145,16 +145,33 @@ node server/mobile/scripts/sync-contract.mjs --check
 npm run test:ui
 ```
 
+La recette finale passe : typage, 277 tests serveur, quatre contrats mobiles identiques et 53 tests navigateur.
+
+### Transport avec le vrai modèle
+
+Le 12 novembre 2026, Codex `0.167.2` avec `gpt-6.1-sol` a appelé une fois un outil local neutre. Le test vérifie les arguments et un accusé aléatoire que seul l’outil retourne. Il ne contacte pas Composio.
+
+La première sonde a échoué : les fonctions enregistrées sans espace de noms restaient invisibles au modèle. Le moteur les regroupe maintenant dans `ezrabot_services`, avec `features.code_mode.direct_only_tool_namespaces`. Le moteur de code reste désactivé. Les appels d’un autre espace de noms sont refusés. Ce réglage suit le [code officiel de Codex 0.167.2](https://github.com/openai/codex/blob/rust-v0.167.2/codex-rs/core/src/config/mod.rs).
+
+Pour refaire ce contrôle avec votre connexion Codex existante :
+
+```bash
+npm run build
+node server/tools/verify-dynamic-tools.mjs --live
+```
+
+Cette commande utilise un vrai tour de modèle. Sans `--live`, elle s’arrête avant de lancer Codex. Le résultat attendu contient `verified: true`, `calls: 1` et `composioCalled: false`.
+
 ## 8. Ce qui n’est pas vérifié
 
 Ces points demandent une clé réelle et un compte autorisé. Ils n’ont pas été exécutés.
 
 - Une connexion OAuth réelle et un compte `ACTIVE` chez Composio.
 - Une exécution réelle d’outil.
-- Un aller-retour `item/tool/call` avec le vrai Codex et un vrai modèle. Seul l’enregistrement des outils est prouvé sur le Codex installé.
+- La chaîne complète entre le vrai modèle et un vrai outil Composio. La sonde ci-dessus vérifie seulement le transport vers un outil local neutre.
 - La présence d’une version dans le catalogue brut réel. Si Composio n’en rend pas, aucun outil ne peut être donné. Il faudrait alors une décision écrite du propriétaire.
 - L’acceptation par Composio d’une adresse de retour locale `http://127.0.0.1`. Le bouton **Vérifier la connexion** fonctionne sans ce retour.
-- Les demandes que Codex peut envoyer quand son API expérimentale est active (heure courante, attestation). EzraBot les refuse et arrête le tour. L’effet réel n’est pas observé.
+- Les autres demandes que Codex peut envoyer quand son API expérimentale est active (heure courante, attestation). EzraBot les refuse et arrête le tour. La sonde réelle n’en a rencontré aucune ; les autres situations restent non observées.
 
 ### Contrôle réel, par le propriétaire seulement
 
@@ -197,3 +214,8 @@ Pour vérifier la chaîne complète, le propriétaire :
 - L’identité du propriétaire chez Composio est un UUID privé, créé dans la base. Il n’est jamais affiché.
 - Les journaux du guichet contiennent une action, un succès et une catégorie. Rien d’autre.
 - Les routes `/api/tools/*` demandent le jeton de session du PC. Les écritures demandent aussi l’origine exacte. Seul le retour de connexion `/api/tools/callback` est ouvert ; il ne fait que relire le compte chez le fournisseur.
+
+
+## Journal de décisions
+
+Les premières entrées de `composio-decisions.tsv` sont rétrospectives. Leur colonne `recorded_at` indique le premier commit qui les contient, `8f6c93b`, à 14:55:57 UTC. Les heures initialement saisies ne provenaient pas d’un relevé et certaines étaient futures. Elles ont été retirées. Les dates des commits et les journaux de commandes restent les preuves d’exécution.

@@ -139,6 +139,7 @@ const ItemEventSchema = z.object({ threadId: z.string(), turnId: z.string(), ite
 }) });
 const TOOL_CALL = 'item/tool/call';
 const DYNAMIC_TOOL_ITEM = 'dynamicToolCall';
+const SERVICE_TOOL_NAMESPACE = 'ezrabot_services';
 const ToolCallSchema = z.object({
   threadId: z.string(), turnId: z.string(), callId: z.string().min(1).max(200), namespace: z.string().nullish(), tool: z.string(), arguments: z.unknown(),
 });
@@ -186,6 +187,7 @@ class Connection {
       'app-server', '--listen', 'stdio://',
       ...DISABLED_FEATURES.flatMap(feature => ['--disable', feature]),
       ...CODEX_CONFIG_ARGS,
+      ...(options.dynamicTools ? ['-c', `features.code_mode={enabled=false,direct_only_tool_namespaces=["${SERVICE_TOOL_NAMESPACE}"]}`] : []),
     ];
     this.child = spawn(options.command, args, { cwd: options.workDir, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv(process.env) });
     this.child.stderr.resume();
@@ -431,7 +433,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
         ephemeral: true,
         baseInstructions: turn.baseInstructions,
         config: { mcp_servers: {}, web_search: 'disabled' },
-        ...(tools ? { dynamicTools: tools.specs.map(spec => ({ type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema })) } : {}),
+        ...(tools ? { dynamicTools: [{ type: 'namespace', name: SERVICE_TOOL_NAMESPACE, description: 'Actions de service proposées par EzraBot, soumises à confirmation sur le PC.', tools: tools.specs.map(spec => ({ type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema })) }] } : {}),
       }, requestTimeout));
       if (!started.success) return engineFailure('rpc_refused');
       if (started.data.model !== used.model) {
@@ -473,7 +475,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const acceptItem = (method: string, event: z.infer<typeof ItemEventSchema>) => {
         if (event.turnId !== turnId) return;
         const { type, text, id: itemId } = event.item;
-        const ownToolCall = type === DYNAMIC_TOOL_ITEM && event.item.tool !== undefined && toolNames.has(event.item.tool) && (event.item.namespace ?? null) === null;
+        const ownToolCall = type === DYNAMIC_TOOL_ITEM && event.item.tool !== undefined && toolNames.has(event.item.tool) && event.item.namespace === SERVICE_TOOL_NAMESPACE;
         if (!ALLOWED_ITEMS.has(type) && !ownToolCall) {
           stop(engineFailure('tool_blocked'));
           return;
@@ -529,7 +531,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
       conn.listener = {
         serverRequest: request => {
           const call = tools && request.method === TOOL_CALL ? ToolCallSchema.safeParse(request.params) : null;
-          if (!tools || !call?.success || call.data.threadId !== threadId || (call.data.namespace ?? null) !== null || !toolNames.has(call.data.tool) || aborting || settled) {
+          if (!tools || !call?.success || call.data.threadId !== threadId || call.data.namespace !== SERVICE_TOOL_NAMESPACE || !toolNames.has(call.data.tool) || aborting || settled) {
             return refuse(request);
           }
           void answerToolCall(request, call.data, tools);
