@@ -13,6 +13,9 @@ async function open(page: Page) {
       .click();
   await page.getByRole("button", { name: /^Préférences/ }).click();
   await expect(connections(page).getByLabel("Service à relier")).toBeVisible();
+  await expect(
+    connections(page).getByRole("button", { name: "Connecter", exact: true }),
+  ).toBeEnabled();
 }
 async function named(page: Page, alias: string) {
   await connections(page)
@@ -45,6 +48,7 @@ test("choix puis Connecter sans nom, fenêtre avant réponse, double clic et ret
     }),
   );
   await open(page);
+  await expect(connections(page)).toContainText("Aucun compte relié");
   await page.screenshot({
     path: `${EVIDENCE}/connexion-1100.png`,
     fullPage: true,
@@ -137,6 +141,17 @@ test("fenêtre bloquée, attente durable, arrêt au démontage et reprise après
       .getByRole("button", { name: "Ouvrir le menu", exact: true })
       .click();
   await page.getByRole("button", { name: /^Préférences/ }).click();
+  await expect(
+    connections(page).getByRole("button", { name: "Connecter", exact: true }),
+  ).toBeEnabled();
+  await expect(connections(page).getByLabel("Service à relier")).toBeEnabled();
+  await page.waitForTimeout(3300);
+  expect(checks).toBe(stopped);
+  await connections(page)
+    .getByRole("listitem")
+    .filter({ hasText: "Compte attente mobile" })
+    .getByRole("button", { name: "Vérifier la connexion" })
+    .click();
   await expect.poll(() => checks).toBeGreaterThan(stopped);
   await expect(
     connections(page).getByRole("link", {
@@ -178,10 +193,6 @@ test("erreur de catalogue et erreur de contrôle récupérables sans recréer de
     .getByRole("button", { name: "Recharger les services" })
     .click();
   await expect(connections(page).getByLabel("Service à relier")).toBeVisible();
-  const stop = connections(page).getByRole("button", {
-    name: "Arrêter la vérification",
-  });
-  if (await stop.isVisible()) await stop.click();
   let links = 0;
   let fail = true;
   page.on("request", (request) => {
@@ -219,10 +230,6 @@ test("attente bornée et contrôle unique malgré plusieurs retours au focus", a
     window.open = () => null;
   });
   await open(page);
-  const stop = connections(page).getByRole("button", {
-    name: "Arrêter la vérification",
-  });
-  if (await stop.isVisible()) await stop.click();
   await named(page, "Compte attente délai");
   await page.clock.install();
   let checks = 0;
@@ -267,10 +274,6 @@ test("échec de création ferme la fenêtre vide et ne recrée rien automatiquem
   page,
 }) => {
   await open(page);
-  const stop = connections(page).getByRole("button", {
-    name: "Arrêter la vérification",
-  });
-  if (await stop.isVisible()) await stop.click();
   let links = 0;
   await page.route("**/api/tools/link", async (route) => {
     links++;
@@ -300,10 +303,6 @@ test("fermer pendant un contrôle annule la requête et ignore sa réponse tardi
     window.open = () => null;
   });
   await open(page);
-  const stop = connections(page).getByRole("button", {
-    name: "Arrêter la vérification",
-  });
-  if (await stop.isVisible()) await stop.click();
   let release: (() => void) | undefined;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -331,6 +330,69 @@ test("fermer pendant un contrôle annule la requête et ignore sa réponse tardi
   await page.getByRole("button", { name: /^Préférences/ }).click();
   await expect(
     connections(page).getByRole("button", { name: "Connecter", exact: true }),
-  ).toBeVisible();
+  ).toBeEnabled();
   await expect(connections(page)).not.toContainText("Compte connecté.");
+});
+
+test("une ancienne demande abandonnée ou orpheline ne bloque pas une nouvelle connexion", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.open = () => null;
+  });
+  await open(page);
+  await named(page, "Compte attente orphelin");
+  let checks = 0;
+  let links = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/check")) checks++;
+    if (request.url().endsWith("/api/tools/link")) links++;
+  });
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let recorded = false;
+  await page.route("**/api/tools/link", async (route) => {
+    const response = await route.fetch();
+    recorded = true;
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  await connections(page)
+    .getByRole("button", { name: "Connecter", exact: true })
+    .click();
+  await expect.poll(() => recorded).toBe(true);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Fermer", exact: true })
+    .click();
+  release?.();
+  await page.unroute("**/api/tools/link");
+  await page.reload();
+  await open(page);
+  await expect(connections(page).getByLabel("Service à relier")).toBeEnabled();
+  await expect(connections(page)).not.toContainText(
+    "Terminez la connexion chez le fournisseur",
+  );
+  await connections(page)
+    .getByRole("button", { name: "Connecter", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `${EVIDENCE}/reprise-sans-blocage.png`,
+    fullPage: true,
+  });
+  await page.clock.install();
+  await page.clock.fastForward(125_000);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  expect(checks).toBe(0);
+  expect(links).toBe(1);
+  await named(page, "Compte de remplacement");
+  await connections(page)
+    .getByRole("button", { name: "Connecter", exact: true })
+    .click();
+  await expect(connections(page)).toContainText("Terminez la connexion");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(connections(page)).toContainText("Compte connecté.");
+  expect(links).toBe(2);
 });

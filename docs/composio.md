@@ -105,7 +105,7 @@ Les autres méthodes (clé d’API, par exemple) sont listées comme indisponibl
 2. Choisissez le service, puis **Connecter**. Le nom du service sert de nom de compte par défaut. Pour distinguer plusieurs comptes, ouvrez **Nom du compte (facultatif)**.
 3. Terminez la connexion dans la fenêtre du fournisseur. Si le navigateur bloque la fenêtre, utilisez **Ouvrir la page de connexion**.
 4. Revenez dans EzraBot. La vérification reprend au retour et continue pendant deux minutes au maximum. Seule la relecture du compte chez le fournisseur rend le compte connecté.
-5. Si la connexion attend encore ou échoue, **Réessayer la vérification** contrôle la même demande. Ce bouton ne crée pas une autre connexion. Après rechargement, EzraBot reprend une demande en attente depuis le lien durable.
+5. Si la connexion attend encore ou échoue, **Réessayer la vérification** contrôle la même demande. Ce bouton ne crée pas une autre connexion. Après rechargement ou réouverture des préférences, les demandes en attente restent dans la liste. Choisissez **Vérifier la connexion** pour reprendre celle voulue. Une ancienne demande ne bloque pas **Connecter** et ne déclenche aucun contrôle automatique.
 6. Ouvrez la page du personnage, section **Services connectés**.
 7. Choisissez le compte, puis **Voir les outils de ce compte**.
 8. Cochez les outils. Enregistrez. Les droits du personnage sur ce service deviennent exactement cette sélection.
@@ -145,7 +145,7 @@ node server/mobile/scripts/sync-contract.mjs --check
 npm run test:ui
 ```
 
-La recette finale passe : typage, 279 tests serveur, quatre contrats mobiles identiques et 59 tests navigateur.
+La recette finale passe : typage, 279 tests serveur, quatre contrats mobiles identiques et 60 tests navigateur.
 
 ### Transport avec le vrai modèle
 

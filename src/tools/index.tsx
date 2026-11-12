@@ -104,12 +104,7 @@ export function ToolConnections({ port }: { port: Port }) {
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [serviceId, setServiceId] = useState("");
   const [alias, setAlias] = useState("");
-  const [state, setState] = useState<ConnectionState>(() => {
-    const pending = tools.links.find((link) => link.state === "pending");
-    return pending
-      ? { kind: "waiting", linkId: pending.id, fallback: null }
-      : { kind: "selection" };
-  });
+  const [state, setState] = useState<ConnectionState>({ kind: "selection" });
   const lifecycle = useRef<AbortController | null>(null);
   const opening = useRef(false);
   const popup = useRef<Window | null>(null);

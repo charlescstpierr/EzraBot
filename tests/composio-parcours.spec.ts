@@ -89,10 +89,9 @@ test("parcours complet : relier un compte, donner un droit, proposer, approuver 
   const connections = preferences.getByRole("region", {
     name: "Services connectés",
   });
-  const stop = connections.getByRole("button", {
-    name: "Arrêter la vérification",
-  });
-  if (await stop.isVisible()) await stop.click();
+  await expect(
+    connections.getByRole("button", { name: "Connecter", exact: true }),
+  ).toBeEnabled();
   const service = connections.getByLabel("Service à relier");
   await expect(service.locator("option")).toHaveText([
     "Courriel (synthétique)",
