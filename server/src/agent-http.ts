@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { AgentCommandSchema, type AgentsView } from './agent-protocol.js';
+import { AgentCommandSchema, type AgentsView, type MissionResponse } from './agent-protocol.js';
 import type { AgentEngine } from './agent-engine.js';
 import type { AgentWorker } from './agent-worker.js';
 import type { CoordinationDeps, Missions } from './missions.js';
@@ -75,7 +75,7 @@ export function createAgentRoutes(options: { missions: Missions; worker: AgentWo
       recheck();
       const found = missions.detail(detail[1]);
       if (!found) send(res, 404, { ok: false, code: 'not_found', message: 'Cette mission n’existe pas.' });
-      else send(res, 200, { rev: missions.rev, mission: found, project: missions.view().projects.find(p => p.id === found.projectId) ?? null });
+      else send(res, 200, { rev: missions.rev, mission: found, project: missions.view().projects.find(p => p.id === found.projectId) ?? null } satisfies MissionResponse);
       return true;
     }
     if (req.method === 'GET' && route === 'catalog') {

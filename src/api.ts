@@ -1,34 +1,191 @@
-import type { AppView, Command } from "../server/src/protocol";
-import type { AgentsView, AgentCommand } from "../server/src/agent-protocol";
+import {
+  CommandResultSchema,
+  type AppView,
+  type Command,
+  type RefusalCode,
+} from "../server/src/protocol";
+import type {
+  AgentsView,
+  AgentCommand,
+  AgentRefusalCode,
+} from "../server/src/agent-protocol";
+import type { CommandRunner, MissionResponse } from "./port";
+
 export async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(url, { signal });
-  if (!r.ok)
+  const response = await fetch(url, { signal });
+  if (!response.ok)
     throw Error(
-      `Service indisponible (${r.status}). Vos données restent sur le PC.`,
+      `Service indisponible (${response.status}). Vos données restent sur le PC.`,
     );
-  return r.json();
+  return response.json();
+}
+export const getMission = (id: string, signal?: AbortSignal) =>
+  get<MissionResponse>(
+    `/api/agents/missions/${encodeURIComponent(id)}`,
+    signal,
+  );
+export const uid = () => crypto.randomUUID();
+const appCodes = {
+  invalid_command: true,
+  request_conflict: true,
+  not_found: true,
+  invalid_transition: true,
+  stale_base: true,
+  cross_work: true,
+  not_current: true,
+  proposal_closed: true,
+  approval_mismatch: true,
+  limit_reached: true,
+  unknown_shape: true,
+  choice_unavailable: true,
+  busy: true,
+} satisfies Record<RefusalCode, true>;
+const agentCodes = {
+  invalid_command: true,
+  not_found: true,
+  path_refused: true,
+  busy: true,
+  budget: true,
+  stale: true,
+  state: true,
+  unavailable: true,
+  duplicate: true,
+} satisfies Record<AgentRefusalCode, true>;
+const isAppCode = (code: unknown): code is RefusalCode =>
+  typeof code === "string" && Object.hasOwn(appCodes, code);
+const isAgentCode = (code: unknown): code is AgentRefusalCode =>
+  typeof code === "string" && Object.hasOwn(agentCodes, code);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+export function createRunner(
+  apply: { app(view: AppView): void; agents(view: AgentsView): void },
+  transport: typeof fetch = fetch,
+  csrf: () => string = () =>
+    document.querySelector<HTMLMetaElement>('meta[name="mino-csrf"]')
+      ?.content ?? "",
+): CommandRunner {
+  async function post(command: Command | AgentCommand, agent: boolean) {
+    try {
+      const response = await transport(
+        agent ? "/api/agents/commands" : "/api/commands",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-mino-csrf": csrf(),
+          },
+          body: JSON.stringify(command),
+        },
+      );
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        return {
+          kind: "unknown" as const,
+          message: "Réponse illisible. Réessayez avec le même envoi.",
+        };
+      }
+      if (response.status >= 500)
+        return {
+          kind: "unknown" as const,
+          message:
+            isRecord(data) && typeof data.message === "string"
+              ? data.message
+              : "Le service ne confirme pas le résultat. Réessayez avec le même envoi.",
+        };
+      if (!isRecord(data))
+        return {
+          kind: "unknown" as const,
+          message: "Réponse inattendue du service.",
+        };
+      return { kind: "response" as const, data, status: response.status };
+    } catch {
+      return {
+        kind: "unknown" as const,
+        message:
+          "Connexion interrompue. Le résultat est inconnu. Réessayez avec le même envoi.",
+      };
+    }
+  }
+  return {
+    async app(input) {
+      const received = await post(input, false);
+      if (received.kind === "unknown") return received;
+      const { data, status } = received;
+      const view = isRecord(data.view) ? (data.view as AppView) : null;
+      if (view) apply.app(view);
+      if (data.ok === true && view) {
+        const result = CommandResultSchema.safeParse(data.result);
+        if (result.success)
+          return {
+            kind: "accepted",
+            view,
+            result: result.data,
+            replayed: data.replayed === true,
+          };
+      }
+      if (data.ok === false && typeof data.message === "string") {
+        if (view && isAppCode(data.code))
+          return {
+            kind: "refused",
+            view,
+            code: data.code,
+            message: data.message,
+          };
+        if (status >= 400)
+          return { kind: "rejected", status, message: data.message };
+      }
+      return {
+        kind: "unknown",
+        message:
+          "Le service ne confirme pas cette commande. Conservez cet envoi pour réessayer.",
+      };
+    },
+    async agents(input) {
+      const received = await post(input, true);
+      if (received.kind === "unknown") return received;
+      const { data, status } = received;
+      const view = isRecord(data.view) ? (data.view as AgentsView) : null;
+      if (view) apply.agents(view);
+      if (data.ok === true && view && typeof data.id === "string")
+        return {
+          kind: "accepted",
+          view,
+          result: { id: data.id },
+          replayed: data.replayed === true,
+        };
+      if (data.ok === false && typeof data.message === "string") {
+        if (view && isAgentCode(data.code))
+          return {
+            kind: "refused",
+            view,
+            code: data.code,
+            message: data.message,
+          };
+        if (status >= 400)
+          return { kind: "rejected", status, message: data.message };
+      }
+      return {
+        kind: "unknown",
+        message:
+          "Le service ne confirme pas cette commande. Conservez cet envoi pour réessayer.",
+      };
+    },
+  };
 }
 export class CommandRefusal extends Error {}
 export async function command(
   input: Command | AgentCommand,
   agent = false,
 ): Promise<AppView | AgentsView> {
-  const r = await fetch(agent ? "/api/agents/commands" : "/api/commands", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-mino-csrf":
-        document.querySelector<HTMLMetaElement>("meta[name=mino-csrf]")
-          ?.content ?? "",
-    },
-    body: JSON.stringify(input),
-  });
-  const data = await r.json();
-  if (!data.ok)
-    throw new CommandRefusal(data.message ?? "La commande a été refusée.");
-  return data.view;
+  const runner = createRunner({ app() {}, agents() {} });
+  const result = agent
+    ? await runner.agents(input as AgentCommand)
+    : await runner.app(input as Command);
+  if (result.kind !== "accepted") throw new CommandRefusal(result.message);
+  return result.view;
 }
-export const uid = () => crypto.randomUUID();
 export const statuses: Record<string, string> = {
   pending: "En attente",
   queued: "En attente",
