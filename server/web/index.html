@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="mino-csrf" content="__MINO_CSRF__">
+<link rel="icon" href="data:,">
+<title>Mino</title>
+<link rel="stylesheet" href="/assets/prototype.css">
+<link rel="stylesheet" href="/mino.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<div id="symbols" hidden></div>
+<div class="app">
+<nav class="rail" aria-label="Navigation">
+<button class="brand" id="home-button" aria-label="Retour à la conversation"><svg aria-hidden="true"><use href="#bot-neutral"/></svg></button>
+<button class="icon active" id="chat-nav" title="Conversation" aria-label="Conversation"><svg><use href="#chat"/></svg></button>
+<button class="icon" id="files-nav" title="Créations et Carnet" aria-label="Créations et Carnet"><svg><use href="#folder"/></svg></button>
+<button class="icon" id="search-nav" title="Rechercher dans le fil (Ctrl+K)" aria-label="Rechercher dans le fil" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+<div class="spacer"></div>
+<button class="icon" id="settings-button" aria-label="À propos de Mino" title="À propos de Mino"><svg><use href="#sliders"/></svg></button>
+<button class="avatar" id="profile-button" title="Vous" aria-label="Vous">C</button>
+</nav>
+<div class="workspace">
+<header class="topbar">
+<button class="project" id="project-button" type="button" aria-label="À propos de Mino">
+<strong>mino</strong>
+</button>
+<div class="top-right">
+<a id="phone-nav" class="work-toggle" href="/devices" aria-label="Connecter mon téléphone">Téléphone</a>
+<button id="work-toggle" class="work-toggle" type="button">Travaux</button>
+<button class="pill" id="export" type="button">Exporter ↗</button>
+<button id="more" type="button" title="Options de la conversation" aria-label="Options de la conversation">···</button>
+</div>
+</header>
+<main class="main" id="main">
+<section class="chat" aria-label="Conversation">
+<div class="bot-welcome">
+<button id="thread-menu" type="button" class="thread-menu" aria-label="Options de la conversation">···</button>
+<div class="bot-fan" id="bot-fan">
+<div class="bot-wheel" id="bot-wheel" role="region" aria-label="Choisir un bot. Glissez horizontalement ou utilisez les flèches." tabindex="-1">
+<svg class="arc-track" viewBox="0 0 280 170" aria-hidden="true"><path d="M 26 132 A 114 100 0 0 1 254 132"/><path class="arc-inner" d="M 43 132 A 97 84 0 0 1 237 132"/></svg>
+<div id="fan-actions" role="group" aria-label="Vos bots"></div>
+<div class="wheel-hint">‹ <span>glissez pour changer</span> ›</div>
+</div>
+<button class="bot-trigger" id="bot-trigger" type="button" aria-label="Afficher ou masquer les autres bots" aria-expanded="false" aria-controls="bot-wheel"><span id="picker-label">Mino</span><svg class="picker-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 5 3 3 3-3"/></svg></button>
+<button id="edit-bot" class="edit-bot" type="button" aria-label="Personnaliser ce bot" title="Personnaliser ce bot"><svg aria-hidden="true"><use href="#sliders"/></svg></button>
+<button class="fixed-create" id="fixed-create" type="button" title="Créer un nouveau bot" aria-label="Créer un nouveau bot"><svg aria-hidden="true"><use href="#plus"/></svg></button>
+</div>
+</div>
+<button id="work-return" class="work-return hidden" type="button"><span></span><span>Voir ›</span></button>
+<div class="messages" id="messages" role="log" aria-live="polite">
+<div id="welcome">
+<div id="empty-bots" class="empty-bots" hidden><p>Aucun bot pour le moment.</p><button type="button" id="empty-create">Créer un bot</button></div>
+<div class="suggestions">
+<button class="suggestion" type="button" data-prompt="Aide-moi à organiser ma journée.">Organiser ma journée</button>
+<button class="suggestion" type="button" data-prompt="Aide-moi à rédiger un message.">Rédiger un message</button>
+<button class="suggestion" type="button" data-prompt="J’aimerais préparer le texte d’une page web.">Créer une page</button>
+<button class="suggestion" type="button" data-prompt="Prépare-moi un plan pour " data-document="true">Préparer un plan</button>
+</div>
+</div>
+</div>
+<button id="jump-bottom" class="jump-bottom" type="button" hidden><span>Revenir en bas</span></button>
+<form id="form" class="composer">
+<div id="draft-others" class="draft-others" role="status" hidden></div>
+<div id="pending-assets" class="pending-assets hidden"></div>
+<div id="doc-options" class="doc-options" role="group" aria-label="Mode document" hidden></div>
+<textarea id="prompt" aria-label="Votre message" placeholder="Écrire à Mino…" maxlength="6000"></textarea>
+<div class="composer-bottom">
+<div class="composer-tools">
+<button type="button" id="attach" title="Joindre un fichier texte" aria-label="Joindre un fichier texte"><svg><use href="#plus"/></svg></button>
+<button type="button" class="model" id="model-button">Codex</button>
+<button type="button" class="doc-mode" id="doc-mode" aria-pressed="false" title="Préparer un document durable, rédigé en arrière-plan">Document</button>
+</div>
+<button type="submit" class="send" id="send" title="Envoyer" aria-label="Envoyer"><svg><use href="#up"/></svg></button>
+</div>
+<input type="file" id="file" class="hidden" multiple accept=".txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.xml,.yaml,.yml,.log,.ini,.toml,.js,.ts,.css,.py,text/*">
+</form>
+<p id="draft-status" class="draft-status" role="status" hidden></p>
+<p id="connection-error" class="connection-error" role="status" hidden></p>
+<div id="erasure-status" class="erasure-status" role="status" hidden></div>
+</section>
+<aside id="doc-panel" class="doc-panel" aria-label="Document" hidden></aside>
+</main>
+</div>
+</div>
+<div id="toast" class="toast hidden" role="status"></div>
+<dialog id="work-drawer" class="work-drawer">
+<div class="work-drawer-heading">
+<div><h2>Travaux</h2></div>
+<button id="work-drawer-close" type="button" aria-label="Fermer">×</button>
+</div>
+<div id="work-filters" class="work-filters">
+<button data-filter="all" type="button">Tout</button>
+<button data-filter="open" type="button">En cours</button>
+<button data-filter="review" type="button">À valider</button>
+<button data-filter="done" type="button">Terminés</button>
+</div>
+<div id="work-list"></div>
+</dialog>
+<dialog id="creations-drawer" class="creations-drawer">
+<div class="creations-heading">
+<div><h2>Créations</h2><p id="creations-count"></p></div>
+<button id="creations-close" type="button" aria-label="Fermer">×</button>
+</div>
+<input id="creation-search" type="search" placeholder="Rechercher un titre ou un bot…" aria-label="Rechercher une création">
+<div id="creation-filters" class="creation-filters" role="tablist">
+<button type="button" role="tab" data-creation-filter="all">Tout</button>
+<button type="button" role="tab" data-creation-filter="deliverables">Livrables</button>
+<button type="button" role="tab" data-creation-filter="carnet">Carnet</button>
+</div>
+<div id="creation-grid" class="creation-grid"></div>
+</dialog>
+<dialog id="play-dialog" class="bot-dialog play-dialog"><div id="play-dialog-content"></div></dialog>
+<dialog id="new-bot-dialog" class="bot-dialog">
+<form id="new-bot-form">
+<h2>Nouveau bot</h2>
+<label>Son nom<input id="new-bot-name" placeholder="Ex. Milo" maxlength="24" required autocomplete="off"></label>
+<label>Sa spécialité<select id="new-bot-role">
+<option value="general">Création et code</option>
+<option value="design">Design d’interface</option>
+<option value="explain">Explication du code</option>
+<option value="ideas">Idées et écriture</option>
+</select></label>
+<label>Sa couleur<input id="new-bot-color" type="color" value="#ff5c03"></label>
+<div class="dialog-buttons">
+<button type="button" id="cancel-bot">Annuler</button>
+<button type="submit" class="confirm">Créer le bot</button>
+</div>
+</form>
+</dialog>
+</body>
+</html>

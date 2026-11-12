@@ -1,0 +1,39 @@
+name: Compile and test EzraBot
+
+on:
+  push:
+    branches: [main, feat/mimobot-react-three]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - name: Install React dependencies
+        run: npm ci
+      - name: Install server dependencies
+        run: npm ci --prefix server
+      - name: Check TypeScript
+        run: npm run typecheck
+      - name: Build production bundles
+        run: npm run build
+      - name: Test server with controlled engines
+        run: node --test --test-concurrency=1 'server/dist/test/*.test.js'

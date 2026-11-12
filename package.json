@@ -1,0 +1,31 @@
+{
+  "name": "ezrabot-react",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "npm install && npm ci --prefix server",
+    "build": "npm run build --prefix server",
+    "start": "npm run build && node server/dist/src/main.js",
+    "typecheck": "tsc --noEmit && npm run typecheck --prefix server",
+    "test": "npm test --prefix server",
+    "test:ui": "npm run build && playwright test"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "markdown-it": "^14.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": "^0.181.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/markdown-it": "^14.1.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.181.0",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.10.0",
+    "typescript": "^5.9.3"
+  }
+}

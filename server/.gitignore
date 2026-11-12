@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+data/
+dist/
+playwright-report/
+test-results/
+*.log
+
+mobile/.expo/
+mobile/android/
+mobile/ios/

@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Mino",
+    "slug": "mino-native-client",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.mino.companion"
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "app.mino.companion"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scanner le QR d’association de votre PC Mino.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ],
+    "backgroundColor": "#ffffff",
+    "extra": {
+      "eas": {
+        "projectId": "0a7a06c6-09fb-44e3-81e0-04453b4f692f"
+      }
+    },
+    "owner": "charlescstpierr"
+  }
+}

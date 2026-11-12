@@ -1,1 +1,50 @@
-# EzraBot
+# EzraBot · React + Three.js
+
+Client web React 19 et TypeScript, servi par le moteur PC fourni dans le dossier de spécifications. Les personnages utilisent les SVG originaux ; Three.js anime une texture issue des mêmes tracés, avec repli SVG sans WebGL. Les animations s’arrêtent en arrière-plan et suivent le mouvement réduit du système.
+
+## Démarrer sur le PC
+
+Node.js 24 ou supérieur et la commande officielle `codex` avec une session locale autorisée sont nécessaires pour les réponses réelles.
+
+```bash
+npm ci
+npm ci --prefix server
+npm start
+```
+
+Ouvrir http://127.0.0.1:4317. Les bases de cette copie sont créées dans `server/data/` ; elles sont ignorées par Git. La session Codex est utilisée par le moteur existant, sans lecture ou copie de ses fichiers d’authentification. Aucune clé API n’est ajoutée au client.
+
+Pour utiliser un autre port : `MINO_PORT=4328 npm start`. Ne pas exposer ce port directement sur Internet.
+
+## Compilation et validation locales
+
+```bash
+npm run typecheck
+npm run build
+npm test
+npx playwright install chromium
+npm run test:ui
+```
+
+La compilation produit `server/dist/` et inclut le bundle React et son CSS. `npm start --prefix server` reconstruit également React ; installer les dépendances racine et serveur avant d’utiliser cette commande.
+
+Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de nouvelles bases SQLite et un moteur volontairement indisponible. Aucun appel fournisseur n’est effectué. Les tests serveur emploient leurs moteurs contrôlés. Le workflow GitHub Actions compile et exécute les tests serveur sur chaque push et pull request. Les essais navigateur restent disponibles en local.
+
+## Ce que cette version apporte
+
+- Chat Mino, Markdown sans HTML exécutable, invitations @, fils séparés et retours aux messages récents.
+- Brouillons isolés par espace et personnage, préservation pendant un envoi, reprise réseau avec le même identifiant, refus serveur explicites.
+- Projets avec dossier explicitement autorisé, propositions de mission avec leur message d’origine, choix de responsable pour la coordination, suivi et actions admises par le serveur.
+- Documents éditables, versions et restauration, publication exacte dans le carnet local avec confirmation.
+- Personnalisation des noms/couleurs et gestion des souvenirs de chaque personnage.
+- Interface adaptative, clavier IME, dialogues avec gestion du focus et navigation clavier.
+
+Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Le seul changement serveur de routage concerne la page React et ses deux assets. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source mentionné par PROVENANCE.json.
+
+## Limites explicites
+
+Ce lot livre le client web PC. Le client natif Expo de référence reste dans `server/mobile/`. La page `/devices` conserve l’association PC/téléphone existante ; le nouveau React utilise les routes privées PC `/api/*`, et ne remplace pas le client HTTPS appairé `/m/*`. Aucune application Android/iPhone physique ni paquet natif n’a été compilé dans ce lot.
+
+Les tests contrôlés ne prouvent ni une réponse réelle de Codex ni une connexion physique de téléphone. Les erreurs de moteur sont visibles. La présente copie ne configure pas Tailscale ou les certificats HTTPS et n’effectue aucune migration d’une installation personnelle existante.
+
+La fiche React couvre le nom, la couleur et la mémoire. Les paramètres avancés du moteur, la suppression définitive des personnages, les modifications d’objectif/précisions et les conflits documentaires avancés sont accessibles via le client de référence sur `/advanced` ; leur présentation React reste à compléter. Leurs contrats et implémentations de référence sont conservés dans `server/`. Une validation ne publie pas un résultat sur Internet.
