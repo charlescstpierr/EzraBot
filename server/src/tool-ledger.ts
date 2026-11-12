@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Ajv } from 'ajv';
 import type { ReceiptContext } from './context.js';
+import type { ToolCall, ToolReply } from './engine.js';
 import type { WorkState } from './protocol.js';
 import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
 import {
@@ -63,9 +64,6 @@ export type SendResult =
   | { kind: 'input_required' }
   /** The request left, or may have left, and no trustworthy answer came back. Never resent. */
   | { kind: 'unknown'; category: 'timeout' | 'transport' | 'response' };
-
-export type ToolCall = { callId: string; tool: string; arguments: unknown };
-export type ToolReply = { success: boolean; text: string };
 
 /** The identity of a running turn, as the store froze it. */
 export type TurnIdentity = { workId: string; attemptId: string; botId: string; toolGrants: readonly GrantSnapshot[] };

@@ -40,10 +40,21 @@ export type EngineOptions = {
   turnTimeoutMs?: number;
   requestTimeoutMs?: number;
   interruptGraceMs?: number;
+  /** Lets this instance register server-owned tools on a thread. Codex needs its experimental API for that, so only this instance turns it on. */
+  dynamicTools?: true;
 };
+
+export type ToolSpec = { name: string; description: string; inputSchema: Record<string, unknown> };
+export type ToolCall = { callId: string; tool: string; arguments: unknown };
+export type ToolReply = { success: boolean; text: string };
+
+/** The only tools a turn may call. A call comes back to the server, which answers at once; nothing runs inside Codex. */
+export type TurnTools = { specs: readonly ToolSpec[]; call(call: ToolCall): Promise<ToolReply> };
 
 export type RunInput = {
   turn: ComposedTurn;
+  /** Absent or empty: the turn has no tool and every request from Codex is refused, as before. */
+  tools?: TurnTools;
   choice: BotChoice;
   signal: AbortSignal;
   onStage: (stage: RunStage) => void;
@@ -123,7 +134,14 @@ const TokenUsageUpdatedSchema = z.object({
 const ThreadStartSchema = z.object({ thread: z.object({ id: z.string() }), model: z.string() });
 const TurnStartSchema = z.object({ turn: z.object({ id: z.string() }) });
 const ThreadScopedSchema = z.object({ threadId: z.string() });
-const ItemEventSchema = z.object({ threadId: z.string(), turnId: z.string(), item: z.object({ type: z.string(), id: z.string().optional(), text: z.string().optional() }) });
+const ItemEventSchema = z.object({ threadId: z.string(), turnId: z.string(), item: z.object({
+  type: z.string(), id: z.string().optional(), text: z.string().optional(), tool: z.string().optional(), namespace: z.string().nullish(),
+}) });
+const TOOL_CALL = 'item/tool/call';
+const DYNAMIC_TOOL_ITEM = 'dynamicToolCall';
+const ToolCallSchema = z.object({
+  threadId: z.string(), turnId: z.string(), callId: z.string().min(1).max(200), namespace: z.string().nullish(), tool: z.string(), arguments: z.unknown(),
+});
 const AgentDeltaSchema = z.object({ threadId: z.string(), turnId: z.string(), itemId: z.string(), delta: z.string() });
 const AGENT_DELTA = 'item/agentMessage/delta';
 const TurnStartedSchema = z.object({ threadId: z.string(), turn: z.object({ id: z.string() }) });
@@ -144,9 +162,12 @@ class StartFailure extends Error {
   }
 }
 
+/** A request Codex sent to Mino. It gets exactly one answer, whoever asks to send it and however often. */
+type ServerRequest = { method: string; params: unknown; refuse(): void; respond(result: unknown): void };
+
 type Listener = {
   notification: (method: string, params: unknown) => void;
-  serverRequest: (method: string) => void;
+  serverRequest: (request: ServerRequest) => void;
   exit: () => void;
 };
 
@@ -207,8 +228,21 @@ class Connection {
     if (!parsed.success) return;
     const message = parsed.data;
     if (message.id !== undefined && message.method !== undefined) {
-      this.send({ id: message.id, error: { code: -32000, message: 'Mino refuse toute action, tout outil et toute autorisation.' } });
-      this.listener?.serverRequest(message.method);
+      const id = message.id;
+      let answered = false;
+      const answer = (body: { result: unknown } | { error: { code: number; message: string } }) => {
+        if (answered) return;
+        answered = true;
+        this.send({ id, ...body });
+      };
+      const request: ServerRequest = {
+        method: message.method,
+        params: message.params,
+        refuse: () => answer({ error: { code: -32000, message: 'Mino refuse toute action, tout outil et toute autorisation.' } }),
+        respond: result => answer({ result }),
+      };
+      if (this.listener) this.listener.serverRequest(request);
+      else request.refuse();
       return;
     }
     if (message.id !== undefined) {
@@ -315,7 +349,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
       await conn.spawned;
       await conn.request('initialize', {
         clientInfo: { name: 'mino', title: 'Mino', version: options.clientVersion },
-        capabilities: { experimentalApi: false },
+        capabilities: { experimentalApi: options.dynamicTools === true },
       }, requestTimeout);
       conn.notify('initialized', {});
       if (!checkConfig(await conn.request('config/read', { includeLayers: false }, requestTimeout))) throw new StartFailure('unsafe_config');
@@ -376,7 +410,10 @@ export function createCodexEngine(options: EngineOptions): Engine {
     }
   }
 
-  async function runTurn({ turn, choice, signal, onStage, onThread, onTurn, onText }: RunInput): Promise<EngineOutcome> {
+  async function runTurn({ turn, choice, signal, onStage, onThread, onTurn, onText, tools: offered }: RunInput): Promise<EngineOutcome> {
+    const tools = offered?.specs.length ? offered : null;
+    if (tools && !options.dynamicTools) return engineFailure('rpc_refused', 'Ce moteur n’accepte aucun outil de service. Mino n’a pas lancé l’appel.');
+    const toolNames = new Set(tools?.specs.map(spec => spec.name));
     const ready = await ensure();
     if (!ready.ok) return engineFailure(ready.code);
     if (signal.aborted) return { kind: 'cancelled' };
@@ -394,6 +431,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
         ephemeral: true,
         baseInstructions: turn.baseInstructions,
         config: { mcp_servers: {}, web_search: 'disabled' },
+        ...(tools ? { dynamicTools: tools.specs.map(spec => ({ type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema })) } : {}),
       }, requestTimeout));
       if (!started.success) return engineFailure('rpc_refused');
       if (started.data.model !== used.model) {
@@ -415,6 +453,9 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const received = new Map<string, string>();
       const early: z.infer<typeof AgentDeltaSchema>[] = [];
       const earlyItems: { method: string; event: z.infer<typeof ItemEventSchema> }[] = [];
+      let announceTurn = () => {};
+      /** Settles when the turn id is known or the run ends, so a tool call that arrives first can be matched to its turn. */
+      const turnAnnounced = new Promise<void>(resolve => { announceTurn = resolve; });
       const accept = (delta: z.infer<typeof AgentDeltaSchema>) => {
         if (delta.turnId !== turnId) return;
         const text = (received.get(delta.itemId) ?? '') + delta.delta;
@@ -424,6 +465,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const knowTurn = (id: string) => {
         if (turnId !== null) return;
         turnId = id;
+        announceTurn();
         for (const delta of early.splice(0)) accept(delta);
         for (const item of earlyItems.splice(0)) acceptItem(item.method, item.event);
       };
@@ -431,7 +473,8 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const acceptItem = (method: string, event: z.infer<typeof ItemEventSchema>) => {
         if (event.turnId !== turnId) return;
         const { type, text, id: itemId } = event.item;
-        if (!ALLOWED_ITEMS.has(type)) {
+        const ownToolCall = type === DYNAMIC_TOOL_ITEM && event.item.tool !== undefined && toolNames.has(event.item.tool) && (event.item.namespace ?? null) === null;
+        if (!ALLOWED_ITEMS.has(type) && !ownToolCall) {
           stop(engineFailure('tool_blocked'));
           return;
         }
@@ -453,6 +496,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
         if (graceTimer) clearTimeout(graceTimer);
         signal.removeEventListener('abort', onAbort);
         conn.listener = null;
+        announceTurn();
         resolve(outcome);
       };
       const interrupt = () => {
@@ -470,8 +514,26 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const onAbort = () => stop({ kind: 'cancelled' });
       const deadline = setTimeout(() => stop(engineFailure('timeout')), turnTimeout);
 
+      const refuse = (request: ServerRequest) => {
+        request.refuse();
+        stop(engineFailure('request_refused'));
+      };
+      const answerToolCall = async (request: ServerRequest, call: z.infer<typeof ToolCallSchema>, offer: TurnTools) => {
+        await turnAnnounced;
+        if (settled || aborting || call.turnId !== turnId) return refuse(request);
+        const reply = await offer.call({ callId: call.callId, tool: call.tool, arguments: call.arguments })
+          .catch((): ToolReply => ({ success: false, text: 'Action refusée : le service est indisponible. Rien n’a été enregistré.' }));
+        request.respond({ contentItems: [{ type: 'inputText', text: reply.text }], success: reply.success });
+      };
+
       conn.listener = {
-        serverRequest: () => stop(engineFailure('request_refused')),
+        serverRequest: request => {
+          const call = tools && request.method === TOOL_CALL ? ToolCallSchema.safeParse(request.params) : null;
+          if (!tools || !call?.success || call.data.threadId !== threadId || (call.data.namespace ?? null) !== null || !toolNames.has(call.data.tool) || aborting || settled) {
+            return refuse(request);
+          }
+          void answerToolCall(request, call.data, tools);
+        },
         exit: () => finish(aborting ?? engineFailure('engine_exited')),
         notification: (method, params) => {
           const scoped = ThreadScopedSchema.safeParse(params);
