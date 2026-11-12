@@ -33,3 +33,9 @@ Le navigateur partagé T3 a perdu sa connexion pour la capture interactive. La r
 Les commandes inconnues du composeur restent persistantes après rechargement. Celles des autres panneaux sont conservées en mémoire tant que le panneau reste ouvert. Le serveur conserve les travaux acceptés après fermeture du navigateur. Un résultat inconnu ne doit pas être considéré comme un échec sans effet.
 
 Les clients historiques qui n’envoient pas `baseUpdatedAt` gardent la dernière écriture gagnante pour les souvenirs. Le client React envoie toujours cette base pour une édition.
+
+## Preuves téléversées
+
+Les [images, vidéos et journaux du ticket 4](https://github.com/charlescstpierr/EzraBot/releases/tag/preuves-ticket-4-20261112) sont publiés comme pièces de preuve. Cette publication ne déploie pas l’application. Elle cible le commit de code `a6ffb6703ac0ae1c30702ea1e818dda8e36024fd`.
+
+Le ZIP des journaux contient aussi les trois conceptions comparées et le contrat retenu. Les artefacts GitHub Actions conservent les résultats de chaque nouvelle recette sur GitHub.
