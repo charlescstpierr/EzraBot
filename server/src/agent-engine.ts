@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { CatalogModel } from './protocol.js';
 import { AGENT_LIMITS, type AgentEngineStatus, type Usage } from './agent-protocol.js';
 import { census, reap, type Census, type Liveness, type Proc } from './process-tree.js';
+import { childEnv } from './child-env.js';
 
 /**
  * Executor sessions on the official `codex app-server`.
@@ -229,7 +230,7 @@ class Connection {
     this.child = spawn(options.command, args, {
       cwd: options.tmpDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, TMPDIR: options.tmpDir },
+      env: { ...childEnv(process.env), TMPDIR: options.tmpDir },
     });
     this.child.stderr.resume();
     this.child.stdin.on('error', () => {});

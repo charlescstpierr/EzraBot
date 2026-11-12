@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { BotChoice, CatalogModel, EngineStatus, RunStage } from './protocol.js';
 import { STANDARD_SPEED } from './protocol.js';
 import type { ComposedTurn } from './context.js';
+import { childEnv } from './child-env.js';
 import {
   ENGINE_ERRORS,
   engineFailure,
@@ -165,7 +166,7 @@ class Connection {
       ...DISABLED_FEATURES.flatMap(feature => ['--disable', feature]),
       ...CODEX_CONFIG_ARGS,
     ];
-    this.child = spawn(options.command, args, { cwd: options.workDir, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn(options.command, args, { cwd: options.workDir, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv(process.env) });
     this.child.stderr.resume();
     this.child.stdin.on('error', () => {});
     this.spawned = new Promise((resolve, reject) => {

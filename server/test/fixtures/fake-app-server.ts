@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 // Test-only stand-in for `codex app-server`, driven by a scenario name.
@@ -9,6 +10,9 @@ args.forEach((arg, i) => {
   const next = args[i + 1];
   if (arg === '--disable' && next) disabled.add(next);
 });
+
+const envProbe = process.env.MINO_TEST_ENV_PROBE;
+if (envProbe) writeFileSync(envProbe, JSON.stringify(Object.keys(process.env).filter(name => /composio/i.test(name))));
 
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
 const notify = (method: string, params: unknown) => send({ method, params });
