@@ -70,6 +70,8 @@ import { composeContext, type ComposedTurn, type ContextSource, type Exchange, t
 import type { AgentText } from './engine.js';
 import { decodeReplyProgress } from './partial-json.js';
 import { canContinue, maxCalls, nextStep, stepActor, taskStatus, type TaskFacts } from './task.js';
+import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
+import { TOOL_MIGRATION, TOOL_PURGE_ORDER, createToolLedger, type GrantSnapshot, type ReportClaim, type ToolLedger } from './tool-ledger.js';
 
 export type Claim = {
   lane: Lane;
@@ -79,6 +81,10 @@ export type Claim = {
   botId: string;
   choice: BotChoice;
   turn: ComposedTurn;
+  /** Service rights frozen when the turn was composed. Empty outside an ordinary chat request. */
+  toolGrants: readonly GrantSnapshot[];
+  /** `receipt`: the turn only reports the outcome of an approved action and proposes nothing. */
+  purpose: { kind: 'request' } | { kind: 'receipt'; executionId: string };
 };
 
 export type FinishResult = { kind: 'recorded'; state: WorkState } | { kind: 'stale' };
@@ -90,6 +96,8 @@ export type DispatchContext = { activeWorkIds: readonly string[] };
 
 export type Store = {
   readonly rev: number;
+  /** Connected services: accounts, rights, proposals and receipts, in this same database. */
+  readonly tools: ToolLedger;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
   view(): StoreView;
   diagnostics(): StoreDiagnostics;
@@ -562,6 +570,7 @@ CREATE TRIGGER doc_proposals_kept BEFORE DELETE ON doc_proposals
   BEGIN SELECT RAISE(ABORT, 'document proposals are kept'); END;
 ` },
   { sql: `ALTER TABLE messages ADD COLUMN handoff TEXT CHECK(handoff IS NULL OR json_valid(handoff));` },
+  { sql: TOOL_MIGRATION },
 ];
 
 /** Migration backups Mino writes next to the database. Each holds the whole space at that time. */
@@ -572,6 +581,7 @@ export const managedBackupPaths = (path: string): string[] =>
 
 /** The rows erased with a bot, in an order that never leaves a dangling reference between statements. */
 const PURGE_ORDER = [
+  ...TOOL_PURGE_ORDER,
   ['publications', 'id'],
   ['decisions', 'id'],
   ['proposals', 'id'],
@@ -593,39 +603,6 @@ const PURGE_ORDER = [
 const DELETED_BOT_NAME = 'Bot supprimé';
 /** The coordinator of the space: only its own thread can propose a mission. */
 const MINO_ID = 'mino';
-
-type Row = Record<string, unknown>;
-
-function str(row: Row, key: string): string {
-  const value = row[key];
-  if (typeof value !== 'string') throw new Error(`Colonne ${key} inattendue`);
-  return value;
-}
-
-function strOrNull(row: Row, key: string): string | null {
-  const value = row[key];
-  if (value === null) return null;
-  if (typeof value !== 'string') throw new Error(`Colonne ${key} inattendue`);
-  return value;
-}
-
-function int(row: Row, key: string): number {
-  const value = row[key];
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  throw new Error(`Colonne ${key} inattendue`);
-}
-
-function oneOf<T extends string>(row: Row, key: string, values: readonly T[]): T {
-  const value = str(row, key);
-  const found = values.find(candidate => candidate === value);
-  if (found === undefined) throw new Error(`Valeur ${key} inattendue`);
-  return found;
-}
-
-function oneOfOrNull<T extends string>(row: Row, key: string, values: readonly T[]): T | null {
-  return row[key] === null ? null : oneOf(row, key, values);
-}
 
 function parseJsonColumn<T>(row: Row, key: string, schema: { parse(value: unknown): T }): T | null {
   const value = strOrNull(row, key);
@@ -787,6 +764,19 @@ export function openStore(options: StoreOptions): Store {
     const signed = payload.type === 'bot.delete' ? { type: payload.type, botId: payload.botId } : payload;
     return createHmac('sha256', hmacKey).update(stableStringify(signed)).digest('hex');
   };
+
+  const tools = createToolLedger(
+    { get, all, run, transaction, now, newId, changed, sign: payload => createHmac('sha256', hmacKey).update(stableStringify(payload)).digest('hex') },
+    {
+      find(requestId) {
+        const prior = get('SELECT type, fingerprint, result FROM commands WHERE request_id = ?', requestId);
+        return prior ? { type: str(prior, 'type'), fingerprint: str(prior, 'fingerprint'), result: str(prior, 'result') } : null;
+      },
+      save(requestId, type, print, result) {
+        run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
+      },
+    },
+  );
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
     const bot = get('SELECT * FROM bots WHERE id = ? AND deleted_at IS NULL', botId);
@@ -1047,6 +1037,8 @@ export function openStore(options: StoreOptions): Store {
           return { kind: 'work', workId: command.workId, state: workState(requireWork(command.workId)) };
         }
         run(`UPDATE attempts SET state = 'cancelled', finished_at = ? WHERE work_id = ? AND state = 'running'`, now(), command.workId);
+        const reported = tools.cancelReport(command.workId);
+        if (reported) return { kind: 'work', workId: command.workId, state: reported };
         setWorkState(work, 'cancelled');
         return { kind: 'work', workId: command.workId, state: 'cancelled' };
       }
@@ -1054,6 +1046,9 @@ export function openStore(options: StoreOptions): Store {
         const work = requireWork(command.workId);
         if (taskOf(work)) throw new Refusal('invalid_transition', 'Ce travail documentaire se reprend avec « Reprendre », qui compte dans sa limite d’appels.');
         requireBot(str(work, 'bot_id'), 'Ce bot a été supprimé : ce travail ne peut pas être relancé.');
+        if (tools.hasLiveExecution(command.workId)) {
+          throw new Refusal('invalid_transition', 'Ce travail a déjà une action de service approuvée. Il ne se relance pas : faites une nouvelle demande.');
+        }
         setWorkState(work, 'pending');
         return { kind: 'work', workId: command.workId, state: 'pending' };
       }
@@ -1253,6 +1248,9 @@ export function openStore(options: StoreOptions): Store {
     if (stopping || get(`SELECT 1 AS x FROM attempts WHERE state = 'running' AND work_id IN (${related})`, botId)) {
       throw new Refusal('busy', 'Un appel de ce bot, ou dans sa conversation, est encore en cours ou en train de s’arrêter. Attendez qu’il soit terminé. Rien n’a été supprimé.');
     }
+    if (tools.blocksPurge(botId, targetsOf('works'))) {
+      throw new Refusal('busy', 'Une action de service approuvée pour ce bot, ou dans sa conversation, est en cours d’envoi. Attendez son reçu. Rien n’a été supprimé.');
+    }
     if (stableStringify(deletionCounts(botId)) !== stableStringify(command.expected)) {
       throw new Refusal('stale_base', 'Le contenu de ce bot a changé depuis l’ouverture de la confirmation. Vérifiez les nouveaux chiffres. Rien n’a été supprimé.');
     }
@@ -1270,6 +1268,7 @@ export function openStore(options: StoreOptions): Store {
     target('handoffs', `SELECT 'handoffs', id FROM handoffs WHERE task_id IN (${targetsOf('tasks')})`);
     target('attempt_progress', `SELECT 'attempt_progress', attempt_id || ':' || item_id FROM attempt_progress WHERE attempt_id IN (${targetsOf('attempts')})`);
     target('doc_proposals', `SELECT 'doc_proposals', id FROM doc_proposals WHERE work_id IN (${targetsOf('works')})`);
+    tools.markPurge(botId, targetsOf('works'));
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
     run(`UPDATE commands SET fingerprint = '',
@@ -1436,6 +1435,7 @@ export function openStore(options: StoreOptions): Store {
           return { ok: true, replayed: true, result: CommandResultSchema.parse(JSON.parse(str(prior, 'result'))) };
         }
         const result = execute(command, context);
+        tools.syncDrafts();
         run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)',
           command.requestId, command.type, print, JSON.stringify(result), now());
         return { ok: true, replayed: false, result };
@@ -1487,10 +1487,13 @@ export function openStore(options: StoreOptions): Store {
 
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
-  } | null): Claim {
-    const source = lane === 'chat' && prepared.source.orchestrator && options.missionContext
-      ? { ...prepared.source, missions: options.missionContext() }
-      : prepared.source;
+  } | null, purpose: Claim['purpose'] = { kind: 'request' }): Claim {
+    const toolGrants = lane === 'chat' && purpose.kind === 'request' ? tools.grantsFor(prepared.botId) : [];
+    const source: ContextSource = {
+      ...prepared.source,
+      ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
+      ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
+    };
     const composed = composeContext(source);
     const bot = prepared.bot;
     const choice: BotChoice = { model: strOrNull(bot, 'model'), effort: strOrNull(bot, 'effort'), speed: str(bot, 'speed') };
@@ -1498,14 +1501,14 @@ export function openStore(options: StoreOptions): Store {
     const attemptId = newId('a');
     run(
       `INSERT INTO attempts(id, work_id, n, state, stage, requested_model, requested_effort, requested_speed, context_sha256, memory_ids, context_plan, started_at,
-         lane, step, task_revision, base_version_id, events_through, handoff_id, continued)
-       VALUES (?, ?, ?, 'running', 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         lane, step, task_revision, base_version_id, events_through, handoff_id, continued, tool_execution_id)
+       VALUES (?, ?, ?, 'running', 'starting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       attemptId, prepared.workId, n, choice.model, choice.effort, choice.speed, composed.sha256,
       JSON.stringify(prepared.memories.map(m => m.id)), JSON.stringify(composed.plan), now(),
       lane, frozen?.step ?? null, frozen?.taskRevision ?? null, frozen?.baseVersionId ?? null, frozen?.eventsThrough ?? null,
-      frozen?.handoffId ?? null, frozen?.continued ? 1 : 0,
+      frozen?.handoffId ?? null, frozen?.continued ? 1 : 0, purpose.kind === 'receipt' ? purpose.executionId : null,
     );
-    return { lane, workId: prepared.workId, attemptId, n, botId: prepared.botId, choice, turn: composed.turn };
+    return { lane, workId: prepared.workId, attemptId, n, botId: prepared.botId, choice, turn: composed.turn, toolGrants, purpose };
   }
 
   const memoriesOf = (botId: string) =>
@@ -1513,7 +1516,27 @@ export function openStore(options: StoreOptions): Store {
   const requestAttachments = (messageId: string) =>
     all('SELECT name, text FROM attachments WHERE message_id = ? ORDER BY seq', messageId).map(row => ({ name: str(row, 'name'), text: str(row, 'text') }));
 
+  /** The same work answers again, only to report the receipt of its approved action. No new request, no new work. */
+  function claimReport(report: ReportClaim): Claim {
+    const bot = requireBot(report.botId);
+    const memories = memoriesOf(report.botId);
+    const claim = startAttempt('chat', {
+      workId: report.workId, botId: report.botId, bot, memories,
+      source: {
+        bot: botSource(bot),
+        memories,
+        exchanges: threadExchanges(report.threadBotId, report.requestSeq),
+        request: { text: report.requestText, attachments: requestAttachments(report.requestMessageId) },
+        receipt: report.receipt,
+      },
+    }, null, { kind: 'receipt', executionId: report.executionId });
+    tools.beginReport(report.executionId);
+    return claim;
+  }
+
   function claimChat(): Claim | null {
+    const report = tools.nextReport();
+    if (report) return claimReport(report);
     const next = get(
       `SELECT w.id AS work_id, w.bot_id, m.bot_id AS thread_bot_id, m.seq, m.id AS message_id, m.text
        FROM works w JOIN messages m ON m.id = w.request_message_id JOIN bots actor ON actor.id = w.bot_id AND actor.deleted_at IS NULL
@@ -1649,55 +1672,66 @@ export function openStore(options: StoreOptions): Store {
 
   function finishJob(claim: Claim, outcome: EngineOutcome): FinishResult {
     const result = transaction((): FinishResult => {
-      const attempt = get('SELECT * FROM attempts WHERE id = ?', claim.attemptId);
-      const work = get('SELECT * FROM works WHERE id = ?', claim.workId);
-      const latest = get('SELECT id FROM attempts WHERE work_id = ? ORDER BY n DESC LIMIT 1', claim.workId);
-      if (!attempt || !work || !latest || !get('SELECT 1 AS x FROM bots WHERE id = ? AND deleted_at IS NULL', str(work, 'bot_id'))
-        || str(attempt, 'work_id') !== claim.workId || int(attempt, 'n') !== claim.n
-        || str(attempt, 'state') !== 'running' || workState(work) !== 'running' || str(latest, 'id') !== claim.attemptId) {
-        return { kind: 'stale' };
-      }
-      if (work.task_id !== null) return finishTaskStep(claim, outcome, attempt, work);
-      const at = now();
-      switch (outcome.kind) {
-        case 'succeeded': {
-          run(
-            `UPDATE attempts SET state = 'succeeded', stage = NULL, model = ?, effort = ?, speed = ?, thread_id = COALESCE(thread_id, ?), turn_id = COALESCE(turn_id, ?), finished_at = ? WHERE id = ?`,
-            outcome.used.model, outcome.used.effort, outcome.used.speed, outcome.threadId, outcome.turnId, at, claim.attemptId,
-          );
-          const threadBot = str(get('SELECT bot_id FROM messages WHERE id = ?', str(work, 'request_message_id')) ?? {}, 'bot_id');
-          // Only Mino, in its own thread, may propose a mission; any other bot's proposal is dropped.
-          const handoff = str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
-          run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at, handoff) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
-            newId('m'), str(work, 'bot_id'), outcome.reply.reply, claim.attemptId, at, handoff ? JSON.stringify(handoff) : null);
-          const deliverable = outcome.reply.deliverable;
-          if (deliverable) {
-            insertVersion({ workId: claim.workId, title: deliverable.title, body: deliverable.body, source: 'result', restoredFrom: null, attemptId: claim.attemptId });
-            setWorkState(work, 'review', deliverable.title);
-            return { kind: 'recorded', state: 'review' };
-          }
-          setWorkState(work, 'done');
-          return { kind: 'recorded', state: 'done' };
-        }
-        case 'failed': {
-          run(`UPDATE attempts SET state = 'failed', stage = NULL, error_code = ?, error_text = ?, finished_at = ? WHERE id = ?`,
-            outcome.code, outcome.message, at, claim.attemptId);
-          setWorkState(work, 'failed');
-          return { kind: 'recorded', state: 'failed' };
-        }
-        case 'cancelled': {
-          run(`UPDATE attempts SET state = 'cancelled', stage = NULL, finished_at = ? WHERE id = ?`, at, claim.attemptId);
-          setWorkState(work, 'cancelled');
-          return { kind: 'recorded', state: 'cancelled' };
-        }
-        default: {
-          const _exhaustive: never = outcome;
-          return _exhaustive;
-        }
-      }
+      const finished = finishAttempt(claim, outcome);
+      tools.syncDrafts();
+      return finished;
     });
     if (result.kind === 'recorded') changed();
     return result;
+  }
+
+  function finishAttempt(claim: Claim, outcome: EngineOutcome): FinishResult {
+    const attempt = get('SELECT * FROM attempts WHERE id = ?', claim.attemptId);
+    const work = get('SELECT * FROM works WHERE id = ?', claim.workId);
+    const latest = get('SELECT id FROM attempts WHERE work_id = ? ORDER BY n DESC LIMIT 1', claim.workId);
+    if (!attempt || !work || !latest || !get('SELECT 1 AS x FROM bots WHERE id = ? AND deleted_at IS NULL', str(work, 'bot_id'))
+      || str(attempt, 'work_id') !== claim.workId || int(attempt, 'n') !== claim.n
+      || str(attempt, 'state') !== 'running' || workState(work) !== 'running' || str(latest, 'id') !== claim.attemptId) {
+      return { kind: 'stale' };
+    }
+    if (work.task_id !== null) return finishTaskStep(claim, outcome, attempt, work);
+    /** Set for a turn that reports a receipt: it records a message and nothing else, and the work returns to its earlier state. */
+    const reportOf = strOrNull(attempt, 'tool_execution_id');
+    const at = now();
+    switch (outcome.kind) {
+      case 'succeeded': {
+        run(
+          `UPDATE attempts SET state = 'succeeded', stage = NULL, model = ?, effort = ?, speed = ?, thread_id = COALESCE(thread_id, ?), turn_id = COALESCE(turn_id, ?), finished_at = ? WHERE id = ?`,
+          outcome.used.model, outcome.used.effort, outcome.used.speed, outcome.threadId, outcome.turnId, at, claim.attemptId,
+        );
+        const threadBot = str(get('SELECT bot_id FROM messages WHERE id = ?', str(work, 'request_message_id')) ?? {}, 'bot_id');
+        // Only Mino, in its own thread, may propose a mission; any other bot's proposal is dropped.
+        const handoff = reportOf === null && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
+        run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at, handoff) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
+          newId('m'), str(work, 'bot_id'), outcome.reply.reply, claim.attemptId, at, handoff ? JSON.stringify(handoff) : null);
+        if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'done') };
+        const deliverable = outcome.reply.deliverable;
+        if (deliverable) {
+          insertVersion({ workId: claim.workId, title: deliverable.title, body: deliverable.body, source: 'result', restoredFrom: null, attemptId: claim.attemptId });
+          setWorkState(work, 'review', deliverable.title);
+          return { kind: 'recorded', state: 'review' };
+        }
+        setWorkState(work, 'done');
+        return { kind: 'recorded', state: 'done' };
+      }
+      case 'failed': {
+        run(`UPDATE attempts SET state = 'failed', stage = NULL, error_code = ?, error_text = ?, finished_at = ? WHERE id = ?`,
+          outcome.code, outcome.message, at, claim.attemptId);
+        if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'failed') };
+        setWorkState(work, 'failed');
+        return { kind: 'recorded', state: 'failed' };
+      }
+      case 'cancelled': {
+        run(`UPDATE attempts SET state = 'cancelled', stage = NULL, finished_at = ? WHERE id = ?`, at, claim.attemptId);
+        if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'suppressed') };
+        setWorkState(work, 'cancelled');
+        return { kind: 'recorded', state: 'cancelled' };
+      }
+      default: {
+        const _exhaustive: never = outcome;
+        return _exhaustive;
+      }
+    }
   }
 
   function finishTaskStep(claim: Claim, given: EngineOutcome, attempt: Row, work: Row): FinishResult {
@@ -1762,6 +1796,7 @@ export function openStore(options: StoreOptions): Store {
 
   function recoverInterrupted(): number {
     const recovered = transaction(() => {
+      const unknownSends = tools.recover();
       const interrupted = run(
         `UPDATE attempts SET state = 'interrupted', stage = NULL, error_code = 'interrupted', error_text = ?, finished_at = ? WHERE state = 'running'`,
         ENGINE_ERRORS.interrupted, now(),
@@ -1770,9 +1805,10 @@ export function openStore(options: StoreOptions): Store {
       const availableDocuments = run(`UPDATE works SET state = 'review', updated_at = ?
         WHERE task_id IS NOT NULL AND state IN ('failed','cancelled')
           AND EXISTS (SELECT 1 FROM versions v WHERE v.work_id = works.id)`, now());
-      return {interrupted,availableDocuments};
+      tools.syncDrafts();
+      return {interrupted,availableDocuments,unknownSends};
     });
-    if (recovered.interrupted > 0 || recovered.availableDocuments > 0) changed();
+    if (recovered.interrupted > 0 || recovered.availableDocuments > 0 || recovered.unknownSends > 0) changed();
     return recovered.interrupted;
   }
 
@@ -2034,6 +2070,7 @@ export function openStore(options: StoreOptions): Store {
 
   return {
     get rev() { return rev; },
+    tools,
     dispatch,
     view,
     diagnostics,
