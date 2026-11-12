@@ -2,7 +2,7 @@
   "name": "mino",
   "version": "0.1.0",
   "private": true,
-  "description": "Mino, un fil local o\u00f9 des bots r\u00e9pondent avec Codex.",
+  "description": "Mino, un fil local où des bots répondent avec Codex.",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -16,6 +16,8 @@
     "compare:context": "npm run build && node tools/compare-context.mjs"
   },
   "dependencies": {
+    "@composio/core": "0.29.0",
+    "ajv": "8.20.0",
     "markdown-it": "15.0.3",
     "qrcode": "^1.5.4",
     "zod": "4.6.7"
