@@ -12,7 +12,7 @@ import type { PcView, ToolsReplyOf } from "../server/src/tools-protocol";
 // every account, action, address and result on these pages is synthetic.
 
 const TOOLS = "http://127.0.0.1:4398";
-const EVIDENCE = ".audit/composio/evidence";
+const EVIDENCE = ".audit/composio-ux/evidence";
 const HEADERS = { origin: TOOLS, "x-mino-csrf": "test-only-token" };
 
 async function pcView(request: APIRequestContext): Promise<PcView> {
@@ -89,26 +89,40 @@ test("parcours complet : relier un compte, donner un droit, proposer, approuver 
   const connections = preferences.getByRole("region", {
     name: "Services connectés",
   });
-  await expect(connections).toContainText("Aucun compte relié");
-  await connections.getByRole("button", { name: "Relier un service" }).click();
+  const stop = connections.getByRole("button", {
+    name: "Arrêter la vérification",
+  });
+  if (await stop.isVisible()) await stop.click();
   const service = connections.getByLabel("Service à relier");
   await expect(service.locator("option")).toHaveText([
-    "Courriel (synthétique) · gmail",
-    "Messagerie d’équipe (synthétique) · slack",
-    "Notes par clé (synthétique) · notion (indisponible)",
+    "Courriel (synthétique)",
+    "Messagerie d’équipe (synthétique)",
+    "Notes par clé (synthétique) (indisponible)",
   ]);
-  await expect(connections).toContainText("Seul OAuth 2 est pris en charge");
-  await service.selectOption({ label: "Courriel (synthétique) · gmail" });
-  await connections.getByLabel("Nom de ce compte").fill("Courriel de recette");
   await connections
-    .getByRole("button", { name: "Préparer la connexion" })
+    .getByText("Services indisponibles", { exact: true })
     .click();
-  await expect(
-    connections.getByRole("link", { name: "Ouvrir la page de connexion" }),
-  ).toHaveAttribute(
-    "href",
-    /^https:\/\/connexion-synthetique\.invalid\/lien\//,
-  );
+  await expect(connections).toContainText("Seul OAuth 2 est pris en charge");
+  await service.selectOption({ label: "Courriel (synthétique)" });
+  await connections
+    .getByText("Nom du compte (facultatif)", { exact: true })
+    .click();
+  await connections.getByLabel("Nom de ce compte").fill("Courriel de recette");
+  await page
+    .context()
+    .route("https://connexion-synthetique.invalid/**", (route) =>
+      route.fulfill({ body: "Fournisseur simulé", contentType: "text/plain" }),
+    );
+  const opened = page.waitForEvent("popup");
+  await connections
+    .getByRole("button", { name: "Connecter", exact: true })
+    .click();
+  const popup = await opened;
+  await expect
+    .poll(() => popup.url())
+    .toMatch(/^https:\/\/connexion-synthetique\.invalid\/lien\//);
+  await popup.close();
+  await page.bringToFront();
   const stored = await page.evaluate(() =>
     JSON.stringify([{ ...localStorage }, { ...sessionStorage }]),
   );
@@ -116,18 +130,12 @@ test("parcours complet : relier un compte, donner un droit, proposer, approuver 
   expect(JSON.stringify(await pcView(request))).not.toContain(
     "connexion-synthetique",
   );
-  await connections
-    .getByRole("button", { name: "Vérifier la connexion" })
-    .click();
-  await expect(connections).toContainText(
-    "Le fournisseur confirme ce compte : il est actif.",
-  );
-  await expect(connections.getByRole("listitem")).toContainText([
-    "Courriel de recette",
-  ]);
-  await expect(connections.getByRole("listitem").first()).toContainText(
-    "Actif",
-  );
+  await expect(connections).toContainText("Compte connecté.");
+  await expect(
+    connections
+      .getByRole("listitem")
+      .filter({ hasText: "Courriel de recette" }),
+  ).toContainText("Connecté");
   await page.screenshot({
     path: `${EVIDENCE}/apres-composio-preferences.png`,
     fullPage: true,

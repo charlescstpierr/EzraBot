@@ -134,3 +134,20 @@
 .ez-chat-services input {
   margin-top: 2px;
 }
+.ez-connection-details {
+  margin: 12px 0;
+}
+.ez-tools summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #56634a;
+}
+.ez-tools select,
+.ez-tools input {
+  max-width: 100%;
+  min-width: 0;
+}
+.ez-tools .notice button,
+.ez-tools .notice a {
+  margin: 4px 6px 4px 0;
+}

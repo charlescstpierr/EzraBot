@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, RefreshCw, ShieldCheck, X } from "lucide-react";
 import type { BotView, MessageView } from "../../server/src/protocol";
 import type {
@@ -82,31 +82,144 @@ function useToolCommand(port: Port) {
 const failureText = (reason: unknown) =>
   reason instanceof Error ? reason.message : "Le service ne répond pas.";
 
+type ConnectionState =
+  | { kind: "selection" }
+  | { kind: "opening" }
+  | { kind: "waiting"; linkId: string; fallback: string | null }
+  | { kind: "success" }
+  | {
+      kind: "error";
+      message: string;
+      linkId: string | null;
+      fallback: string | null;
+    };
+type CatalogState =
+  | { kind: "loading" }
+  | { kind: "ready"; services: ServiceOption[] }
+  | { kind: "error"; message: string };
+
 export function ToolConnections({ port }: { port: Port }) {
   const tools = port.view.tools;
-  const [services, setServices] = useState<ServiceOption[] | null>(null),
-    [serviceId, setServiceId] = useState(""),
-    [alias, setAlias] = useState(""),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
-  const [redirect, setRedirect] = useState<{
-    toolkit: string;
-    url: string;
-  } | null>(null);
-  async function attempt(work: () => Promise<void>) {
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      await work();
-    } catch (reason) {
-      setError(failureText(reason));
-    } finally {
-      setBusy(false);
+  const [catalog, setCatalog] = useState<CatalogState>({ kind: "loading" });
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [serviceId, setServiceId] = useState("");
+  const [alias, setAlias] = useState("");
+  const [state, setState] = useState<ConnectionState>(() => {
+    const pending = tools.links.find((link) => link.state === "pending");
+    return pending
+      ? { kind: "waiting", linkId: pending.id, fallback: null }
+      : { kind: "selection" };
+  });
+  const lifecycle = useRef<AbortController | null>(null);
+  const opening = useRef(false);
+  const popup = useRef<Window | null>(null);
+  const checkNow = useRef<(() => void) | null>(null);
+  const configured = tools.status.state !== "missing_key";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    lifecycle.current = controller;
+    return () => {
+      controller.abort();
+      if (opening.current) popup.current?.close();
+      lifecycle.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!configured) return;
+    const controller = new AbortController();
+    setCatalog({ kind: "loading" });
+    void toolsRequest("catalog", "catalog", undefined, controller.signal)
+      .then((reply) => {
+        if (controller.signal.aborted) return;
+        setCatalog({ kind: "ready", services: reply.services });
+        setServiceId(
+          reply.services.find((service) => service.connectable)?.id ?? "",
+        );
+      })
+      .catch((reason) => {
+        if (!controller.signal.aborted)
+          setCatalog({ kind: "error", message: failureText(reason) });
+      });
+    return () => controller.abort();
+  }, [configured, catalogAttempt]);
+
+  const waitingId = state.kind === "waiting" ? state.linkId : null;
+  const waitingFallback = state.kind === "waiting" ? state.fallback : null;
+  useEffect(() => {
+    if (!configured || !waitingId) return;
+    const controller = new AbortController();
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (next: ConnectionState) => {
+      controller.abort();
+      clearTimeout(timer);
+      setState(next);
+    };
+    const deadline = setTimeout(
+      () =>
+        finish({
+          kind: "error",
+          linkId: waitingId,
+          fallback: waitingFallback,
+          message:
+            "La connexion attend encore votre autorisation. Vérifiez de nouveau quand vous avez terminé chez le fournisseur.",
+        }),
+      120_000,
+    );
+    async function check() {
+      if (inFlight || controller.signal.aborted) return;
+      clearTimeout(timer);
+      inFlight = true;
+      try {
+        const reply = await toolsRequest(
+          "checked",
+          `links/${encodeURIComponent(waitingId ?? "")}/check`,
+          {},
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        if (reply.link.state === "active") finish({ kind: "success" });
+        else if (reply.link.state === "failed")
+          finish({
+            kind: "error",
+            linkId: waitingId,
+            fallback: waitingFallback,
+            message:
+              "La connexion n’a pas abouti. Vous pouvez vérifier de nouveau ou choisir un autre compte.",
+          });
+        else timer = setTimeout(() => void check(), 3_000);
+      } catch (reason) {
+        if (!controller.signal.aborted)
+          finish({
+            kind: "error",
+            linkId: waitingId,
+            fallback: waitingFallback,
+            message: failureText(reason),
+          });
+      } finally {
+        inFlight = false;
+      }
     }
-  }
-  if (tools.status.state === "missing_key")
+    const onReturn = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+    checkNow.current = () => void check();
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    timer = setTimeout(() => void check(), 1_000);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      clearTimeout(deadline);
+      checkNow.current = null;
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [configured, waitingId, waitingFallback]);
+
+  if (!configured)
     return (
       <section className="ez-tools" aria-label="Services connectés">
         <h3>Services connectés</h3>
@@ -115,57 +228,103 @@ export function ToolConnections({ port }: { port: Port }) {
         </p>
       </section>
     );
-  const chosen = services?.find((service) => service.id === serviceId);
+  const services = catalog.kind === "ready" ? catalog.services : [];
+  const chosen = services.find((service) => service.id === serviceId);
+  const busy = state.kind === "opening" || state.kind === "waiting";
+  function defaultAlias(service: ServiceOption) {
+    const base = service.name.slice(0, 36);
+    const used = new Set(tools.accounts.map((account) => account.alias));
+    let name = base;
+    for (let number = 2; used.has(name); number += 1)
+      name = `${base} ${number}`.slice(0, 40);
+    return name;
+  }
+  async function connect() {
+    const controller = lifecycle.current;
+    if (!chosen?.connectable || !controller || opening.current) return;
+    opening.current = true;
+    const child = window.open("about:blank", "_blank");
+    popup.current = child;
+    if (child) child.opener = null;
+    setState({ kind: "opening" });
+    try {
+      const reply = await toolsRequest(
+        "link",
+        "link",
+        {
+          serviceId: chosen.id,
+          alias: alias.trim() || defaultAlias(chosen),
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) {
+        child?.close();
+        return;
+      }
+      if (new URL(reply.redirectUrl).protocol !== "https:")
+        throw Error("Adresse de connexion invalide.");
+      let fallback: string | null = null;
+      if (child && !child.closed) child.location.href = reply.redirectUrl;
+      else fallback = reply.redirectUrl;
+      setState({ kind: "waiting", linkId: reply.linkId, fallback });
+      setAlias("");
+    } catch (reason) {
+      child?.close();
+      if (!controller.signal.aborted)
+        setState({
+          kind: "error",
+          message: failureText(reason),
+          linkId: null,
+          fallback: null,
+        });
+    } finally {
+      opening.current = false;
+    }
+  }
   return (
     <section className="ez-tools" aria-label="Services connectés">
       <h3>Services connectés</h3>
       <p>
-        Un personnage ne peut agir qu’avec un compte relié ici, les outils que
-        vous lui donnez, et votre confirmation pour chaque action.
+        Connectez un compte, puis choisissez ses droits dans la page du
+        personnage. Chaque action demandera votre confirmation.
       </p>
-      {tools.accounts.length === 0 && tools.links.length === 0 && (
+      {!tools.accounts.length && !tools.links.length && (
         <p>Aucun compte relié pour le moment.</p>
       )}
       <ul className="ez-tools-list">
-        {tools.accounts.map((account) => (
-          <li key={account.id}>
-            <strong>{account.alias}</strong>
-            <span>{account.toolkit}</span>
-            <span>
-              {account.status === "ACTIVE"
-                ? "Actif"
-                : `Non actif (${account.status})`}
-            </span>
-          </li>
-        ))}
+        {tools.accounts
+          .filter(
+            (account) =>
+              !tools.links.some((link) => link.accountId === account.id),
+          )
+          .map((account) => (
+            <li key={account.id}>
+              <strong>{account.alias}</strong>
+              <span>
+                {account.status === "ACTIVE" ? "Connecté" : "Compte inactif"}
+              </span>
+            </li>
+          ))}
         {tools.links.map((link) => (
           <li key={link.id}>
-            <strong>{link.toolkit}</strong>
+            <strong>
+              {tools.accounts.find((account) => account.id === link.accountId)
+                ?.alias ??
+                services.find((service) => service.toolkit === link.toolkit)
+                  ?.name ??
+                "Compte à connecter"}
+            </strong>
             <span>
               {link.state === "failed"
                 ? "Connexion non aboutie"
-                : "Connexion à vérifier"}
+                : "Connexion en attente"}
             </span>
             <button
               type="button"
               className="outline"
               disabled={busy}
               onClick={() =>
-                void attempt(async () => {
-                  const reply = await toolsRequest(
-                    "checked",
-                    `links/${encodeURIComponent(link.id)}/check`,
-                    {},
-                  );
-                  if (reply.link.state !== "pending") setRedirect(null);
-                  setNotice(
-                    reply.link.state === "active"
-                      ? "Le fournisseur confirme ce compte : il est actif."
-                      : reply.link.state === "failed"
-                        ? "Le fournisseur signale que cette connexion n’a pas abouti."
-                        : "Le fournisseur ne confirme pas encore ce compte. Terminez la connexion, puis vérifiez de nouveau.",
-                  );
-                })
+                setState({ kind: "waiting", linkId: link.id, fallback: null })
               }
             >
               Vérifier la connexion
@@ -173,41 +332,31 @@ export function ToolConnections({ port }: { port: Port }) {
           </li>
         ))}
       </ul>
-      {services === null ? (
-        <button
-          type="button"
-          className="outline"
-          disabled={busy}
-          onClick={() =>
-            void attempt(async () => {
-              const reply = await toolsRequest("catalog", "catalog");
-              setServices(reply.services);
-              setServiceId(
-                reply.services.find((service) => service.connectable)?.id ?? "",
-              );
-            })
-          }
-        >
-          Relier un service
-        </button>
-      ) : (
+      {catalog.kind === "loading" && (
+        <p role="status">Chargement des services…</p>
+      )}
+      {catalog.kind === "error" && (
+        <div role="alert">
+          <p>{catalog.message}</p>
+          <button
+            className="outline"
+            onClick={() => setCatalogAttempt((attempt) => attempt + 1)}
+          >
+            Recharger les services
+          </button>
+        </div>
+      )}
+      {catalog.kind === "ready" && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!chosen?.connectable || !alias.trim()) return;
-            void attempt(async () => {
-              const reply = await toolsRequest("link", "link", {
-                serviceId: chosen.id,
-                alias: alias.trim(),
-              });
-              setRedirect({ toolkit: chosen.toolkit, url: reply.redirectUrl });
-              setAlias("");
-            });
+            if (!busy) void connect();
           }}
         >
           <label>
             Service à relier
             <select
+              disabled={busy}
               value={serviceId}
               onChange={(event) => setServiceId(event.target.value)}
             >
@@ -217,64 +366,107 @@ export function ToolConnections({ port }: { port: Port }) {
                   value={service.id}
                   disabled={!service.connectable}
                 >
-                  {service.name} · {service.toolkit}
+                  {service.name}
                   {service.connectable ? "" : " (indisponible)"}
                 </option>
               ))}
             </select>
           </label>
-          {services
-            .filter((service) => !service.connectable)
-            .map((service) => (
-              <small key={service.id}>
-                {service.name} : {service.reason}
-              </small>
-            ))}
-          {!services.length && (
-            <p className="notice">
-              Le projet Composio de ce serveur ne propose aucun service.
-            </p>
-          )}
-          <label>
-            Nom de ce compte
-            <input
-              required
-              maxLength={40}
-              value={alias}
-              onChange={(event) => setAlias(event.target.value)}
-              placeholder="Par exemple : Courriel personnel"
-            />
-          </label>
-          <button
-            className="outline"
-            disabled={busy || !chosen?.connectable || !alias.trim()}
-          >
-            Préparer la connexion
+          <button className="black" disabled={busy || !chosen?.connectable}>
+            {state.kind === "opening" ? "Ouverture…" : "Connecter"}
           </button>
+          {services.some((service) => !service.connectable) && (
+            <details>
+              <summary>Services indisponibles</summary>
+              {services
+                .filter((service) => !service.connectable)
+                .map((service) => (
+                  <small key={service.id}>
+                    {service.name} · {service.reason}
+                  </small>
+                ))}
+            </details>
+          )}
+          {!services.length && (
+            <p>Ce serveur ne propose aucun service à connecter.</p>
+          )}
+          <details className="ez-connection-details">
+            <summary>Nom du compte (facultatif)</summary>
+            <label>
+              Nom de ce compte
+              <input
+                disabled={busy}
+                maxLength={40}
+                value={alias}
+                onChange={(event) => setAlias(event.target.value)}
+                placeholder={chosen ? defaultAlias(chosen) : "Nom du compte"}
+              />
+            </label>
+            <small>
+              Utilisez un nom distinct pour reconnaître le compte sur les
+              demandes de confirmation.
+            </small>
+          </details>
         </form>
       )}
-      {redirect && (
+      {state.kind === "waiting" && (
         <div className="notice" role="status">
           <p>
-            La page de connexion de {redirect.toolkit} est prête. Elle s’ouvre
-            chez le fournisseur. Revenez ensuite ici et choisissez « Vérifier la
-            connexion ».
+            Terminez la connexion chez le fournisseur. La vérification se fait
+            automatiquement à votre retour.
           </p>
+          <button
+            type="button"
+            className="outline"
+            onClick={() => checkNow.current?.()}
+          >
+            Vérifier maintenant
+          </button>
+          <button
+            type="button"
+            className="outline"
+            onClick={() => setState({ kind: "selection" })}
+          >
+            Arrêter la vérification
+          </button>
+        </div>
+      )}
+      {(state.kind === "waiting" || state.kind === "error") &&
+        state.fallback && (
           <a
-            className="black"
-            href={redirect.url}
+            className="black ez-connection-fallback"
+            href={state.fallback}
             target="_blank"
             rel="noopener noreferrer"
           >
             Ouvrir la page de connexion
           </a>
-        </div>
-      )}
-      {notice && <p role="status">{notice}</p>}
-      {error && (
-        <p className="notice" role="alert">
-          {error}
+        )}
+      {state.kind === "success" && (
+        <p role="status">
+          Compte connecté. Vous pouvez maintenant choisir ses droits dans la
+          page du personnage.
         </p>
+      )}
+      {state.kind === "error" && (
+        <div className="notice" role="alert">
+          <p>{state.message}</p>
+          {state.linkId && (
+            <button
+              className="outline"
+              onClick={() => {
+                if (state.linkId)
+                  setState({
+                    kind: "waiting",
+                    linkId: state.linkId,
+                    fallback: state.fallback,
+                  });
+              }}
+            >
+              Réessayer la vérification
+            </button>
+          )}
+        </div>
       )}
     </section>
   );

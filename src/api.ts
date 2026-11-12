@@ -80,8 +80,10 @@ export async function toolsRequest<K extends ToolsReply["kind"]>(
   kind: K,
   route: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<ToolsReplyOf<K>> {
   const response = await fetch(`/api/tools/${route}`, {
+    signal,
     cache: "no-store",
     headers: {
       "x-mino-csrf": csrfToken(),
