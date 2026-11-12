@@ -3,8 +3,18 @@ import type { PromptContent } from "../../server/web/drafts";
 
 const unsaved = new Map<string, string | null>();
 
-type Say = CommandOf<"message.say">;
-export type SavedSend = { command: Say; raw: PromptContent };
+/**
+ * The two ways the composer sends a message. `message.say` lets the server route a document request to the document mode.
+ * `message.send` without `document` keeps the message in the conversation, where a bot may propose a service action.
+ * A saved send keeps its exact command: a retry never changes its kind.
+ */
+export type Sendable = CommandOf<"message.say"> | CommandOf<"message.send">;
+export type SavedSend = { command: Sendable; raw: PromptContent };
+export const isSendable = (
+  command: ReturnType<typeof CommandSchema.parse>,
+): command is Sendable =>
+  command.type === "message.say" ||
+  (command.type === "message.send" && command.document === undefined);
 export function storageRead(key: string): string | null {
   try {
     if (unsaved.has(key)) return unsaved.get(key) ?? null;
@@ -33,7 +43,7 @@ export function readPending(key: string, botId: string): SavedSend | null {
     );
     if (
       !parsed.success ||
-      parsed.data.type !== "message.say" ||
+      !isSendable(parsed.data) ||
       parsed.data.botId !== botId
     )
       return null;

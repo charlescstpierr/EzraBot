@@ -11,6 +11,7 @@ import {
 import type { AppOutcome, Port } from "../port";
 import { uid } from "../api";
 import { Mascot } from "../Mascot";
+import { ToolGrants } from "../tools";
 import "./style.css";
 const deletionLabels: Record<string, string> = {
   messages: "Messages",
@@ -341,6 +342,7 @@ function Profile({ port, bot }: { port: Port; bot: BotView }) {
       </button>
       {reset.feedback}
       <EngineSettings port={port} bot={bot} />
+      <ToolGrants port={port} bot={bot} />
       <section>
         <h3>Sa mémoire</h3>
         <p>

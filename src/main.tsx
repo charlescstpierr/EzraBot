@@ -16,7 +16,8 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import type { AppView, CommandOf } from "../server/src/protocol";
+import type { CommandOf } from "../server/src/protocol";
+import type { PcView } from "../server/src/tools-protocol";
 import type { AgentsView } from "../server/src/agent-protocol";
 import { openDrafts, type KeyValueStorage } from "../server/web/drafts";
 import { forgetSearch } from "../server/web/search";
@@ -38,6 +39,7 @@ import { TaskCard, DocumentPanel } from "./documents";
 import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
 import { CharacterPanel, CharacterCreate } from "./characters";
+import { ToolCards, ToolConnections } from "./tools";
 import "./style.css";
 function browserStorage(
   kind: "localStorage" | "sessionStorage",
@@ -49,7 +51,7 @@ function browserStorage(
   }
 }
 function App() {
-  const [view, setView] = useState<AppView | null>(null),
+  const [view, setView] = useState<PcView | null>(null),
     [agents, setAgents] = useState<AgentsView | null>(null),
     [offline, setOffline] = useState(""),
     [error, setError] = useState(""),
@@ -71,7 +73,7 @@ function App() {
     currentSpace = useRef<string | null>(null),
     press = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyApp = useCallback(
-    (next: AppView) => {
+    (next: PcView) => {
       if (retiredSpaces.current.has(next.spaceId)) return;
       if (
         currentSpace.current !== null &&
@@ -160,6 +162,7 @@ function App() {
     () =>
       outbox && {
         app: runner.app,
+        tools: runner.tools,
         agents: (command) =>
           outbox.run(
             command,
@@ -532,6 +535,7 @@ function App() {
               mission: (message) => (
                 <MissionProposal port={port} message={message} />
               ),
+              tools: (message) => <ToolCards port={port} message={message} />,
             }}
           />
         ) : (
@@ -747,6 +751,7 @@ function App() {
                   Client de référence
                   <ArrowRight size={16} />
                 </a>
+                {port && <ToolConnections port={port} />}
                 <p className="notice">
                   Les animations suivent le mouvement réduit du système. Aucun
                   secret n’est stocké dans le client.
