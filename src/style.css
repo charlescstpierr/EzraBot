@@ -312,7 +312,7 @@ main {
   flex-direction: column;
   position: relative;
 }
-header {
+main > header {
   height: 82px;
   padding: 0 34px;
   display: flex;
@@ -1204,7 +1204,7 @@ pre {
   .header-left {
     gap: 4px;
   }
-  header {
+  main > header {
     height: 65px;
     padding: 0 12px;
   }

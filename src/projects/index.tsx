@@ -6,6 +6,7 @@ import {
 } from "../../server/src/agent-protocol";
 import type { AgentsOutcome, Port } from "../port";
 import { statuses, uid } from "../api";
+import { AgentCommandFeedback, useAgentCommand } from "../agent-outbox";
 import { Mascot } from "../Mascot";
 import "./projects.css";
 
@@ -21,45 +22,23 @@ export function ProjectsPage({ port }: { port: Port }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [editCheck, setEditCheck] = useState("");
   const [archiving, setArchiving] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<AgentsOutcome | null>(null);
-  const [sending, setSending] = useState(false);
-  const pending = useRef<AgentCommand | null>(null);
-  const busy = useRef(false);
-  const locked = sending || outcome?.kind === "unknown";
+  const command = useAgentCommand(port);
+  const { sending, locked } = command;
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (adding) dialog.current?.showModal();
   }, [adding]);
-  async function transmit() {
-    if (busy.current || !pending.current) return;
-    busy.current = true;
-    setSending(true);
-    let result: AgentsOutcome;
-    try {
-      result = await port.run.agents(pending.current);
-    } catch {
-      result = {
-        kind: "unknown",
-        message: "Confirmation non reçue. Réessayez le même envoi.",
-      };
-    }
-    if (result.kind !== "unknown") pending.current = null;
-    if (result.kind === "accepted") {
-      setAdding(false);
-      setPath("");
-      setName("");
-      setCheck("");
-      setEditing(null);
-      setArchiving(null);
-    }
-    setOutcome(result);
-    busy.current = false;
-    setSending(false);
+  function settle(result: AgentsOutcome | null) {
+    if (result?.kind !== "accepted") return;
+    setAdding(false);
+    setPath("");
+    setName("");
+    setCheck("");
+    setEditing(null);
+    setArchiving(null);
   }
-  function send(command: AgentCommand) {
-    if (busy.current || pending.current) return;
-    pending.current = command;
-    void transmit();
+  function send(input: AgentCommand) {
+    void command.send(input).then(settle);
   }
   const active =
     port.agents?.projects.filter((project) => !project.archived) ?? [];
@@ -76,23 +55,12 @@ export function ProjectsPage({ port }: { port: Port }) {
           Ajouter un dossier
         </button>
       </header>
-      {sending && <p role="status">Envoi en cours…</p>}
-      {!adding && outcome && outcome.kind !== "accepted" && (
-        <div className="projects-error" role="alert">
-          <p>
-            {outcome.kind === "refused"
-              ? `${outcome.code} · `
-              : outcome.kind === "rejected"
-                ? `HTTP ${outcome.status} · `
-                : ""}
-            {outcome.message}
-          </p>
-          {outcome.kind === "unknown" && (
-            <button disabled={sending} onClick={() => void transmit()}>
-              Réessayer le même envoi
-            </button>
-          )}
-        </div>
+      {!adding && (
+        <AgentCommandFeedback
+          command={command}
+          afterRetry={settle}
+          className="projects-error"
+        />
       )}
       {!port.agents ? (
         <p>Chargement des projets…</p>
@@ -248,7 +216,7 @@ export function ProjectsPage({ port }: { port: Port }) {
           ref={dialog}
           onCancel={(event) => {
             event.preventDefault();
-            if (!locked) setAdding(false);
+            if (!sending) setAdding(false);
           }}
           aria-labelledby="projects-add-title"
           className="projects-dialog"
@@ -306,26 +274,10 @@ export function ProjectsPage({ port }: { port: Port }) {
               <button type="submit">Confier ce dossier</button>
             </fieldset>
           </form>
-          <button disabled={locked} onClick={() => setAdding(false)}>
+          <button disabled={sending} onClick={() => setAdding(false)}>
             Fermer
           </button>
-          {outcome && outcome.kind !== "accepted" && (
-            <div role="alert">
-              <p>
-                {outcome.kind === "refused"
-                  ? `${outcome.code} · `
-                  : outcome.kind === "rejected"
-                    ? `HTTP ${outcome.status} · `
-                    : ""}
-                {outcome.message}
-              </p>
-              {outcome.kind === "unknown" && (
-                <button disabled={sending} onClick={() => void transmit()}>
-                  Réessayer le même envoi
-                </button>
-              )}
-            </div>
-          )}
+          <AgentCommandFeedback command={command} afterRetry={settle} />
         </dialog>
       )}
     </section>

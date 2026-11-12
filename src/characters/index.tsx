@@ -611,6 +611,9 @@ function DeleteCharacter({ port, bot }: { port: Port; bot: BotView }) {
     [name, setName] = useState("");
   const action = useAction(port);
   const [counts, setCounts] = useState(() => bot.deletion);
+  const countsChanged = Object.entries(counts).some(
+    ([key, value]) => bot.deletion[key as keyof typeof counts] !== value,
+  );
   return (
     <section className="ez-character-delete">
       <h3>Supprimer ce personnage</h3>
@@ -633,6 +636,7 @@ function DeleteCharacter({ port, bot }: { port: Port; bot: BotView }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            if (countsChanged) return;
             void action.perform(
               {
                 type: "bot.delete",
@@ -662,6 +666,31 @@ function DeleteCharacter({ port, bot }: { port: Port; bot: BotView }) {
                 </div>
               ))}
             </dl>
+            {countsChanged && (
+              <div role="alert">
+                <p>
+                  Les éléments à supprimer ont changé. Vérifiez les nouveaux
+                  décomptes.
+                </p>
+                <dl>
+                  {Object.entries(bot.deletion).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{deletionLabels[key] ?? key}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCounts(bot.deletion);
+                    setName("");
+                  }}
+                >
+                  Actualiser les décomptes
+                </button>
+              </div>
+            )}
             <label>
               Recopier le nom « {bot.name} »
               <input
@@ -670,7 +699,10 @@ function DeleteCharacter({ port, bot }: { port: Port; bot: BotView }) {
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
-            <button className="black" disabled={name !== bot.name}>
+            <button
+              className="black"
+              disabled={countsChanged || name !== bot.name}
+            >
               Supprimer définitivement {bot.name}
             </button>
             <button

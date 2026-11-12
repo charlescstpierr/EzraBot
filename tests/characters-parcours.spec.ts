@@ -76,6 +76,24 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
   await page
     .getByRole("button", { name: "Examiner la suppression", exact: true })
     .click();
+  await other
+    .getByRole("textbox", { name: "Un souvenir à garder", exact: true })
+    .fill("Un second souvenir synthétique");
+  await other
+    .getByRole("button", { name: "Ajouter à sa mémoire", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Actualiser les décomptes", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: `Supprimer définitivement ${name}`,
+      exact: true,
+    }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Actualiser les décomptes", exact: true })
+    .click();
   await page
     .getByLabel(`Recopier le nom « ${name} »`, { exact: true })
     .fill(name);

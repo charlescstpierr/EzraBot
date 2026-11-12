@@ -155,7 +155,7 @@ test("préparer ne démarre rien et un résultat inconnu garde la même commande
   await expect(page.getByLabel("Objectif à confier")).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Fermer la préparation" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page.getByRole("button", { name: "Réessayer le même envoi" }).click();
   await expect(
     page.getByRole("heading", { name: detail.title, exact: true }),

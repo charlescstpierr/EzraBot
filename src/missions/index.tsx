@@ -153,7 +153,7 @@ function MissionForm({
       </fieldset>
       <CommandFeedback command={command} afterRetry={completed} />
       {cancel && (
-        <button type="button" disabled={command.locked} onClick={cancel}>
+        <button type="button" disabled={command.sending} onClick={cancel}>
           Fermer la préparation
         </button>
       )}

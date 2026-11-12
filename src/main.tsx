@@ -21,7 +21,14 @@ import type { AgentsView } from "../server/src/agent-protocol";
 import { openDrafts, type KeyValueStorage } from "../server/web/drafts";
 import { forgetSearch } from "../server/web/search";
 import { createRunner, getAppView, getAgentsView, uid } from "./api";
-import type { Port, Route } from "./port";
+import type { CommandRunner, Port, Route } from "./port";
+import {
+  AgentOutboxProvider,
+  AgentRecovery,
+  OUTBOX_KEY,
+  commandOwners,
+  openAgentOutbox,
+} from "./agent-outbox";
 import { Mascot } from "./Mascot";
 import { Markdown } from "./Markdown";
 import { ChatPage } from "./chat";
@@ -136,6 +143,42 @@ function App() {
     };
   }, [applyApp, applyAgents]);
   const space = view?.spaceId;
+  const outbox = useMemo(
+    () =>
+      space === undefined
+        ? null
+        : openAgentOutbox({
+            spaceId: space,
+            storage: browserStorage("localStorage"),
+            send: runner.agents,
+          }),
+    [space, runner],
+  );
+  const shown = useRef({ view, agents });
+  shown.current = { view, agents };
+  const run = useMemo<CommandRunner | null>(
+    () =>
+      outbox && {
+        app: runner.app,
+        agents: (command) =>
+          outbox.run(
+            command,
+            commandOwners(command, {
+              messages: shown.current.view?.messages ?? [],
+              missions: shown.current.agents?.missions ?? [],
+            }),
+          ),
+      },
+    [runner, outbox],
+  );
+  useEffect(() => {
+    if (!outbox) return;
+    const changed = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith(OUTBOX_KEY)) outbox.sync();
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [outbox]);
   useEffect(() => {
     if (!view) return;
     drafts.useSpace(view.spaceId);
@@ -161,6 +204,7 @@ function App() {
       })),
     ];
     drafts.purge(view.spaceId, scopes);
+    outbox?.purge(view.purged.botIds);
     if (scopes.length) {
       forgetSearch();
       for (const id of view.purged.botIds) {
@@ -180,7 +224,7 @@ function App() {
       )
         setRoute({ page: "characters" });
     }
-  }, [view, drafts, route]);
+  }, [view, drafts, outbox, route]);
   useEffect(() => {
     if (!dialog) return;
     const previous =
@@ -238,7 +282,7 @@ function App() {
     if (next.page === "chat" && next.botId && next.botId !== view?.activeBotId)
       void select({ type: "bot.select", requestId: uid(), botId: next.botId });
   }
-  const port: Port | null = view ? { view, agents, run: runner, go } : null;
+  const port: Port | null = view && run ? { view, agents, run, go } : null;
   const selectedBot = view?.bots.find(
     (b) =>
       b.id ===
@@ -265,7 +309,7 @@ function App() {
           : { page: "characters" },
     );
   }
-  return (
+  const shell = (
     <div className="app">
       <aside className={sidebar ? "sidebar open" : "sidebar"}>
         <a href="/" className="brand">
@@ -468,6 +512,7 @@ function App() {
             </button>
           </div>
         )}
+        {port && <AgentRecovery port={port} />}
         {!port ? (
           <div className="empty">
             <h2>Connexion à votre ordinateur…</h2>
@@ -713,5 +758,6 @@ function App() {
       )}
     </div>
   );
+  return <AgentOutboxProvider value={outbox}>{shell}</AgentOutboxProvider>;
 }
 createRoot(document.getElementById("root")!).render(<App />);

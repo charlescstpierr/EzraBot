@@ -68,9 +68,10 @@ test("ajout rejouable, contrôle refusé puis corrigé et archivage confirmé", 
     form.requestSubmit();
   });
   await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByLabel("Chemin complet du dossier")).toBeDisabled();
   await expect(
     dialog.getByRole("button", { name: "Fermer", exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await dialog.getByRole("button", { name: "Réessayer le même envoi" }).click();
   await expect(dialog).toHaveCount(0);
   expect(commands).toHaveLength(2);

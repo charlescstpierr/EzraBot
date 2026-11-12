@@ -1,0 +1,49 @@
+.agent-outbox {
+  margin: 12px 24px 0;
+  padding: 12px 14px;
+  background: #fff6ef;
+  color: #9c5528;
+  border: 1px solid #eed6be;
+  border-radius: 8px;
+  font-size: 12px;
+  display: grid;
+  gap: 10px;
+}
+.agent-outbox article,
+.agent-outbox-result {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.agent-outbox h2 {
+  font-size: 13px;
+  margin: 0;
+}
+.agent-outbox p,
+.agent-outbox dl,
+.agent-outbox dd {
+  margin: 0;
+}
+.agent-outbox dl {
+  display: grid;
+  gap: 4px;
+}
+.agent-outbox dl div {
+  display: flex;
+  gap: 8px;
+}
+.agent-outbox dt {
+  flex: none;
+  font-weight: 600;
+}
+.agent-outbox dd {
+  max-height: 7.5em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+@media (max-width: 700px) {
+  .agent-outbox {
+    margin: 8px 12px 0;
+  }
+}

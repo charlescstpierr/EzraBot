@@ -403,7 +403,7 @@ function MissionContent({
               </fieldset>
               <button
                 type="button"
-                disabled={command.locked}
+                disabled={command.sending}
                 onClick={() => setEditing(null)}
               >
                 Annuler la modification
