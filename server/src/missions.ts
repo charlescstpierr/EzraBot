@@ -196,7 +196,7 @@ export function openMissions(options: { path: string; minoRoot: string; dataDir:
   const generation = Number(get("SELECT value FROM meta WHERE key='generation'")?.value ?? 0) + 1;
   run("INSERT OR REPLACE INTO meta(key, value) VALUES ('generation', ?)", String(generation));
 
-  let rev = Number(get("SELECT value FROM meta WHERE key='view_rev'")?.value ?? 0) + 1;
+  let rev = Math.max(Date.now(), Number(get("SELECT value FROM meta WHERE key='view_rev'")?.value ?? 0) + 1);
   run("INSERT OR REPLACE INTO meta(key, value) VALUES ('view_rev', ?)", String(rev));
   const listeners = new Set<() => void>();
   const changed = () => {

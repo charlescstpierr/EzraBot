@@ -268,6 +268,17 @@ test("une commande inconnue d’un autre onglet devient visible à la synchronis
   expect(second.pending()).toMatchObject([{ command, durable: true }]);
 });
 
+test("une purge reçue avant l’événement de stockage ne cache pas une commande étrangère", async () => {
+  const { storage } = browser();
+  const observing = page(storage, service().send);
+  const command = mission();
+  await page(storage, service().send).run(command, ["nova"]);
+  observing.purge(["ancien-bot"]);
+  observing.sync();
+  expect(observing.holds(command)).toBe(true);
+  expect(observing.pending()).toMatchObject([{ command, durable: true }]);
+});
+
 test("les espaces sont séparés et la suppression d’un bot retire ses commandes", async () => {
   const { storage } = browser();
   const fromNova = mission("Objectif venu du fil de Nova");

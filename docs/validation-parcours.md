@@ -5,8 +5,8 @@ Les vérifications ci-dessous concernent la reprise du ticket #4. Elles utilisen
 ## Résultats locaux
 
 - `npm run typecheck` vérifie le client, les tests et le serveur.
-- `npm test` compile puis exécute 228 tests serveur. Aucun échec.
-- `npm run test:ui` compile puis exécute 48 contrôles Playwright, dont des tests de logique pure et des parcours Chromium.
+- `npm test` compile puis exécute 229 tests serveur. Aucun échec.
+- `npm run test:ui` compile puis exécute 49 contrôles Playwright, dont des tests de logique pure et des parcours Chromium.
 - `node server/mobile/scripts/sync-contract.mjs --check` confirme les quatre copies de contrats mobiles.
 - Le test de mémoire ajoute sept cas. Il refuse une base ancienne, conserve le client sans base et les requêtes rejouées, et couvre une horloge figée ou reculée et un redémarrage.
 
@@ -16,7 +16,9 @@ Une copie isolée du commit `fb4f305` reproduit les deux défauts du composeur a
 
 Ces deux tests passent dans la nouvelle version. Un test de placement a également échoué sur l’accueil décentré avant correction, puis passe après centrage et suppression du défilement initial sans messages.
 
-La revue indépendante a reproduit quatre défauts supplémentaires. Les régressions vérifient maintenant la révision des missions après redémarrage, le Markdown sans image réseau, la reprise exacte des commandes après rechargement et l’actualisation des décomptes avant suppression.
+La revue indépendante a reproduit quatre défauts supplémentaires. Les régressions vérifient maintenant la révision des missions après redémarrage, le premier démarrage d’une base historique et le recul de l’horloge, le Markdown sans image réseau, la reprise exacte des commandes après rechargement et l’actualisation des décomptes avant suppression.
+
+La synchronisation de la boîte agents conserve aussi une commande étrangère visible si la purge arrive avant l’événement de stockage. Le renouvellement des décomptes de suppression efface la confirmation déjà saisie.
 
 ## Portée des scénarios
 
@@ -41,3 +43,10 @@ Les clients historiques qui n’envoient pas `baseUpdatedAt` gardent la dernièr
 Les [images, vidéos et journaux du ticket 4](https://github.com/charlescstpierr/EzraBot/releases/tag/preuves-ticket-4-20261112) sont publiés comme pièces de preuve. Cette publication ne déploie pas l’application. Elle cible le commit de code `a6ffb6703ac0ae1c30702ea1e818dda8e36024fd`.
 
 Le ZIP des journaux contient aussi les trois conceptions comparées et le contrat retenu. Les artefacts GitHub Actions conservent les résultats de chaque nouvelle recette sur GitHub.
+
+
+## Corrections de revue et compilation GitHub
+
+Les [preuves des corrections](https://github.com/charlescstpierr/EzraBot/releases/tag/preuves-revue-4-20261112) ciblent le commit `2a62a5ef0641ea530036b38f4606ca61799934de`. Elles contiennent les captures mobiles avant et après, une vidéo de reprise, les résultats des 48 contrôles et les journaux rouges et verts.
+
+La [recette GitHub Actions du même commit](https://github.com/charlescstpierr/EzraBot/actions/runs/43164995715) a réussi. Types, synchronisation mobile, compilation, tests serveur, tests d’interface et téléversement des preuves y passent.

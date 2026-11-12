@@ -127,7 +127,7 @@ export function openAgentOutbox(options: {
       return null;
     }
   }
-  function adopt(recoverable: boolean): boolean {
+  function adopt(): boolean {
     const saved = stored();
     if (!saved) return false;
     let changed = false;
@@ -136,11 +136,16 @@ export function openAgentOutbox(options: {
         held.delete(requestId);
         changed = true;
       }
-    for (const [requestId, entry] of saved)
-      if (!held.has(requestId)) {
-        held.set(requestId, { entry, durable: true, recoverable });
+    for (const [requestId, entry] of saved) {
+      const item = held.get(requestId);
+      if (!item) {
+        held.set(requestId, { entry, durable: true, recoverable: true });
+        changed = true;
+      } else if (!flights.has(requestId) && !item.recoverable) {
+        item.recoverable = true;
         changed = true;
       }
+    }
     return changed;
   }
   function find(command: AgentCommand): Held | undefined {
@@ -158,12 +163,12 @@ export function openAgentOutbox(options: {
     message,
   });
 
-  adopt(true);
+  adopt();
   publish();
 
   return {
     run(command, ownerBotIds) {
-      adopt(false);
+      adopt();
       const saved = find(command);
       const target =
         saved?.entry.command ?? standIns.get(command.requestId) ?? command;
@@ -233,11 +238,11 @@ export function openAgentOutbox(options: {
       return () => listeners.delete(listener);
     },
     sync() {
-      if (adopt(true)) publish();
+      if (adopt()) publish();
     },
     purge(botIds) {
       if (!botIds.length) return;
-      let changed = adopt(false);
+      let changed = adopt();
       const gone = new Set(botIds);
       for (const [requestId, item] of held)
         if (item.entry.ownerBotIds.some((id) => gone.has(id))) {

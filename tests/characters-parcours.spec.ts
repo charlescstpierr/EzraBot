@@ -76,6 +76,9 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
   await page
     .getByRole("button", { name: "Examiner la suppression", exact: true })
     .click();
+  await page
+    .getByLabel(`Recopier le nom « ${name} »`, { exact: true })
+    .fill(name);
   await other
     .getByRole("textbox", { name: "Un souvenir à garder", exact: true })
     .fill("Un second souvenir synthétique");
@@ -94,6 +97,9 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
   await page
     .getByRole("button", { name: "Actualiser les décomptes", exact: true })
     .click();
+  await expect(
+    page.getByLabel(`Recopier le nom « ${name} »`, { exact: true }),
+  ).toHaveValue("");
   await page
     .getByLabel(`Recopier le nom « ${name} »`, { exact: true })
     .fill(name);
