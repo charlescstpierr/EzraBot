@@ -2,7 +2,7 @@
   "name": "mino",
   "version": "0.1.0",
   "private": true,
-  "description": "Mino, un fil local où des bots répondent avec Codex.",
+  "description": "Mino, un fil local o\u00f9 des bots r\u00e9pondent avec Codex.",
   "type": "module",
   "engines": {
     "node": ">=24"
