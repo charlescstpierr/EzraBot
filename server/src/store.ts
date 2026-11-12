@@ -641,7 +641,6 @@ export type StoreOptions = {
   mascots: MascotCatalogue;
   now?: () => string;
   missionContext?: () => NonNullable<ContextSource['missions']>;
-  /** True when the server can reach the provider. Without it no turn is given a service tool, whatever rights exist. */
   serviceTools?: boolean;
 };
 

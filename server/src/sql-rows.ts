@@ -1,4 +1,3 @@
-/** Typed reads of SQLite rows: a column of an unexpected type is a bug, never a default. */
 export type Row = Record<string, unknown>;
 
 export function str(row: Row, key: string): string {

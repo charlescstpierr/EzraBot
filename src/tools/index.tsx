@@ -17,7 +17,6 @@ const MISSING_KEY =
 
 type Accepted = Extract<ToolsOutcome, { kind: "accepted" }>;
 
-/** One decision at a time. An answer that never arrived keeps the same command, so a retry cannot apply it twice. */
 function useToolCommand(port: Port) {
   const lock = useRef(false),
     held = useRef<{
@@ -27,9 +26,8 @@ function useToolCommand(port: Port) {
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [uncertain, setUncertain] = useState(false);
-  async function send(command: ToolCommand, done?: (result: Accepted) => void) {
+  async function execute(action: NonNullable<typeof held.current>) {
     if (lock.current) return;
-    const action = held.current ?? { command, done };
     held.current = action;
     lock.current = true;
     setBusy(true);
@@ -51,7 +49,10 @@ function useToolCommand(port: Port) {
     }
   }
   return {
-    send,
+    send(command: ToolCommand, done?: (result: Accepted) => void) {
+      if (held.current) return;
+      return execute({ command, done });
+    },
     locked: busy || uncertain,
     feedback: (
       <>
@@ -66,7 +67,7 @@ function useToolCommand(port: Port) {
             className="outline"
             disabled={busy}
             onClick={() => {
-              if (held.current) void send(held.current.command);
+              if (held.current) void execute(held.current);
             }}
           >
             Réessayer la même action
@@ -81,7 +82,6 @@ function useToolCommand(port: Port) {
 const failureText = (reason: unknown) =>
   reason instanceof Error ? reason.message : "Le service ne répond pas.";
 
-/** Preferences: the accounts of this space and the way to connect another one. */
 export function ToolConnections({ port }: { port: Port }) {
   const tools = port.view.tools;
   const [services, setServices] = useState<ServiceOption[] | null>(null),
@@ -90,7 +90,6 @@ export function ToolConnections({ port }: { port: Port }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
-  /** The connection address lives in this open dialog only. It is not stored and is gone when the dialog closes. */
   const [redirect, setRedirect] = useState<{
     toolkit: string;
     url: string;
@@ -281,7 +280,6 @@ export function ToolConnections({ port }: { port: Port }) {
   );
 }
 
-/** Character page: the exact account and tools this bot may propose. Empty until the person grants something. */
 export function ToolGrants({ port, bot }: { port: Port; bot: BotView }) {
   const tools = port.view.tools;
   const grants = tools.grants[bot.id] ?? [];
@@ -626,7 +624,6 @@ function ToolCard({
   );
 }
 
-/** The exact actions proposed by the turn that wrote this message. */
 export function ToolCards({
   port,
   message,

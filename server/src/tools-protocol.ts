@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import type { AppView } from './protocol.js';
 
-/** PC-only contract for connected services. It is not part of the contract copied to the mobile client. */
-
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,80}$/);
 const requestId = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
 const providerId = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
@@ -136,13 +134,11 @@ export type ToolsView = z.infer<typeof ToolsViewSchema>;
 
 export type PcView = AppView & { tools: ToolsView };
 
-/** One way to connect a service, as configured in the provider project. */
 export const ServiceOptionSchema = z.strictObject({
   id: z.string(),
   toolkit: z.string(),
   name: z.string(),
   connectable: z.boolean(),
-  /** Why it cannot be connected from here, when it cannot. */
   reason: z.string().nullable(),
 });
 export type ServiceOption = z.infer<typeof ServiceOptionSchema>;

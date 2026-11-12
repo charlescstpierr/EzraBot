@@ -257,7 +257,7 @@ test('with tools registered, a native approval request is still refused and a fo
   const approval = gateway();
   assert.equal(failureCode(await runWithTools('tool-then-approval', approval.tools)), 'request_refused');
   assert.equal(approval.calls.length, 1);
-  for (const scenario of ['tool-item-foreign', 'tool-item-foreign-namespace']) {
+  for (const scenario of ['tool-item-foreign', 'tool-item-foreign-namespace', 'tool-item-no-namespace']) {
     const foreign = gateway();
     assert.equal(failureCode(await runWithTools(scenario, foreign.tools)), 'tool_blocked');
     assert.equal(foreign.calls.length, 0);

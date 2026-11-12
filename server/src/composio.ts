@@ -1,12 +1,9 @@
-import { Composio, ComposioToolInputRequiredError, SessionPreset, type ConnectionRequestState } from '@composio/core';
+import { Composio, ComposioToolInputRequiredError, ComposioRequestCancelledError, SessionPreset, type ToolRouterSession, type ConnectionRequestState } from '@composio/core';
 import { schemaSha256, type AccountFacts, type Pin, type RawToolFacts, type SendResult } from './tool-ledger.js';
 import { ACCOUNT_STATUSES, type ServiceOption } from './tools-protocol.js';
 
-/** The only module that knows the Composio SDK. Everything it returns is a plain projection, never an SDK object. */
-
 export type ProviderErrorCategory = 'unauthorized' | 'not_found' | 'rate_limited' | 'timeout' | 'unavailable';
 
-/** A provider failure reduced to a safe category. It carries no provider text, header or address. */
 export class ProviderError extends Error {
   constructor(readonly category: ProviderErrorCategory) {
     super(`provider:${category}`);
@@ -14,9 +11,7 @@ export class ProviderError extends Error {
 }
 
 export type Provider = {
-  /** The ways to connect a service that the provider project really offers. */
   catalog(): Promise<ServiceOption[]>;
-  /** Starts a connection. The address is for the person who asked, once. */
   startLink(serviceId: string, alias: string, callbackUrl: string): Promise<{ accountId: string; toolkit: string; redirectUrl: string }>;
   /** The account as the provider reports it for this space's owner, or null when the owner has no such account. */
   account(accountId: string, toolkit: string): Promise<AccountFacts | null>;
@@ -27,16 +22,15 @@ export type Provider = {
 };
 
 type Sdk = InstanceType<typeof Composio>;
-type SdkSession = Awaited<ReturnType<Sdk['sessions']['create']>>;
+// SDK 0.29.0 declares a narrower session return type; its exported class includes request options.
+type SdkSession = ToolRouterSession<never, never, never>;
 
-/** The part of the SDK this adapter uses, with the SDK's own signatures. Tests replace exactly this. */
 export type SdkPort = {
   authConfigs: Pick<Sdk['authConfigs'], 'list'>;
   connectedAccounts: Pick<Sdk['connectedAccounts'], 'list'>;
   sessions: { create(...args: Parameters<Sdk['sessions']['create']>): Promise<SessionPort> };
   tools: Pick<Sdk['tools'], 'getRawToolRouterSessionTools'>;
 };
-/** `authorize` and `execute` keep the published function types, which take no request options. */
 export type SessionPort = Pick<SdkSession, 'sessionId' | 'execute'> & {
   authorize(...args: Parameters<SdkSession['authorize']>): Promise<ConnectionRequestState>;
 };
@@ -59,6 +53,7 @@ export function createComposioSdk(apiKey: string): SdkPort {
 
 function categoryOf(error: unknown): ProviderErrorCategory {
   if (error instanceof ProviderError) return error.category;
+  if (error instanceof ComposioRequestCancelledError) return 'timeout';
   const status = error !== null && typeof error === 'object' && 'status' in error ? error.status : undefined;
   if (status === 401 || status === 403) return 'unauthorized';
   if (status === 404) return 'not_found';
@@ -66,17 +61,19 @@ function categoryOf(error: unknown): ProviderErrorCategory {
   return 'unavailable';
 }
 
-/** Bounds a provider call. A late answer is dropped: the caller has already recorded what it knows. */
-function within<T>(ms: number, work: Promise<T>): Promise<T> {
+function within<T>(ms: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new ProviderError('timeout')), ms);
-    work.then(value => { clearTimeout(timer); resolve(value); }, (error: unknown) => { clearTimeout(timer); reject(error); });
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new ProviderError('timeout'));
+    }, ms);
+    void Promise.resolve().then(() => work(controller.signal)).then(value => { clearTimeout(timer); resolve(value); }, (error: unknown) => { clearTimeout(timer); reject(error); });
   });
 }
 
 export function createComposioProvider(options: {
   sdk: SdkPort;
-  /** Stable private identity of this space at the provider. Never chosen by a model or a browser. */
   ownerId: string;
   readTimeoutMs?: number;
   executeTimeoutMs?: number;
@@ -85,16 +82,15 @@ export function createComposioProvider(options: {
   const readTimeout = options.readTimeoutMs ?? 30_000;
   const executeTimeout = options.executeTimeoutMs ?? 120_000;
 
-  /** Every read is bounded, and every failure leaves as a category only. */
-  async function guarded<T>(body: () => Promise<T>): Promise<T> {
+  async function guarded<T>(body: (signal: AbortSignal) => Promise<T>): Promise<T> {
     try {
-      return await within(readTimeout, body());
+      return await within(readTimeout, body);
     } catch (error) {
       throw new ProviderError(categoryOf(error));
     }
   }
 
-  const pinnedSession = (toolkit: string, accountId: string, only?: readonly string[]) =>
+  const pinnedSession = (toolkit: string, accountId: string, only: readonly string[] | undefined, signal: AbortSignal) =>
     sdk.sessions.create(ownerId, {
       sessionPreset: SessionPreset.DIRECT_TOOLS,
       toolkits: { enable: [toolkit] },
@@ -103,10 +99,10 @@ export function createComposioProvider(options: {
       manageConnections: false,
       sandbox: { enable: false },
       proxyExecute: false,
-    });
+    }, { signal });
 
-  const rawTools = async (sessionId: string): Promise<RawToolFacts[]> =>
-    (await sdk.tools.getRawToolRouterSessionTools(sessionId)).map(tool => ({
+  const rawTools = async (sessionId: string, signal: AbortSignal): Promise<RawToolFacts[]> =>
+    (await sdk.tools.getRawToolRouterSessionTools(sessionId, undefined, { signal })).map(tool => ({
       slug: tool.slug,
       toolkit: tool.toolkit?.slug ?? '',
       name: tool.name,
@@ -116,11 +112,11 @@ export function createComposioProvider(options: {
     }));
 
   async function catalog(): Promise<ServiceOption[]> {
-    return guarded(async () => {
+    return guarded(async signal => {
       const services: ServiceOption[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < MAX_PAGES; page += 1) {
-        const listed = await sdk.authConfigs.list({ showDisabled: false, limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) });
+        const listed = await sdk.authConfigs.list({ showDisabled: false, limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) }, { signal });
         for (const config of listed.items) {
           if (config.status !== 'ENABLED') continue;
           const reason = config.authScheme !== 'OAUTH2'
@@ -140,7 +136,7 @@ export function createComposioProvider(options: {
     async startLink(serviceId, alias, callbackUrl) {
       const service = (await catalog()).find(candidate => candidate.id === serviceId);
       if (!service?.connectable) throw new ProviderError('not_found');
-      return guarded(async () => {
+      return guarded(async signal => {
         const session = await sdk.sessions.create(ownerId, {
           sessionPreset: SessionPreset.DIRECT_TOOLS,
           toolkits: { enable: [service.toolkit] },
@@ -148,17 +144,17 @@ export function createComposioProvider(options: {
           manageConnections: false,
           sandbox: { enable: false },
           proxyExecute: false,
-        });
-        const request = await session.authorize(service.toolkit, { callbackUrl, alias });
+        }, { signal });
+        const request = await session.authorize(service.toolkit, { callbackUrl, alias }, { signal });
         if (!request.redirectUrl || !URL.canParse(request.redirectUrl) || new URL(request.redirectUrl).protocol !== 'https:') throw new ProviderError('unavailable');
         return { accountId: request.id, toolkit: service.toolkit, redirectUrl: request.redirectUrl };
       });
     },
     async account(accountId, toolkit) {
-      return guarded(async () => {
+      return guarded(async signal => {
         let cursor: string | undefined;
         for (let page = 0; page < MAX_PAGES; page += 1) {
-          const listed = await sdk.connectedAccounts.list({ userIds: [ownerId], toolkitSlugs: [toolkit], limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) });
+          const listed = await sdk.connectedAccounts.list({ userIds: [ownerId], toolkitSlugs: [toolkit], limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) }, { signal });
           const found = listed.items.find(item => item.id === accountId);
           if (found) {
             const status = ACCOUNT_STATUSES.find(candidate => candidate === found.status);
@@ -172,15 +168,15 @@ export function createComposioProvider(options: {
       });
     },
     async toolsFor(toolkit, accountId, only) {
-      return guarded(async () => rawTools((await pinnedSession(toolkit, accountId, only)).sessionId));
+      return guarded(async signal => rawTools((await pinnedSession(toolkit, accountId, only, signal)).sessionId, signal));
     },
     async send(pin, args) {
       let session: SessionPort;
       let tools: RawToolFacts[];
       try {
-        const opened = await within(readTimeout, pinnedSession(pin.toolkit, pin.accountId, [pin.toolSlug]));
+        const opened = await within(readTimeout, signal => pinnedSession(pin.toolkit, pin.accountId, [pin.toolSlug], signal));
         session = opened;
-        tools = await within(readTimeout, rawTools(opened.sessionId));
+        tools = await within(readTimeout, signal => rawTools(opened.sessionId, signal));
       } catch {
         return { kind: 'not_sent', reason: 'session' };
       }
@@ -190,11 +186,11 @@ export function createComposioProvider(options: {
       if (!tool.version) return { kind: 'not_sent', reason: 'version_missing' };
       if (tool.version !== pin.version || schemaSha256(tool.inputSchema) !== pin.schemaSha256) return { kind: 'not_sent', reason: 'schema_changed' };
       try {
-        const result = await within(executeTimeout, session.execute(pin.toolSlug, args, { account: pin.accountId }));
+        const result = await within(executeTimeout, signal => session.execute(pin.toolSlug, args, { account: pin.accountId }, { signal }));
         return { kind: result.resultType, data: result.data, error: result.error, logId: result.logId };
       } catch (error) {
         if (error instanceof ComposioToolInputRequiredError) return { kind: 'input_required' };
-        if (error instanceof ProviderError) return { kind: 'unknown', category: 'timeout' };
+        if (error instanceof ProviderError || error instanceof ComposioRequestCancelledError) return { kind: 'unknown', category: 'timeout' };
         return { kind: 'unknown', category: error instanceof Error && error.name === 'ZodError' ? 'response' : 'transport' };
       }
     },

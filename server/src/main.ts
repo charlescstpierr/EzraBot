@@ -31,7 +31,6 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/** Read before anything else runs, then gone from this process: no child and no later code can see it. */
 const providerKey = takeProviderKey(process.env);
 const port = Number(process.env.MINO_PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) fail('MINO_PORT doit être un numéro de port entre 1024 et 65535.');
@@ -67,7 +66,6 @@ const agentEngine = createAgentEngine({ command: engineOptions.command, tmpDir: 
 const agentWorker = createAgentWorker({ missions, engine: agentEngine, log, onFatal: () => fail('Le registre des missions a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
 const agents = createAgentRoutes({ missions, worker: agentWorker, engine: agentEngine,
   coordination: { bot: botId => store.leadCandidate(botId), origin: messageId => store.missionOrigin(messageId) } });
-// Only the chat engine can register service tools, and only when the provider is configured. Documents and missions never can.
 const engine = createCodexEngine({ ...engineOptions, ...(providerKey ? { dynamicTools: true as const } : {}) });
 const docEngine = createCodexEngine(engineOptions);
 const desk = createActionDesk({

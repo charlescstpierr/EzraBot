@@ -145,7 +145,7 @@ node server/mobile/scripts/sync-contract.mjs --check
 npm run test:ui
 ```
 
-La recette finale passe : typage, 277 tests serveur, quatre contrats mobiles identiques et 53 tests navigateur.
+La recette finale passe : typage, 279 tests serveur, quatre contrats mobiles identiques et 53 tests navigateur.
 
 ### Transport avec le vrai modèle
 
@@ -160,7 +160,7 @@ npm run build
 node server/tools/verify-dynamic-tools.mjs --live
 ```
 
-Cette commande utilise un vrai tour de modèle. Sans `--live`, elle s’arrête avant de lancer Codex. Le résultat attendu contient `verified: true`, `calls: 1` et `composioCalled: false`.
+Cette commande utilise un vrai tour de modèle. Sans `--live`, elle s’arrête avant de lancer Codex. Le résultat attendu contient `verified: true`, `calls: 1` et `composioCalled: false`. Ce dernier champ est une constante : le script ne charge aucun code Composio.
 
 ## 8. Ce qui n’est pas vérifié
 
@@ -175,7 +175,7 @@ Ces points demandent une clé réelle et un compte autorisé. Ils n’ont pas é
 
 ### Contrôle réel, par le propriétaire seulement
 
-Ce script contacte le vrai service. Il lit seulement. Il ne lance aucune connexion et n’exécute aucun outil.
+Ce script contacte le vrai service. Il lit le catalogue, les comptes et les outils. La liste des outils crée des sessions chez Composio. Il ne lance aucun parcours OAuth et n’exécute aucun outil.
 
 ```bash
 # Arrêtez EzraBot d’abord.
@@ -195,6 +195,7 @@ Pour vérifier la chaîne complète, le propriétaire :
 
 ## 9. Limites connues
 
+- **Délai dépassé :** le serveur annule la requête du SDK. Une exécution déjà envoyée reste de résultat inconnu et ne repart pas. Annuler la requête ne peut pas annuler un effet déjà produit chez le service.
 - **Pas de verrou de version chez le fournisseur.** `session.execute` ne prend pas de version. EzraBot relit le catalogue de la session qui va exécuter et compare la version et le schéma. Entre cette lecture et l’exécution, le fournisseur peut encore changer.
 - **Pas d’exécution unique garantie chez le fournisseur.** EzraBot n’envoie jamais deux fois. Il ne peut pas empêcher un doublon interne au service.
 - **Une approbation enregistrée juste avant un arrêt est envoyée une fois au redémarrage.** Les vérifications sont refaites à ce moment.

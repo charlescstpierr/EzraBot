@@ -28,19 +28,14 @@ import {
   type ToolsView,
 } from './tools-protocol.js';
 
-/** One connected account as the provider reports it for this space's owner. */
 export type AccountFacts = { id: string; toolkit: string; alias: string; status: AccountStatus };
 
-/** One action as the provider's raw session catalogue describes it. */
 export type RawToolFacts = { slug: string; toolkit: string; name: string; description: string; version: string | null; inputSchema: unknown };
 
-/** What the provider says right now, read outside any transaction just before a decision. */
 export type LiveFacts = { account: AccountFacts | null; tools: readonly RawToolFacts[] };
 
-/** The provider's answer about one account just before sending. `unreachable` never sends. */
 export type AccountReading = { kind: 'found'; account: AccountFacts } | { kind: 'absent' } | { kind: 'unreachable' };
 
-/** A right as frozen in a turn: the model sees exactly these actions and schemas. */
 export type GrantSnapshot = {
   grantId: string;
   toolkit: string;
@@ -52,7 +47,6 @@ export type GrantSnapshot = {
   inputSchema: Record<string, unknown>;
 };
 
-/** The exact target a person approved. */
 export type Pin = { proposalId: string; toolkit: string; accountId: string; toolSlug: string; version: string; schemaSha256: string };
 
 /** The single right to send one approved action. Its row is already `dispatching`. */
@@ -66,7 +60,6 @@ export type SendResult =
   /** The request left, or may have left, and no trustworthy answer came back. Never resent. */
   | { kind: 'unknown'; category: 'timeout' | 'transport' | 'response' };
 
-/** The identity of a running turn, as the store froze it. */
 export type TurnIdentity = { workId: string; attemptId: string; botId: string; toolGrants: readonly GrantSnapshot[] };
 
 export type ReportClaim = {
@@ -82,7 +75,6 @@ export type ReportClaim = {
 
 type SqlValue = string | number | null;
 
-/** What the store lends: its database handle, clock, identifiers and command receipts. */
 export type LedgerKit = {
   get(text: string, ...params: SqlValue[]): Row | undefined;
   all(text: string, ...params: SqlValue[]): Row[];
@@ -91,23 +83,19 @@ export type LedgerKit = {
   now(): string;
   newId(prefix: string): string;
   changed(): void;
-  /** Keyed digest of a command payload, so a request identity cannot be reused for another content. */
   sign(payload: unknown): string;
 };
 
 export type ToolLedger = {
-  /** Stable private identity of this space at the provider. It stays on the server. */
   readonly ownerId: string;
   view(status: ToolsStatus): ToolsView;
   /** Applies one PC command. The same `requestId` with the same content returns the first receipt. */
   apply(command: ToolCommand, live: LiveFacts | null): ToolOutcome;
   recordLink(link: { linkId: string; toolkit: string; accountId: string }): void;
   link(linkId: string): LinkView | null;
-  /** The only way an account or a link becomes active: facts re-read from the provider. */
   observeAccount(account: AccountFacts): void;
   account(accountId: string): AccountFacts | null;
   grantsFor(botId: string): GrantSnapshot[];
-  /** Records the one proposal of a running turn. Nothing is sent. */
   propose(turn: TurnIdentity, call: ToolCall): ToolReply;
   peek(proposalId: string): Pin | null;
   nextApproved(): { executionId: string; pin: Pin } | null;
@@ -115,13 +103,11 @@ export type ToolLedger = {
   claimDispatch(executionId: string, reading: AccountReading): DispatchPermit | null;
   settle(permit: DispatchPermit, result: SendResult): void;
 
-  /** The remaining members serve the store, inside its own transactions. */
   nextReport(): ReportClaim | null;
   beginReport(executionId: string): void;
   endReport(executionId: string, report: 'done' | 'failed' | 'suppressed'): WorkState;
   cancelReport(workId: string): WorkState | null;
   hasLiveExecution(workId: string): boolean;
-  /** Opens the proposals of turns that produced a message and closes those of turns that did not. */
   syncDrafts(): void;
   recover(): number;
   blocksPurge(botId: string, erasedWorks: string): boolean;
@@ -249,7 +235,6 @@ CREATE TRIGGER attempts_report_source BEFORE INSERT ON attempts
   BEGIN SELECT RAISE(ABORT, 'a report turn belongs to a queued receipt of its work'); END;
 `;
 
-/** Tool rows erased with a bot, before the attempts and works they point at. */
 export const TOOL_PURGE_ORDER = [
   ['tool_executions', 'id'],
   ['tool_proposals', 'id'],
@@ -273,7 +258,6 @@ export function canonicalJson(value: unknown): string {
 
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 
-/** The identity of an argument schema: the same hash means the person approved against the same contract. */
 export const schemaSha256 = (schema: unknown): string => sha256(canonicalJson(schema));
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -302,7 +286,6 @@ type ToolAssessment =
   | { ok: true; version: string; schemaSha256: string; inputSchema: Record<string, unknown>; description: string }
   | { ok: false; reason: string };
 
-/** Whether an action can be granted at all, with the reason shown to the person when it cannot. */
 export function assessTool(tool: RawToolFacts, toolkit: string): ToolAssessment {
   if (isMetaTool(tool.slug)) return { ok: false, reason: 'Outil interne du fournisseur : il n’est jamais donné à un personnage.' };
   if (!TOOL_SLUG.test(tool.slug)) return { ok: false, reason: 'Le nom de cet outil n’est pas pris en charge.' };
@@ -327,7 +310,6 @@ function redact(value: unknown, depth = 0): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, SENSITIVE_KEY.test(key) ? '[retiré]' : redact(item, depth + 1)]));
 }
 
-/** The provider result kept for the card and the report: sensitive keys removed, then bounded. */
 export function summarize(data: unknown, error: string | null): string {
   const text = canonicalJson(redact({ data, error }));
   const bytes = Buffer.from(text, 'utf8');
@@ -352,7 +334,6 @@ export function createToolLedger(kit: LedgerKit, receipts: {
   kit.transaction(() => {
     if (!get('SELECT value FROM meta WHERE key = ?', 'composio_owner')) run('INSERT INTO meta(key, value) VALUES (?, ?)', 'composio_owner', randomUUID());
   });
-  /** Private to the server: it scopes every provider call and is part of every fingerprint, and it is never shown. */
   const ownerId = str(get('SELECT value FROM meta WHERE key = ?', 'composio_owner') ?? {}, 'value');
 
   const fingerprintOf = (pin: Omit<Pin, 'proposalId'>, args: unknown) => sha256(canonicalJson({
@@ -457,7 +438,6 @@ export function createToolLedger(kit: LedgerKit, receipts: {
             || fingerprintOf(pin, parseArguments(proposal)) !== str(proposal, 'fingerprint') ? 'schema_changed'
             : null;
     if (reason) {
-      // The observation above may already have closed it for an inactive account.
       closeProposals(`id = ? AND state = 'open'`, reason, command.proposalId);
       const closed = oneOf(get('SELECT stale_reason FROM tool_proposals WHERE id = ?', command.proposalId) ?? {}, 'stale_reason', STALE_REASONS);
       return { kind: 'decision', proposalId: command.proposalId, decision: 'stale', executionId: null, staleReason: closed };
@@ -589,7 +569,6 @@ export function createToolLedger(kit: LedgerKit, receipts: {
                 : reading.kind !== 'found' || reading.account.id !== pin.accountId || reading.account.toolkit !== pin.toolkit || reading.account.status !== 'ACTIVE' ? 'account_inactive'
                   : fingerprintOf(pin, args) !== str(row, 'fingerprint') ? 'schema_changed'
                     : null;
-      // The observation may already have voided it for an inactive account.
       if (category) {
         voidApproved('id = ?', category, executionId);
         return null;
@@ -650,7 +629,6 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     return row;
   };
 
-  /** The one place a finished work runs again: only to report a receipt, and it returns to the state it had. */
   function beginReport(executionId: string): void {
     const row = workOf(executionId);
     const work = get('SELECT state FROM works WHERE id = ?', str(row, 'work_id')) ?? {};

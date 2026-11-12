@@ -35,8 +35,9 @@ try {
     },
   });
   const matched = calls.length === 1 && calls[0].tool === name && calls[0].arguments?.seed === seed;
-  const verified = result.kind === 'succeeded' && matched && result.reply.reply.includes(acknowledgement) && result.reply.deliverable === null;
-  console.log(JSON.stringify({ verified, outcome: result.kind, calls: calls.length, argumentsMatch: matched, acknowledgementMatch: verified, model: result.kind === 'succeeded' ? result.used.model : null, code: result.kind === 'failed' ? result.code : null, composioCalled: false }));
+  const acknowledgementMatch = result.kind === 'succeeded' && result.reply.reply.includes(acknowledgement);
+  const verified = result.kind === 'succeeded' && matched && acknowledgementMatch && result.reply.deliverable === null;
+  console.log(JSON.stringify({ verified, outcome: result.kind, calls: calls.length, argumentsMatch: matched, acknowledgementMatch, model: result.kind === 'succeeded' ? result.used.model : null, code: result.kind === 'failed' ? result.code : null, composioCalled: false }));
   if (!verified) process.exitCode = 1;
 } finally {
   try {

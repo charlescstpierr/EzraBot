@@ -1,12 +1,12 @@
 // Real provider check, for the owner only. It needs a real Composio key and it contacts the real Composio API.
-// It only reads: catalogue, the accounts this space already linked, and their tool lists. It never starts a connection and never executes a tool.
+// It lists catalogue, linked accounts and tools. Listing tools creates provider sessions. It never starts OAuth or executes a tool.
 //
 //   1. Stop EzraBot (the database is opened read-only, and a running server holds it).
 //   2. npm run build
 //   3. COMPOSIO_API_KEY=... node server/tools/verify-composio.mjs --owner-run [--data-dir <dossier>]
 //
 // The report holds counts and booleans. It prints no key, no address, no account identifier and no tool argument.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -52,7 +52,8 @@ if (typeof ownerId !== 'string') {
 
 const provider = createComposioProvider({ sdk: createComposioSdk(key), ownerId });
 const category = error => (error instanceof ProviderError ? error.category : 'unavailable');
-const report = { checkedAt: new Date().toISOString(), sdk: '@composio/core 0.29.0', catalog: null, accounts: [] };
+const packageInfo = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const report = { checkedAt: new Date().toISOString(), sdk: `@composio/core ${packageInfo.dependencies['@composio/core']}`, catalog: null, accounts: [] };
 
 try {
   const services = await provider.catalog();

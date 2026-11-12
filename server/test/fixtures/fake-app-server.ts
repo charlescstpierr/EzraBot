@@ -97,7 +97,7 @@ function toolArguments(tool: string, request: string): Record<string, unknown> {
 
 const EARLY_ID = 'outil-précoce';
 const TOOL_SCENARIOS = new Set(['tool-call', 'tool-call-number-id', 'tool-call-early', 'tool-call-twice', 'tool-call-then-fail', 'tool-call-hang',
-  'tool-call-owned-namespace', 'tool-call-no-namespace', 'tool-item-foreign-namespace', 'tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool', 'tool-item-foreign', 'tool-then-approval']);
+  'tool-call-owned-namespace', 'tool-call-no-namespace', 'tool-item-foreign-namespace', 'tool-item-no-namespace', 'tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool', 'tool-item-foreign', 'tool-then-approval']);
 
 /**
  * A turn that calls one registered tool, waits for Mino's real answer, and only then writes its reply.
@@ -112,9 +112,9 @@ async function toolTurn(threadId: string, turnId: string, input: string, early: 
     turnId: scenario === 'tool-call-wrong-turn' ? 'turn-elsewhere' : turnId,
     callId: 'call-1', namespace: scenario === 'tool-call-namespace' ? 'autre' : scenario === 'tool-call-no-namespace' ? null : 'ezrabot_services', tool, arguments: toolArguments(tool, request),
   };
-  const item = { type: 'dynamicToolCall', id: 'tool-1', namespace: scenario === 'tool-item-foreign-namespace' ? 'autre' : 'ezrabot_services', tool: scenario === 'tool-item-foreign' ? 'shell' : registered[0] ?? tool, arguments: params.arguments, status: 'inProgress', contentItems: null, success: null, durationMs: null };
+  const item = { type: 'dynamicToolCall', id: 'tool-1', namespace: scenario === 'tool-item-foreign-namespace' ? 'autre' : scenario === 'tool-item-no-namespace' ? null : 'ezrabot_services', tool: scenario === 'tool-item-foreign' ? 'shell' : registered[0] ?? tool, arguments: params.arguments, status: 'inProgress', contentItems: null, success: null, durationMs: null };
   notify('item/started', { threadId, turnId, item });
-  if (scenario === 'tool-item-foreign' || scenario === 'tool-item-foreign-namespace') return;
+  if (scenario === 'tool-item-foreign' || scenario === 'tool-item-foreign-namespace' || scenario === 'tool-item-no-namespace') return;
   const id = scenario === 'tool-call-number-id' ? serverRequestId++ : `outil-${serverRequestId++}`;
   const answer = await (early ?? ask(id, 'item/tool/call', params));
   const answered = early ? EARLY_ID : id;

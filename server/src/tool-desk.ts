@@ -16,23 +16,19 @@ import {
   type ToolsView,
 } from './tools-protocol.js';
 
-/** One request to the PC-only tools routes, already checked for host, origin and session token by the HTTP layer. */
 export type DeskRequest = { method: 'GET' | 'POST'; route: string; query: URLSearchParams; body: unknown };
 
 export type DeskFailure = { ok: false; code: ToolRefusalCode; message: string };
 export type DeskResponse =
   | { status: number; body: ({ ok: true } & ToolsReply) | DeskFailure }
-  /** A command answer. The HTTP layer adds the fresh view, as it does for every command. */
   | { status: number; outcome: ToolOutcome }
   | { status: number; page: string };
 
 export type ActionDesk = {
   view(): ToolsView;
-  /** The tools of one chat turn, built from the rights frozen in its claim. Undefined for every other turn. */
   forClaim(claim: Claim): TurnTools | undefined;
   /** Null when the route does not exist. */
   route(request: DeskRequest): Promise<DeskResponse | null>;
-  /** Sends what is approved and not sent yet. */
   kick(): void;
   idle(): Promise<void>;
   close(): Promise<void>;
@@ -51,21 +47,16 @@ const MISSING_KEY = 'Aucune clé Composio n’est configurée sur ce serveur. Le
 
 const STATUS: Partial<Record<ToolRefusalCode, number>> = { invalid_command: 422, not_found: 404, provider_unavailable: 503 };
 
-const CALLBACK_PAGE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Connexion vérifiée</title></head>
-<body><p>La connexion a été revérifiée auprès du fournisseur. Vous pouvez fermer cet onglet et revenir à EzraBot.</p></body></html>`;
+const CALLBACK_PAGE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Retour à EzraBot</title></head>
+<body><p>Vous pouvez fermer cet onglet et revenir à EzraBot. Utilisez « Vérifier la connexion » pour connaître son état.</p></body></html>`;
 
 const failure = (code: ToolRefusalCode, message: string): DeskResponse => ({ status: STATUS[code] ?? 409, body: { ok: false, code, message } });
 
-/**
- * Everything that talks to the provider. It reads facts outside any transaction, then lets the ledger decide.
- * It never writes SQL and never holds a connection address longer than one answer.
- */
 export function createActionDesk(options: {
   store: Store;
   /** Null when the server has no provider key. */
   provider: Provider | null;
   port: number;
-  /** Called when a receipt may be waiting for its report turn. */
   wake(): void;
   log?: (entry: DeskEvent) => void;
   closeGraceMs?: number;
@@ -94,7 +85,6 @@ export function createActionDesk(options: {
       log({ event: 'tools', action: 'dispatch', ok: false, code: 'voided' });
       return;
     }
-    // From here the action may reach the service. Whatever happens next, it is never sent a second time.
     const result = await port.send(permit.pin, permit.arguments).catch((): SendResult => ({ kind: 'unknown', category: 'transport' }));
     if (closed) return;
     ledger.settle(permit, result);
@@ -132,7 +122,6 @@ export function createActionDesk(options: {
     }
   }
 
-  /** The provider's current facts for one decision, or null when it cannot be reached. */
   async function liveFacts(command: ToolCommand, port: Provider): Promise<LiveFacts | null> {
     const target = command.type === 'tools.approve' ? ledger.peek(command.proposalId)
       : command.type === 'tools.grant' ? ledger.account(command.accountId) : null;
@@ -155,7 +144,6 @@ export function createActionDesk(options: {
     }
     const input = parsed.data;
     const needsProvider = input.type === 'tools.grant' || input.type === 'tools.approve';
-    // A first pass without provider facts settles replays and every refusal that needs no network.
     let outcome = ledger.apply(input, null);
     if (needsProvider && !outcome.ok && outcome.code === 'provider_unavailable') {
       if (!provider) outcome = { ok: false, code: 'provider_unavailable', message: MISSING_KEY };
@@ -175,7 +163,6 @@ export function createActionDesk(options: {
     if (!link) return failure('not_found', 'Cette demande de connexion n’existe pas.');
     const read = await reading(port, p => p.account(link.accountId, link.toolkit));
     if (!read.ok) return read.response;
-    // Only what the provider says now counts. Nothing in the request can make an account active.
     if (read.value) ledger.observeAccount(read.value);
     const checked = ledger.link(linkId) ?? link;
     log({ event: 'tools', action: 'link.check', ok: true, code: checked.state });
@@ -248,7 +235,6 @@ export function createActionDesk(options: {
         await Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(resolve, options.closeGraceMs ?? 5_000); })]);
         clearTimeout(timer);
       }
-      // A send still in flight is left `dispatching`: the store's recovery records it as unknown.
       closed = true;
     },
   };

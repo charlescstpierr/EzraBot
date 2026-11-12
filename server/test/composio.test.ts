@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ComposioToolInputRequiredError } from '@composio/core';
+import { ComposioToolInputRequiredError, ComposioRequestCancelledError } from '@composio/core';
 import { ProviderError, createComposioProvider, createComposioSdk, type SdkPort, type SessionPort } from '../src/composio.js';
 import { schemaSha256, type Pin } from '../src/tool-ledger.js';
 import { SEND_EMAIL } from './fixtures/fake-composio.js';
@@ -28,7 +28,7 @@ const account = (id: string, extra: Partial<AccountPage['items'][number]> = {}):
 
 function fakeSdk(script: {
   rawTools?: RawTools;
-  execute?: () => Promise<ExecuteResult>;
+  execute?: (...args: Parameters<SessionPort['execute']>) => Promise<ExecuteResult>;
   createFails?: boolean;
   authConfigPages?: AuthConfigPage[];
   accountPages?: AccountPage[];
@@ -68,7 +68,7 @@ function fakeSdk(script: {
           },
           async execute(...executeArgs) {
             calls.execute.push(executeArgs);
-            return script.execute ? script.execute() : { data: { id: 'resultat_synthetique' }, error: null, logId: 'log_synthetique', resultType: 'completed' };
+            return script.execute ? script.execute(...executeArgs) : { data: { id: 'resultat_synthetique' }, error: null, logId: 'log_synthetique', resultType: 'completed' };
           },
         };
       },
@@ -91,7 +91,7 @@ const rawSend = (extra: Partial<RawTools[number]>): RawTools => [{
 test('a send opens a fresh direct session pinned to one account and one action, checks that session, then executes once', async () => {
   const { provider, calls } = fakeSdk();
   assert.deepEqual(await provider.send(PIN, ARGS), { kind: 'completed', data: { id: 'resultat_synthetique' }, error: null, logId: 'log_synthetique' });
-  assert.deepEqual(calls.create, [[OWNER, {
+  assert.deepEqual(calls.create.map(args => args.slice(0, 2)), [[OWNER, {
     sessionPreset: 'direct_tools',
     toolkits: { enable: ['gmail'] },
     tools: { gmail: { enable: ['GMAIL_SEND_EMAIL'] } },
@@ -101,7 +101,7 @@ test('a send opens a fresh direct session pinned to one account and one action, 
     proxyExecute: false,
   }]]);
   assert.deepEqual(calls.rawTools, ['session-synthetique-1'], 'the catalogue read is the one of the session that executes');
-  assert.deepEqual(calls.execute, [['GMAIL_SEND_EMAIL', ARGS, { account: 'ca_synthetique_a' }]]);
+  assert.deepEqual(calls.execute.map(args => args.slice(0, 3)), [['GMAIL_SEND_EMAIL', ARGS, { account: 'ca_synthetique_a' }]]);
 });
 
 test('a session whose catalogue differs from the approved pin sends nothing', async () => {
@@ -182,10 +182,10 @@ test('a connection starts from a catalogue entry, with the owner, the alias and 
   const { provider, calls } = fakeSdk({ authConfigPages: pages });
   assert.deepEqual(await provider.startLink('ac_gmail', 'Courriel perso', 'http://127.0.0.1:4317/api/tools/callback?link=tl_1'),
     { accountId: 'ca_synthetique_nouveau', toolkit: 'gmail', redirectUrl: 'https://connexion-synthetique.invalid/lien' });
-  assert.deepEqual(calls.create, [[OWNER, {
+  assert.deepEqual(calls.create.map(args => args.slice(0, 2)), [[OWNER, {
     sessionPreset: 'direct_tools', toolkits: { enable: ['gmail'] }, authConfigs: { gmail: 'ac_gmail' }, manageConnections: false, sandbox: { enable: false }, proxyExecute: false,
   }]]);
-  assert.deepEqual(calls.authorize, [['gmail', { callbackUrl: 'http://127.0.0.1:4317/api/tools/callback?link=tl_1', alias: 'Courriel perso' }]]);
+  assert.deepEqual(calls.authorize.map(args => args.slice(0, 2)), [['gmail', { callbackUrl: 'http://127.0.0.1:4317/api/tools/callback?link=tl_1', alias: 'Courriel perso' }]]);
 
   await assert.rejects(fakeSdk({ authConfigPages: pages }).provider.startLink('ac_notion', 'Notes', 'http://127.0.0.1:4317/x'), (error: unknown) => error instanceof ProviderError && error.category === 'not_found');
   await assert.rejects(fakeSdk({ authConfigPages: pages }).provider.startLink('ac_inconnu', 'X', 'http://127.0.0.1:4317/x'), ProviderError);
@@ -238,5 +238,61 @@ test('the real SDK client sends only the explicit key to the fixed provider addr
     globalThis.fetch = saved.fetch;
     if (saved.key === undefined) delete process.env.COMPOSIO_API_KEY; else process.env.COMPOSIO_API_KEY = saved.key;
     if (saved.base === undefined) delete process.env.COMPOSIO_BASE_URL; else process.env.COMPOSIO_BASE_URL = saved.base;
+  }
+});
+
+
+test('a timed out SDK request is cancelled, and a cancelled execution remains unknown without retry', async () => {
+  let executeSignal: AbortSignal | undefined;
+  const execution = fakeSdk({ execute: async (...args) => {
+    executeSignal = args[3]?.signal;
+    return new Promise<ExecuteResult>((_resolve, reject) => executeSignal?.addEventListener('abort', () => reject(new ComposioRequestCancelledError()), { once: true }));
+  } });
+  assert.deepEqual(await execution.provider.send(PIN, ARGS), { kind: 'unknown', category: 'timeout' });
+  assert.equal(executeSignal?.aborted, true);
+  assert.equal(execution.calls.execute.length, 1);
+
+  const read = fakeSdk();
+  let readSignal: AbortSignal | undefined;
+  read.sdk.authConfigs.list = async (_query, options) => {
+    readSignal = options?.signal;
+    return new Promise<AuthConfigPage>((_resolve, reject) => readSignal?.addEventListener('abort', () => reject(new ComposioRequestCancelledError()), { once: true }));
+  };
+  await assert.rejects(read.provider.catalog(), (error: unknown) => error instanceof ProviderError && error.category === 'timeout');
+  assert.equal(readSignal?.aborted, true);
+});
+
+test('a session returned by the installed SDK forwards the execution signal to fetch and never retries an abort', async () => {
+  const previousFetch = globalThis.fetch;
+  let sends = 0;
+  let aborted = false;
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (new URL(request.url).pathname.endsWith('/execute')) {
+      sends += 1;
+      return new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener('abort', () => {
+          aborted = true;
+          reject(new DOMException('Synthetic cancellation', 'AbortError'));
+        }, { once: true });
+      });
+    }
+    return new Response(JSON.stringify({ session_id: 'session_synthetic', config: {}, config_version: 1, mcp: { type: 'http', url: 'https://backend.composio.dev/synthetic-mcp' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const sdk = createComposioSdk('cle-synthetique');
+    const session: SessionPort = await sdk.sessions.create(OWNER, { sessionPreset: 'direct_tools' });
+    const controller = new AbortController();
+    const execution = session.execute(PIN.toolSlug, ARGS, { account: PIN.accountId }, { signal: controller.signal });
+    const timer = setTimeout(() => controller.abort(), 50);
+    try {
+      await assert.rejects(execution, ComposioRequestCancelledError);
+    } finally {
+      clearTimeout(timer);
+    }
+    assert.equal(sends, 1);
+    assert.equal(aborted, true);
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });

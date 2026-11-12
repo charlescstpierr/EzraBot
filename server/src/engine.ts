@@ -232,7 +232,7 @@ class Connection {
     if (message.id !== undefined && message.method !== undefined) {
       const id = message.id;
       let answered = false;
-      const answer = (body: { result: unknown } | { error: { code: number; message: string } }) => {
+      const answerOnce = (body: { result: unknown } | { error: { code: number; message: string } }) => {
         if (answered) return;
         answered = true;
         this.send({ id, ...body });
@@ -240,8 +240,8 @@ class Connection {
       const request: ServerRequest = {
         method: message.method,
         params: message.params,
-        refuse: () => answer({ error: { code: -32000, message: 'Mino refuse toute action, tout outil et toute autorisation.' } }),
-        respond: result => answer({ result }),
+        refuse: () => answerOnce({ error: { code: -32000, message: 'Mino refuse toute action, tout outil et toute autorisation.' } }),
+        respond: result => answerOnce({ result }),
       };
       if (this.listener) this.listener.serverRequest(request);
       else request.refuse();
@@ -455,9 +455,8 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const received = new Map<string, string>();
       const early: z.infer<typeof AgentDeltaSchema>[] = [];
       const earlyItems: { method: string; event: z.infer<typeof ItemEventSchema> }[] = [];
-      let announceTurn = () => {};
-      /** Settles when the turn id is known or the run ends, so a tool call that arrives first can be matched to its turn. */
-      const turnAnnounced = new Promise<void>(resolve => { announceTurn = resolve; });
+      let resolveTurnKnownOrSettled = () => {};
+      const turnKnownOrSettled = new Promise<void>(resolve => { resolveTurnKnownOrSettled = resolve; });
       const accept = (delta: z.infer<typeof AgentDeltaSchema>) => {
         if (delta.turnId !== turnId) return;
         const text = (received.get(delta.itemId) ?? '') + delta.delta;
@@ -467,7 +466,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
       const knowTurn = (id: string) => {
         if (turnId !== null) return;
         turnId = id;
-        announceTurn();
+        resolveTurnKnownOrSettled();
         for (const delta of early.splice(0)) accept(delta);
         for (const item of earlyItems.splice(0)) acceptItem(item.method, item.event);
       };
@@ -498,7 +497,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
         if (graceTimer) clearTimeout(graceTimer);
         signal.removeEventListener('abort', onAbort);
         conn.listener = null;
-        announceTurn();
+        resolveTurnKnownOrSettled();
         resolve(outcome);
       };
       const interrupt = () => {
@@ -521,7 +520,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
         stop(engineFailure('request_refused'));
       };
       const answerToolCall = async (request: ServerRequest, call: z.infer<typeof ToolCallSchema>, offer: TurnTools) => {
-        await turnAnnounced;
+        await turnKnownOrSettled;
         if (settled || aborting || call.turnId !== turnId) return refuse(request);
         const reply = await offer.call({ callId: call.callId, tool: call.tool, arguments: call.arguments })
           .catch((): ToolReply => ({ success: false, text: 'Action refusée : le service est indisponible. Rien n’a été enregistré.' }));
