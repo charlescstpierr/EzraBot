@@ -331,3 +331,28 @@ test("le focus placé sur le nom pendant l’enregistrement du modèle y reste",
   await expect(trigger).toBeEnabled();
   await expect(field).toBeFocused();
 });
+
+for (const { group, option } of [
+  { group: "Réflexion", option: "high (Poussée)" },
+  { group: "Vitesse", option: "priority (Fast)" },
+]) {
+  test(`le réglage ${group} garde le focus après son enregistrement`, async ({
+    page,
+  }) => {
+    await openWithDefaultModels(page, ["pixel"]);
+    const answer = await holdConfigure(page);
+    const { sheet, trigger } = await pixelSheet(page);
+    const control = sheet
+      .getByRole("group", { name: group, exact: true })
+      .getByRole("radio", { name: option, exact: true });
+    await control.focus();
+    await page.keyboard.press("Space");
+    await expect(trigger).toBeDisabled();
+    await expect(control).not.toBeFocused();
+
+    await answer();
+    await expect(control).toBeEnabled();
+    await expect(control).toBeChecked();
+    await expect(control).toBeFocused();
+  });
+}
