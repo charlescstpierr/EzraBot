@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu } from "lucide-react";
 import { PROVIDER_PATHS } from "./provider-paths";
 import {
@@ -229,7 +229,8 @@ function ModelMenu({
     [query, setQuery] = useState(""),
     [active, setActive] = useState(0);
   const trigger = useRef<HTMLButtonElement>(null),
-    panel = useRef<HTMLDivElement>(null);
+    panel = useRef<HTMLDivElement>(null),
+    blurredByLock = useRef(false);
   const id = useId();
   const models = engine.state === "ready" ? engine.models : [];
   const shown = models.filter((m) => matchesModel(m, query));
@@ -243,6 +244,11 @@ function ModelMenu({
     close(true);
     onPick(model);
   }
+  useLayoutEffect(() => {
+    if (disabled || !blurredByLock.current) return;
+    blurredByLock.current = false;
+    if (document.activeElement === document.body) trigger.current?.focus();
+  }, [disabled]);
   useEffect(() => {
     if (engine.state !== "ready") void fetch("/api/catalog").catch(() => {});
   }, [open, engine.state]);
@@ -277,6 +283,9 @@ function ModelMenu({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Modèle de ${name} : ${label}${identified ? ` (${current.id})` : ""}`}
+        onBlur={(e) => {
+          if (e.currentTarget.disabled) blurredByLock.current = true;
+        }}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
         <ProviderLogo model={modelId} />
