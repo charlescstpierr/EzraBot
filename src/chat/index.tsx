@@ -437,8 +437,8 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           <div className="ez-chat-welcome">
             <button
               className="ez-chat-hero hero-mascot"
-              aria-label="Personnaliser le personnage"
-              onClick={() => port.go({ page: "characters", botId })}
+              aria-label={`Modifier ${bot.name}`}
+              onClick={() => port.openBot({ mode: "edit", botId })}
             >
               <Mascot shape={bot.shape} color={bot.color} size={148} animated />
             </button>
@@ -618,7 +618,10 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             void send();
           }}
         >
-          <AttachmentMenu onFiles={(files) => void addFiles(files)} disabled={readingFiles} />
+          <AttachmentMenu
+            onFiles={(files) => void addFiles(files)}
+            disabled={readingFiles}
+          />
           <button
             type="button"
             aria-label="Inviter un personnage"

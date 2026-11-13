@@ -342,6 +342,23 @@ test('SQL cannot attach a work or reply to another bot owner', () => {
   } finally { db.close(); }
 });
 
+test('a bot created with its personality keeps it after a restart, and a retried create stays one bot', () => {
+  const first = open();
+  const command = { type: 'bot.create', requestId: rid(), name: 'Basilic', title: 'jardin de balcon', shape: 'radish', color: '#ff2b76', instructions: 'Pose une question à la fois.' } as const;
+  const created = ok(first.store.dispatch(command));
+  const replayed = first.store.dispatch(command);
+  assert.equal(replayed.ok && replayed.replayed, true, 'the same requestId replays instead of creating twice');
+  assert.equal(first.store.view().bots.filter(b => b.name === 'Basilic').length, 1);
+  const legacy = ok(first.store.dispatch({ type: 'bot.create', requestId: rid(), name: 'Sans consigne', title: '', shape: 'sprout', color: '#8de343' }));
+  first.store.close();
+  const second = open(first.path);
+  try {
+    const bots = second.store.view().bots;
+    assert.equal(created.kind === 'bot' && bots.find(b => b.id === created.botId)?.instructions, 'Pose une question à la fois.');
+    assert.equal(legacy.kind === 'bot' && bots.find(b => b.id === legacy.botId)?.instructions, '', 'a create without instructions keeps the legacy shape');
+  } finally { second.store.close(); }
+});
+
 test('bot instructions and reply settings survive a restart and only reach that bot’s calls', () => {
   const first = open();
   ok(first.store.dispatch({ type: 'bot.update', requestId: rid(), botId: 'mino', instructions: 'CONSIGNE_PROPRE_A_MINO', replyStyle: 'detailed', contextSize: 'long' }));

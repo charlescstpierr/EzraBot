@@ -1,4 +1,4 @@
-import { attachmentStorage, hydrateAttachments } from './chat/durable';
+import { attachmentStorage, hydrateAttachments } from "./chat/durable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -10,7 +10,6 @@ import {
   Smartphone,
   Settings,
   PanelLeft,
-  ChevronDown,
   X,
   Download,
   MoreHorizontal,
@@ -23,7 +22,7 @@ import type { AgentsView } from "../server/src/agent-protocol";
 import { openDrafts, type KeyValueStorage } from "../server/web/drafts";
 import { forgetSearch } from "../server/web/search";
 import { createRunner, getAppView, getAgentsView, uid } from "./api";
-import type { CommandRunner, Port, Route } from "./port";
+import type { BotSheetTarget, CommandRunner, Port, Route } from "./port";
 import {
   AgentOutboxProvider,
   AgentRecovery,
@@ -39,7 +38,14 @@ import { SearchBox } from "./search";
 import { TaskCard, DocumentPanel } from "./documents";
 import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
-import { CharacterPanel, CharacterCreate } from "./characters";
+import {
+  BotSheet,
+  BotSwitcher,
+  ModelPicker,
+  CharacterGallery,
+  CharacterPanel,
+} from "./characters";
+import { Sheet } from "./Sheet";
 import { ToolCards, ToolConnections } from "./tools";
 import "./style.css";
 function browserStorage(
@@ -58,7 +64,8 @@ function App() {
     [error, setError] = useState(""),
     [sidebar, setSidebar] = useState(false),
     [dialog, setDialog] = useState<"computer" | "settings" | null>(null),
-    [fan, setFan] = useState(false),
+    [botSheet, setBotSheet] = useState<BotSheetTarget | null>(null),
+    [greeted, setGreeted] = useState(0),
     [route, setRoute] = useState<Route>({ page: "chat", botId: "" });
   const [selectionPending, setSelectionPending] =
     useState<CommandOf<"bot.select"> | null>(null);
@@ -71,8 +78,7 @@ function App() {
     [],
   );
   const retiredSpaces = useRef(new Set<string>()),
-    currentSpace = useRef<string | null>(null),
-    press = useRef<ReturnType<typeof setTimeout> | null>(null);
+    currentSpace = useRef<string | null>(null);
   const applyApp = useCallback(
     (next: PcView) => {
       if (retiredSpaces.current.has(next.spaceId)) return;
@@ -191,7 +197,7 @@ function App() {
         ? { page: "chat", botId: view.activeBotId }
         : { page: "characters" },
     );
-    setFan(false);
+    setBotSheet(null);
     setDialog(null);
     setSelectionPending(null);
   }, [space, drafts]);
@@ -230,40 +236,12 @@ function App() {
     }
   }, [view, drafts, outbox, route]);
   useEffect(() => {
-    if (!dialog) return;
-    const previous =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    const modal = document.querySelector<HTMLElement>(".modal");
-    const focusables = () =>
-      Array.from(
-        modal?.querySelectorAll<HTMLElement>(
-          "button:not([disabled]),a[href],input,textarea,select",
-        ) ?? [],
-      );
-    focusables()[0]?.focus();
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDialog(null);
-      if (e.key === "Tab") {
-        const items = focusables(),
-          first = items[0],
-          last = items.at(-1);
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("keydown", key);
-      previous?.focus();
-    };
-  }, [dialog]);
+    // Runs after the closed sheet has restored focus to its opener, so the new conversation keeps it.
+    if (greeted)
+      document
+        .querySelector<HTMLTextAreaElement>(".ez-chat-composer textarea")
+        ?.focus();
+  }, [greeted]);
   async function select(command: CommandOf<"bot.select">) {
     const result = await runner.app(command);
     if (result.kind === "unknown") {
@@ -282,11 +260,17 @@ function App() {
     setRoute(next);
     setSidebar(false);
     setDialog(null);
-    setFan(false);
+    setBotSheet(null);
     if (next.page === "chat" && next.botId && next.botId !== view?.activeBotId)
       void select({ type: "bot.select", requestId: uid(), botId: next.botId });
   }
-  const port: Port | null = view && run ? { view, agents, run, go } : null;
+  function openBot(target: BotSheetTarget) {
+    setSidebar(false);
+    setDialog(null);
+    setBotSheet(target);
+  }
+  const port: Port | null =
+    view && run ? { view, agents, run, go, openBot } : null;
   const selectedBot = view?.bots.find(
     (b) =>
       b.id ===
@@ -339,11 +323,7 @@ function App() {
                 if (id === "chat") openHome();
                 else if (id === "missions") go({ page: "missions" });
                 else if (id === "projects") go({ page: "projects" });
-                else if (id === "characters")
-                  go({
-                    page: "characters",
-                    botId: view?.activeBotId || undefined,
-                  });
+                else if (id === "characters") go({ page: "characters" });
                 else go({ page: "carnet" });
               }}
             >
@@ -353,7 +333,14 @@ function App() {
           ))}
         </nav>
         <div className="section-label">
-          Conversations<span>{view?.bots.length ?? "—"}</span>
+          Conversations
+          <button
+            className="icon"
+            aria-label="Nouveau personnage"
+            onClick={() => openBot({ mode: "create" })}
+          >
+            <Plus size={16} />
+          </button>
         </div>
         <div className="threads">
           {view?.bots.map((bot) => (
@@ -414,30 +401,11 @@ function App() {
             >
               <PanelLeft size={20} />
             </button>
-            {selectedBot && route.page === "chat" ? (
-              <button
-                className="bot-title"
-                onClick={() =>
-                  go({ page: "characters", botId: selectedBot.id })
-                }
-                onPointerDown={() => {
-                  press.current = setTimeout(() => setFan(true), 550);
-                }}
-                onPointerUp={() => {
-                  if (press.current) clearTimeout(press.current);
-                }}
-                onPointerLeave={() => {
-                  if (press.current) clearTimeout(press.current);
-                }}
-              >
-                <Mascot
-                  shape={selectedBot.shape}
-                  color={selectedBot.color}
-                  size={30}
-                />
-                <strong>{selectedBot.name}</strong>
-                <ChevronDown size={13} />
-              </button>
+            {port && selectedBot && route.page === "chat" ? (
+              <>
+                <BotSwitcher port={port} bot={selectedBot} />
+                <ModelPicker port={port} bot={selectedBot} />
+              </>
             ) : (
               <strong>
                 {route.page === "document"
@@ -535,41 +503,15 @@ function App() {
                 <MissionList port={port} />
               )
             ) : route.page === "characters" ? (
-              <>
-                <div className="character-tabs">
-                  {port.view.bots.map((bot) => (
-                    <button
-                      className={
-                        route.botId === bot.id
-                          ? "character-choice selected"
-                          : "character-choice"
-                      }
-                      aria-pressed={route.botId === bot.id}
-                      key={bot.id}
-                      onClick={() => go({ page: "characters", botId: bot.id })}
-                    >
-                      <Mascot shape={bot.shape} color={bot.color} size={25} />
-                      {bot.name}
-                    </button>
-                  ))}
-                  <button
-                    className="outline"
-                    onClick={() => go({ page: "characters" })}
-                  >
-                    <Plus size={16} />
-                    Nouveau personnage
-                  </button>
-                </div>
-                {route.botId ? (
-                  <CharacterPanel
-                    key={route.botId}
-                    port={port}
-                    botId={route.botId}
-                  />
-                ) : (
-                  <CharacterCreate port={port} />
-                )}
-              </>
+              route.botId ? (
+                <CharacterPanel
+                  key={route.botId}
+                  port={port}
+                  botId={route.botId}
+                />
+              ) : (
+                <CharacterGallery port={port} />
+              )
             ) : (
               <div className="content-page">
                 <h1>Documents</h1>
@@ -621,114 +563,95 @@ function App() {
             )}
           </div>
         )}
-        {fan && (
-          <div className="shell-fan">
-            <div className="fan-heading">
-              Changer de compagnon
-              <button
-                className="icon"
-                onClick={() => setFan(false)}
-                aria-label="Fermer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            {view?.bots.map((bot) => (
-              <button
-                key={bot.id}
-                onClick={() => go({ page: "chat", botId: bot.id })}
-              >
-                <Mascot shape={bot.shape} color={bot.color} size={45} />
-                {bot.name}
-              </button>
-            ))}
-          </div>
-        )}
       </main>
       {dialog && (
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setDialog(null);
-          }}
+        <Sheet
+          label="Préférences et connexion"
+          className="modal"
+          onClose={() => setDialog(null)}
         >
-          <section
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Préférences et connexion"
+          <button
+            className="modal-close icon"
+            aria-label="Fermer"
+            onClick={() => setDialog(null)}
           >
-            <button
-              className="modal-close icon"
-              aria-label="Fermer"
-              onClick={() => setDialog(null)}
-            >
-              <X size={20} />
-            </button>
-            {dialog === "computer" ? (
-              <>
-                <Smartphone size={28} />
-                <h2>Connexion téléphone</h2>
-                <a className="black" href="/devices">
-                  Associer un téléphone
-                  <ArrowRight size={16} />
-                </a>
-                <small>
-                  Connexion privée HTTPS et Tailscale requise. L’association
-                  doit être approuvée sur le PC.
-                </small>
-              </>
-            ) : (
-              <>
-                <Settings size={28} />
-                <h2>Préférences</h2>
-                <div className="info-row">
-                  <span>Service PC</span>
-                  <strong>
-                    {offline ? "Déconnecté" : "Connecté en local"}
-                  </strong>
-                </div>
-                <div className="info-row">
-                  <span>Moteur Codex</span>
-                  <strong>
-                    {view?.engine.state === "ready"
-                      ? "Disponible"
-                      : "Indisponible"}
-                  </strong>
-                </div>
-                {view?.engine.state === "unavailable" && (
-                  <p className="notice">{view.engine.message}</p>
-                )}
-                <a
+            <X size={20} />
+          </button>
+          {dialog === "computer" ? (
+            <>
+              <Smartphone size={28} />
+              <h2>Connexion téléphone</h2>
+              <a className="black" href="/devices">
+                Associer un téléphone
+                <ArrowRight size={16} />
+              </a>
+              <small>
+                Connexion privée HTTPS et Tailscale requise. L’association doit
+                être approuvée sur le PC.
+              </small>
+            </>
+          ) : (
+            <>
+              <Settings size={28} />
+              <h2>Préférences</h2>
+              <div className="info-row">
+                <span>Service PC</span>
+                <strong>{offline ? "Déconnecté" : "Connecté en local"}</strong>
+              </div>
+              <div className="info-row">
+                <span>Moteur Codex</span>
+                <strong>
+                  {view?.engine.state === "ready"
+                    ? "Disponible"
+                    : "Indisponible"}
+                </strong>
+              </div>
+              {view?.engine.state === "unavailable" && (
+                <p className="notice">{view.engine.message}</p>
+              )}
+              <a
+                className="outline"
+                href={`/api/export?threadBotId=${encodeURIComponent(view?.activeBotId ?? "")}`}
+              >
+                <Download size={16} />
+                Exporter la conversation
+              </a>
+              {selectedBot && (
+                <button
                   className="outline"
-                  href={`/api/export?threadBotId=${encodeURIComponent(view?.activeBotId ?? "")}`}
+                  onClick={() =>
+                    openBot({ mode: "edit", botId: selectedBot.id })
+                  }
                 >
-                  <Download size={16} />
-                  Exporter la conversation
-                </a>
-                {selectedBot && (
-                  <button
-                    className="outline"
-                    onClick={() =>
-                      go({ page: "characters", botId: selectedBot.id })
-                    }
-                  >
-                    Personnaliser {selectedBot.name}
-                    <ArrowRight size={16} />
-                  </button>
-                )}
-                <a className="outline" href="/advanced">
-                  Client de référence
+                  Modifier {selectedBot.name}
                   <ArrowRight size={16} />
-                </a>
-                {port && <ToolConnections port={port} />}
-              </>
-            )}
-          </section>
-        </div>
+                </button>
+              )}
+              <a className="outline" href="/advanced">
+                Client de référence
+                <ArrowRight size={16} />
+              </a>
+              {port && <ToolConnections port={port} />}
+            </>
+          )}
+        </Sheet>
+      )}
+      {port && botSheet && (
+        <BotSheet
+          key={botSheet.mode === "edit" ? botSheet.botId : "new"}
+          port={port}
+          target={botSheet}
+          onClose={() => setBotSheet(null)}
+          onCreated={(botId) => {
+            go({ page: "chat", botId });
+            setGreeted((n) => n + 1);
+          }}
+        />
       )}
     </div>
   );
   return <AgentOutboxProvider value={outbox}>{shell}</AgentOutboxProvider>;
 }
-void hydrateAttachments().then(() => createRoot(document.getElementById("root")!).render(<App />));
+void hydrateAttachments().then(() =>
+  createRoot(document.getElementById("root")!).render(<App />),
+);

@@ -40,10 +40,12 @@ export type Route =
   | { page: "projects" }
   | { page: "characters"; botId?: string }
   | { page: "carnet" };
+export type BotSheetTarget = { mode: "create" } | { mode: "edit"; botId: string };
 export type Port = {
   view: PcView;
   agents: AgentsView | null;
   run: CommandRunner;
   go(route: Route): void;
+  openBot(target: BotSheetTarget): void;
 };
 export type { MissionResponse } from "../server/src/agent-protocol";

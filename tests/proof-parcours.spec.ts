@@ -44,7 +44,7 @@ test("preuves visuelles du client avec un espace synthétique vide", async ({
   });
   await page.getByRole("button", { name: "Personnages", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Personnaliser Mino" }),
+    page.getByRole("button", { name: "Discuter avec Mino" }),
   ).toBeVisible();
   await page.screenshot({
     path: info.outputPath("apres-personnages-desktop.png"),

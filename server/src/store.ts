@@ -1109,9 +1109,9 @@ export function openStore(options: StoreOptions): Store {
         const position = int(get('SELECT COALESCE(MAX(position), -1) + 1 AS n FROM bots') ?? {}, 'n');
         const botId = newId('b');
         run(
-          `INSERT INTO bots(id, position, name, title, shape, color, default_shape, default_color, model, effort, speed, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
-          botId, position, command.name, command.title, command.shape, command.color, command.shape, defaultColor, STANDARD_SPEED, now(),
+          `INSERT INTO bots(id, position, name, title, shape, color, default_shape, default_color, model, effort, speed, instructions, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+          botId, position, command.name, command.title, command.shape, command.color, command.shape, defaultColor, STANDARD_SPEED, command.instructions ?? '', now(),
         );
         return { kind: 'bot', botId };
       }

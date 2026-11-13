@@ -87,7 +87,7 @@ test("un personnage créé avec sa personnalité ouvre son fil et conserve son m
 
   await page.reload();
   await expect(model).toContainText("Fake Sol");
-  const view = await page.request.get("/api/view");
+  const view = await page.request.get(new URL("/api/view", page.url()).href);
   expect(view.ok()).toBe(true);
   expect(await view.json()).toMatchObject({
     bots: expect.arrayContaining([
