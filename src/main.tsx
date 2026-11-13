@@ -40,6 +40,7 @@ import { ProjectsPage } from "./projects";
 import {
   BotSheet,
   BotSwitcher,
+  ModelPicker,
   CharacterGallery,
   CharacterPanel,
 } from "./characters";
@@ -400,7 +401,10 @@ function App() {
               <PanelLeft size={20} />
             </button>
             {port && selectedBot && route.page === "chat" ? (
-              <BotSwitcher port={port} bot={selectedBot} />
+              <>
+                <BotSwitcher port={port} bot={selectedBot} />
+                <ModelPicker port={port} bot={selectedBot} />
+              </>
             ) : (
               <strong>
                 {route.page === "document"

@@ -23,7 +23,7 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
   await sheet
     .getByLabel("Description courte", { exact: true })
     .fill("Données de recette");
-  await sheet.getByRole("button", { name: "Changer l’apparence" }).click();
+  await sheet.getByRole("button", { name: "Apparence" }).click();
   await sheet.getByTitle("Radis").click();
   await sheet
     .getByLabel("Personnalité et instructions", { exact: true })

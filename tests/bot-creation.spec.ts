@@ -45,7 +45,7 @@ test("créer un personnage avec sa personnalité ouvre la conversation, puis se 
   await sheet
     .getByLabel("Personnalité et instructions", { exact: true })
     .fill(personality);
-  await sheet.getByRole("button", { name: "Changer l’apparence" }).click();
+  await sheet.getByRole("button", { name: "Apparence" }).click();
   await sheet.getByTitle("Champignon").click();
   await expect(sheet.getByRole("radio", { name: "Champignon" })).toBeChecked();
   await sheet.getByRole("button", { name: "Créer et discuter" }).click();
@@ -128,4 +128,56 @@ test("une création au résultat inconnu se réessaie sans créer de doublon", a
   expect(
     view.bots.filter((b: { name: string }) => b.name === name),
   ).toHaveLength(1);
+});
+
+test("le modèle choisi depuis l’en-tête du personnage reste enregistré", async ({
+  page,
+}) => {
+  const base = "http://127.0.0.1:4398";
+  const configures = commands(page, "bot.configure");
+  await page.goto(`${base}/`);
+  await page
+    .locator(".threads")
+    .getByRole("button", { name: /^Pixel/ })
+    .click();
+  const trigger = page.getByRole("button", { name: /^Modèle de Pixel :/ });
+  await trigger.click();
+  const picker = page.getByRole("dialog", { name: "Modèle de Pixel" });
+  await expect(
+    picker.getByRole("combobox", { name: "Chercher un modèle" }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(configures).toHaveLength(0);
+
+  await trigger.click();
+  await picker.getByRole("option", { name: /Fake Sol/ }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(configures.at(-1)).toMatchObject({
+    botId: "pixel",
+    model: "fake-sol",
+    effort: null,
+    speed: "standard",
+  });
+
+  await trigger.click();
+  await picker.getByText("Poussée", { exact: true }).click();
+  await expect(picker.getByRole("radio", { name: "Poussée" })).toBeChecked();
+  expect(configures.at(-1)).toMatchObject({
+    model: "fake-sol",
+    effort: "high",
+  });
+
+  await page.reload();
+  await expect(trigger).toContainText("Fake Sol");
+  const view = await (await page.request.get(`${base}/api/view`)).json();
+  expect(
+    view.bots.find((b: { id: string }) => b.id === "pixel").choice,
+  ).toEqual({
+    model: "fake-sol",
+    effort: "high",
+    speed: "standard",
+  });
 });

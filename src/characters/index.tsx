@@ -13,6 +13,8 @@ import { ToolGrants } from "../tools";
 import { useAction } from "./action";
 export { BotSheet } from "./sheet";
 export { BotSwitcher } from "./switcher";
+export { ModelPicker } from "./model";
+import { ModelPicker, modelLabel } from "./model";
 import "./style.css";
 const deletionLabels: Record<string, string> = {
   messages: "Messages",
@@ -51,6 +53,7 @@ export function CharacterGallery({ port }: { port: Port }) {
             <strong>{bot.name}</strong>
             {bot.title && <small>{bot.title}</small>}
             {bot.instructions && <p>{bot.instructions}</p>}
+            <span className="bot-card-model">{modelLabel(port, bot)}</span>
           </button>
           <button
             className="icon bot-card-edit"
@@ -116,6 +119,10 @@ function Settings({ port, bot }: { port: Port; bot: BotView }) {
           <p>Aucune instruction pour le moment.</p>
         )}
       </section>
+      <section aria-labelledby="model-heading" className="ez-character-model">
+        <h3 id="model-heading">Modèle</h3>
+        <ModelPicker port={port} bot={bot} />
+      </section>
       <section aria-labelledby="memory-heading">
         <h3 id="memory-heading">Sa mémoire</h3>
         <p>
@@ -168,7 +175,6 @@ function Settings({ port, bot }: { port: Port; bot: BotView }) {
       <details className="ez-character-advanced">
         <summary>Réglages avancés</summary>
         <ReplySettings port={port} bot={bot} />
-        <EngineSettings port={port} bot={bot} />
       </details>
       <DeleteCharacter port={port} bot={bot} />
     </div>
@@ -365,93 +371,6 @@ function MemoryEditor({
       )}
       {action.feedback}
     </div>
-  );
-}
-function EngineSettings({ port, bot }: { port: Port; bot: BotView }) {
-  const [model, setModel] = useState(bot.choice.model ?? ""),
-    [effort, setEffort] = useState(bot.choice.effort ?? ""),
-    [speed, setSpeed] = useState(bot.choice.speed);
-  const action = useAction(port);
-  const engine = port.view.engine,
-    models = engine.state === "ready" ? engine.models : [];
-  const selected =
-    models.find((m) => m.id === model) ?? models.find((m) => m.isDefault);
-  return (
-    <section>
-      <h3>Moteur de réponse</h3>
-      {engine.state !== "ready" ? (
-        <p className="notice">
-          Le catalogue du moteur est indisponible. Aucun réglage n’a été changé.
-        </p>
-      ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void action.perform({
-              type: "bot.configure",
-              requestId: uid(),
-              botId: bot.id,
-              model: model || null,
-              effort: effort || null,
-              speed,
-            });
-          }}
-        >
-          <fieldset disabled={action.disabled}>
-            <label>
-              Modèle
-              <select
-                value={model}
-                onChange={(e) => {
-                  setModel(e.target.value);
-                  setEffort("");
-                  setSpeed("standard");
-                }}
-              >
-                <option value="">Choix par défaut du moteur</option>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Effort
-              <select
-                value={effort}
-                onChange={(e) => setEffort(e.target.value)}
-              >
-                <option value="">Effort par défaut</option>
-                {selected?.efforts.map((e) => (
-                  <option key={e} value={e}>
-                    {e}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Vitesse
-              <select value={speed} onChange={(e) => setSpeed(e.target.value)}>
-                <option value="standard">Standard</option>
-                {selected?.speeds
-                  .filter((s) => s.id !== "standard")
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <button className="outline">
-              Enregistrer le choix du moteur
-              <Check size={16} />
-            </button>
-          </fieldset>
-        </form>
-      )}
-      {action.feedback}
-    </section>
   );
 }
 function DeleteCharacter({ port, bot }: { port: Port; bot: BotView }) {

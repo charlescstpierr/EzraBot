@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { X } from "lucide-react";
 import catalogue from "../../server/assets/mascots.json";
 import { LIMITS, type BotView } from "../../server/src/protocol";
@@ -7,6 +7,7 @@ import { uid } from "../api";
 import { Mascot } from "../Mascot";
 import { Sheet } from "../Sheet";
 import { useAction } from "./action";
+import { ModelPicker } from "./model";
 
 const colorNames: Record<string, string> = {
   "#f3ecd7": "Crème",
@@ -69,7 +70,6 @@ export function BotSheet({
       : freshDraft(port.view.bots),
   );
   const [look, setLook] = useState(false);
-  const id = useId();
   const action = useAction(port);
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const heading = bot ? `Modifier ${bot.name}` : "Nouveau personnage";
@@ -117,25 +117,64 @@ export function BotSheet({
             aria-label="Fermer"
             onClick={onClose}
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </header>
         <fieldset disabled={action.disabled}>
-          <div className="bot-sheet-portrait">
-            <Mascot
-              shape={draft.shape}
-              color={draft.color}
-              size={104}
-              animated
-            />
+          <div className="bot-sheet-identity">
+            <Mascot shape={draft.shape} color={draft.color} size={52} />
+            <div>
+              <input
+                className="bot-sheet-name"
+                aria-label="Nom"
+                placeholder="Nom du personnage"
+                required
+                data-autofocus={bot ? undefined : true}
+                maxLength={24}
+                autoComplete="off"
+                value={draft.name}
+                onChange={(e) => set({ name: e.target.value })}
+              />
+              <input
+                className="bot-sheet-title"
+                aria-label="Description courte"
+                placeholder="Description courte (facultative)"
+                maxLength={60}
+                autoComplete="off"
+                value={draft.title}
+                onChange={(e) => set({ title: e.target.value })}
+              />
+            </div>
+          </div>
+          <textarea
+            className="bot-sheet-text"
+            aria-label="Personnalité et instructions"
+            rows={5}
+            maxLength={LIMITS.botInstructionsChars}
+            placeholder="Décris sa personnalité et sa façon de répondre. Ex. Tu es patient et curieux. Tu me tutoies et tu poses une question à la fois."
+            value={draft.instructions}
+            onChange={(e) => set({ instructions: e.target.value })}
+          />
+          {left < 150 && (
+            <small className="bot-sheet-count" aria-live="polite">
+              {left} caractères restants
+            </small>
+          )}
+          <div className="bot-sheet-chips">
             <button
               type="button"
-              className="link"
+              className="chip"
               aria-expanded={look}
               onClick={() => setLook(!look)}
             >
-              {look ? "Masquer l’apparence" : "Changer l’apparence"}
+              <span
+                className="chip-dot"
+                style={{ background: draft.color }}
+                aria-hidden="true"
+              />
+              Apparence
             </button>
+            {bot && <ModelPicker port={port} bot={bot} />}
           </div>
           {look && (
             <div className="bot-look">
@@ -207,47 +246,6 @@ export function BotSheet({
               </fieldset>
             </div>
           )}
-          <div className="bot-sheet-fields">
-            <div>
-              <label htmlFor={`${id}-name`}>Nom</label>
-              <input
-                id={`${id}-name`}
-                required
-                data-autofocus={bot ? undefined : true}
-                maxLength={24}
-                autoComplete="off"
-                value={draft.name}
-                onChange={(e) => set({ name: e.target.value })}
-              />
-            </div>
-            <div>
-              <label htmlFor={`${id}-title`}>Description courte</label>
-              <input
-                id={`${id}-title`}
-                maxLength={60}
-                autoComplete="off"
-                placeholder="Facultative"
-                value={draft.title}
-                onChange={(e) => set({ title: e.target.value })}
-              />
-            </div>
-          </div>
-          <div className="bot-sheet-personality">
-            <label htmlFor={`${id}-personality`}>
-              Personnalité et instructions
-            </label>
-            <textarea
-              id={`${id}-personality`}
-              rows={5}
-              maxLength={LIMITS.botInstructionsChars}
-              placeholder="Ex. Tu es patient et curieux. Tu me tutoies et tu poses une question à la fois."
-              value={draft.instructions}
-              onChange={(e) => set({ instructions: e.target.value })}
-            />
-            {left < 150 && (
-              <small aria-live="polite">{left} caractères restants</small>
-            )}
-          </div>
         </fieldset>
         {action.feedback}
         <footer className="bot-sheet-foot">
