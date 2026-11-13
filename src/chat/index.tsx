@@ -30,6 +30,7 @@ import {
   type SavedSend,
 } from "./pending";
 import "./style.css";
+import { AttachmentMenu } from "./AttachmentMenu";
 
 type Props = {
   port: Port;
@@ -617,6 +618,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             void send();
           }}
         >
+          <AttachmentMenu onFiles={(files) => void addFiles(files)} disabled={readingFiles} />
           <button
             type="button"
             aria-label="Inviter un personnage"
@@ -726,34 +728,6 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             </span>
           </label>
         )}
-        <label className="ez-chat-attachment">
-          Joindre photos et fichiers
-          <input
-            aria-label="Joindre photos et fichiers"
-            type="file"
-            multiple
-            accept="image/png,image/jpeg,image/webp,text/*,.txt,.md,.json,.csv,.html,.css,.js,.ts,.xml,.yaml,.yml"
-            disabled={readingFiles}
-            onChange={(e) => {
-              void addFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        <label className="ez-chat-attachment">
-          Joindre un dossier
-          <input
-            aria-label="Joindre un dossier"
-            type="file"
-            multiple
-            {...{ webkitdirectory: "" }}
-            disabled={readingFiles}
-            onChange={(e) => {
-              void addFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-        </label>
         <small id="message-keyboard-help" className="sr-only">
           Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne
         </small>

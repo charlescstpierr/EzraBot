@@ -22,7 +22,9 @@ test("les images restent dans le brouillon puis dans la commande exacte après u
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   const png = await syntheticPng(page);
   await page
     .getByLabel("Joindre photos et fichiers")
@@ -68,7 +70,9 @@ test("un lot avec un binaire interdit ne garde aucun fichier", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   await page.getByLabel("Joindre photos et fichiers").setInputFiles([
     { name: "bon.txt", mimeType: "text/plain", buffer: Buffer.from("texte") },
     {
@@ -89,7 +93,9 @@ test("un dossier mixte conserve ses chemins et les trois formats image", async (
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 32;
@@ -162,7 +168,9 @@ test("la suppression efface les images du brouillon dans les deux onglets", asyn
   context,
 }) => {
   await page.goto("/");
-  await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   const botId = await page.evaluate(async () => {
     const csrf = document.querySelector<HTMLMetaElement>(
       'meta[name="mino-csrf"]',
@@ -198,7 +206,9 @@ test("la suppression efface les images du brouillon dans les deux onglets", asyn
     page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
   ).toHaveCount(0);
   await page.reload();
-  await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   const png = await syntheticPng(page);
   await page.getByLabel("Joindre photos et fichiers").setInputFiles({
     name: "a-effacer.png",
@@ -210,7 +220,9 @@ test("la suppression efface les images du brouillon dans les deux onglets", asyn
   ).toBeVisible();
   const other = await context.newPage();
   await other.goto("/");
-  await expect(other.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    other.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   await expect(
     other.getByText("Brouillon d’une autre page", { exact: false }),
   ).toBeVisible();
@@ -271,7 +283,9 @@ test("une image corrompue ou trop grande laisse le brouillon intact", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ajouter des pièces jointes" }),
+  ).toBeVisible();
   const input = page.getByLabel("Joindre photos et fichiers");
   await input.setInputFiles({
     name: "corrompue.png",
