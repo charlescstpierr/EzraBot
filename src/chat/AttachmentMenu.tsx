@@ -31,7 +31,11 @@ export function AttachmentMenu({ onFiles, disabled }: Props) {
         !root.current?.contains(event.target)
       ) {
         setOpen(false);
-        trigger.current?.focus();
+        if (
+          document.activeElement === document.body ||
+          root.current?.contains(document.activeElement)
+        )
+          trigger.current?.focus();
       }
     }
     document.addEventListener("click", outside);

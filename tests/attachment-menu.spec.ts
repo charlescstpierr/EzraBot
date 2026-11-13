@@ -40,6 +40,11 @@ test("le bouton unique ouvre un menu utilisable au clavier et restaure le focus"
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await trigger.click();
+  const message = page.getByRole("textbox", { name: "Message", exact: true });
+  await message.click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(message).toBeFocused();
+  await trigger.click();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("menu")).toHaveCount(0);
 });
