@@ -700,3 +700,26 @@ test('creation stores its chosen model atomically and replays after reopening', 
     assert.equal(second.store.dispatch({ ...command, model: null }).ok, false);
   } finally { second.store.close(); }
 });
+
+test('creation stores its model, level and speed in one insert, replays unchanged and conflicts on another choice', () => {
+  const first = open();
+  const command = { type: 'bot.create', requestId: rid(), name: 'Réglage durable', title: '', shape: 'sprout', color: '#8de343', model: 'gpt-6.1-terra', effort: 'ultra', speed: 'priority' };
+  assert.equal(first.store.knows(command.requestId), false);
+  const created = ok(first.store.dispatch(command));
+  assert.equal(first.store.knows(command.requestId), true);
+  first.store.close();
+  const second = open(first.path);
+  try {
+    const replay = second.store.dispatch(command);
+    assert.equal(replay.ok && replay.replayed, true);
+    const bots = second.store.view().bots.filter(b => b.name === command.name);
+    assert.equal(bots.length, 1);
+    assert.equal(created.kind === 'bot' && created.botId, bots[0]?.id);
+    assert.deepEqual(bots[0]?.choice, { model: 'gpt-6.1-terra', effort: 'ultra', speed: 'priority' });
+    assert.equal(refused(second.store.dispatch({ ...command, effort: 'max' })), 'request_conflict');
+    assert.equal(refused(second.store.dispatch({ ...command, speed: 'standard' })), 'request_conflict');
+    const { model: _model, effort: _effort, speed: _speed, ...legacy } = command;
+    const plain = ok(second.store.dispatch({ ...legacy, requestId: rid(), name: 'Sans réglage' }));
+    assert.deepEqual(second.store.view().bots.find(b => plain.kind === 'bot' && b.id === plain.botId)?.choice, { model: null, effort: null, speed: 'standard' });
+  } finally { second.store.close(); }
+});

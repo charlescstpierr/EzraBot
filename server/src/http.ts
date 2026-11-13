@@ -2,9 +2,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
-import { resolveChoice } from './domain.js';
+import { requestedChoice, resolveChoice } from './domain.js';
 import type { Engine } from './engine.js';
-import { CommandSchema, LIMITS, type DispatchOutcome, type RefusalCode } from './protocol.js';
+import { CommandSchema, LIMITS, type BotChoice, type DispatchOutcome, type RefusalCode } from './protocol.js';
 import type { DownloadFile, Store } from './store.js';
 import type { Worker } from './worker.js';
 import { DeviceError, type Devices } from './devices.js';
@@ -144,17 +144,14 @@ export function createHttpServer(options: HttpOptions): Server {
   async function command(req: IncomingMessage, res: ServerResponse): Promise<void> {
     requireLocalPost(req);
     const input = await readJson(req, LIMITS.commandBodyBytes);
-    const parsedChoice = CommandSchema.safeParse(input);
-    if (parsedChoice.success && (parsedChoice.data.type === 'bot.configure' || (parsedChoice.data.type === 'bot.create' && parsedChoice.data.model != null))) {
-      const choice = parsedChoice.data.type === 'bot.configure' ? parsedChoice.data : { model: parsedChoice.data.model ?? null, effort: null, speed: 'standard' };
-      const refusal = await configureRefusal(choice);
-      if (refusal) {
-        sendJson(res, REFUSAL_STATUS[refusal.code] ?? 409, { ...refusal, view: appView() });
-        return;
-      }
+    const parsed = CommandSchema.safeParse(input);
+    const choice = parsed.success && !store.knows(parsed.data.requestId) ? requestedChoice(parsed.data) : null;
+    const refusal = choice && await choiceRefusal(choice);
+    if (refusal) {
+      sendJson(res, REFUSAL_STATUS[refusal.code] ?? 409, { ...refusal, view: appView() });
+      return;
     }
     const outcome = store.dispatch(input, { activeWorkIds: worker.activeWorkIds });
-    const parsed = CommandSchema.safeParse(input);
     options.log?.({ event: 'command', type: parsed.success ? parsed.data.type : 'unknown', ok: outcome.ok, ...(outcome.ok ? {} : { code: outcome.code }) });
     if (outcome.ok) {
       worker.sync();
@@ -164,18 +161,12 @@ export function createHttpServer(options: HttpOptions): Server {
     sendJson(res, REFUSAL_STATUS[outcome.code] ?? 409, { ...outcome, view: appView() });
   }
 
-  async function configureRefusal(input: object): Promise<Extract<DispatchOutcome, { ok: false }> | null> {
-    const model = 'model' in input ? input.model : undefined;
-    const effort = 'effort' in input ? input.effort : undefined;
-    const speed = 'speed' in input ? input.speed : undefined;
-    if ((model !== null && typeof model !== 'string') || (effort !== null && typeof effort !== 'string') || typeof speed !== 'string') {
-      return { ok: false, code: 'invalid_command', message: 'Cette commande est incomplète ou invalide.' };
-    }
+  async function choiceRefusal(choice: BotChoice): Promise<Extract<DispatchOutcome, { ok: false }> | null> {
     const status = await engine.catalog();
     if (status.state !== 'ready') {
-      return { ok: false, code: 'choice_unavailable', message: 'Le catalogue de Codex est indisponible. Le réglage n’a pas été changé.' };
+      return { ok: false, code: 'choice_unavailable', message: 'Le catalogue de Codex est indisponible. Le réglage n’a pas été enregistré.' };
     }
-    const resolution = resolveChoice(status.models, { model, effort, speed });
+    const resolution = resolveChoice(status.models, choice);
     return resolution.ok ? null : { ok: false, code: 'choice_unavailable', message: resolution.message };
   }
 
