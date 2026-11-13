@@ -25,7 +25,7 @@ test("le bouton unique ouvre un menu utilisable au clavier et restaure le focus"
   ).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(
-    page.getByRole("menuitem", { name: "Dossier", exact: true }),
+    page.getByRole("menuitem", { name: "Inviter un personnage", exact: true }),
   ).toBeFocused();
   await page.keyboard.press("Home");
   await page.keyboard.press("ArrowDown");

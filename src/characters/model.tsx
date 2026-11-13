@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu } from "lucide-react";
+import { PROVIDER_PATHS } from "./provider-paths";
 import type {
   BotChoice,
   BotView,
@@ -16,6 +17,36 @@ const effortNames: Record<string, string> = {
   high: "Poussée",
   xhigh: "Très poussée",
 };
+
+type Provider = keyof typeof PROVIDER_PATHS;
+const PROVIDERS: [RegExp, Provider][] = [
+  [/^(gpt|chatgpt|codex|o\d)([-.\s]|$)|openai/i, "openai"],
+  [/claude|anthropic/i, "anthropic"],
+  [/gemini|gemma/i, "google"],
+  [/llama|meta-/i, "meta"],
+  [/mistral|mixtral|codestral|magistral/i, "mistral"],
+];
+
+/** The maker's logo when the model id names it; a neutral chip otherwise, never a guessed brand. */
+export function ProviderLogo({ model }: { model: string | null }) {
+  const provider = model
+    ? PROVIDERS.find(([pattern]) => pattern.test(model))?.[1]
+    : undefined;
+  if (!provider)
+    return (
+      <span className="provider-logo" data-provider="unknown">
+        <Cpu size={14} aria-hidden="true" />
+      </span>
+    );
+  const { name, d } = PROVIDER_PATHS[provider];
+  return (
+    <span className="provider-logo" data-provider={provider} title={name}>
+      <svg viewBox="0 0 24 24" role="img" aria-label={name}>
+        <path d={d} fill="currentColor" />
+      </svg>
+    </span>
+  );
+}
 
 export function modelLabel(port: Port, bot: BotView): string {
   const engine = port.view.engine;
@@ -154,11 +185,8 @@ function ModelChoicePicker({
         aria-label={`Modèle de ${name} : ${label}`}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
-        <Cpu size={14} aria-hidden="true" />
-        <span>
-          {draft ? "Modèle : " : ""}
-          {busy ? "Enregistrement…" : label}
-        </span>
+        <ProviderLogo model={current?.id ?? choice.model} />
+        <span>{busy ? "Enregistrement…" : label}</span>
         <ChevronDown size={13} aria-hidden="true" />
       </button>
       {open && (
@@ -232,6 +260,7 @@ function ModelChoicePicker({
                     onPointerEnter={() => setActive(i)}
                     onClick={() => choose(m)}
                   >
+                    <ProviderLogo model={m.id} />
                     <span>{m.displayName}</span>
                     {m.isDefault && <small>par défaut</small>}
                     {m.id === current?.id && (

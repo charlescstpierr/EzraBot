@@ -9,7 +9,8 @@ import {
   isActive,
   planLabel,
 } from "../../server/web/tasks";
-import { Mascot } from "../Mascot";
+import { LiveMascot, Mascot } from "../Mascot";
+import { Markdown } from "../Markdown";
 import { statuses } from "../api";
 import type { Port } from "../port";
 import { botNamer, currentVersion, formatDate, plural } from "./model";
@@ -96,26 +97,31 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
   if (work.state === "done" && !current) return null;
   const bot = port.view.bots.find((each) => each.id === work.botId);
   if (!current && work.taskId === null) {
+    const active = work.state === "pending" || work.state === "running";
+    const preview = active ? work.replyPreview?.trim() : "";
+    const name = botNamer(port.view)(work.botId);
     return (
-      <div
-        className="ez-chat-reply"
-        data-work-id={work.id}
-        role={
-          work.state === "pending" || work.state === "running"
-            ? "status"
-            : undefined
-        }
-      >
-        <div className="ez-chat-author">
-          {bot && <Mascot shape={bot.shape} color={bot.color} size={28} />}
-          <strong>{botNamer(port.view)(work.botId)}</strong>
+      <div className="ez-chat-reply" data-work-id={work.id}>
+        {preview && (
+          <div className="ez-chat-bubble ez-chat-partial" aria-busy="true">
+            <Markdown text={preview} />
+          </div>
+        )}
+        <div className="ez-chat-presence" role={active ? "status" : undefined}>
+          {active && bot && (
+            <LiveMascot
+              shape={bot.shape}
+              color={bot.color}
+              activity={preview ? "speaking" : "thinking"}
+            />
+          )}
+          <p className={work.state === "failed" ? "ez-doc-error" : undefined}>
+            {active
+              ? `${name} ${preview ? "écrit" : "prépare une réponse"}…`
+              : workNote(work, false)}
+          </p>
+          <NonTaskWorkControls port={port} work={work} />
         </div>
-        <p className={work.state === "failed" ? "ez-doc-error" : undefined}>
-          {work.state === "pending" || work.state === "running"
-            ? "Prépare une réponse…"
-            : workNote(work, false)}
-        </p>
-        <NonTaskWorkControls port={port} work={work} />
       </div>
     );
   }

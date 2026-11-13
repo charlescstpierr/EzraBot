@@ -10,8 +10,8 @@
   z-index: 20;
   max-width: calc(100vw - 24px);
   padding: 4px;
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: 12px;
+  background: var(--raised);
   box-shadow: var(--shadow-pop);
   animation: menu-in 0.12s ease-out;
   transform-origin: top left;
@@ -90,7 +90,7 @@
   font-weight: 500;
   white-space: nowrap;
 }
-.model-trigger > span {
+.model-trigger > span:not(.provider-logo) {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-1);
@@ -99,7 +99,7 @@
 .chip:hover,
 .model-trigger[aria-expanded="true"],
 .chip[aria-expanded="true"] {
-  background: #f7f7f7;
+  background: var(--field);
   border-color: var(--border-strong);
 }
 .chip-dot {
@@ -145,7 +145,7 @@
   font-weight: 500;
   cursor: pointer;
 }
-.model-panel li[role="option"] > span {
+.model-panel li[role="option"] > span:not(.provider-logo) {
   flex: 1;
 }
 .model-panel li[data-active] {
@@ -283,6 +283,70 @@
   font-size: 14px;
   line-height: 1.55;
 }
+.bot-sheet .bot-sheet-text {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--field);
+}
+.bot-sheet .bot-sheet-text:focus {
+  border-color: var(--border-strong);
+}
+.bot-sheet-model {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+}
+.bot-sheet-model > span {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+.bot-sheet-model .model-trigger {
+  width: 100%;
+  max-width: none;
+  height: 42px;
+  padding: 0 12px 0 8px;
+  gap: 10px;
+  border-radius: 12px;
+  background: var(--field);
+  font-size: 14px;
+}
+.bot-sheet-model .model-trigger > span:not(.provider-logo) {
+  flex: 1;
+  text-align: left;
+}
+.bot-sheet-model .model-panel {
+  width: 100%;
+}
+.provider-logo {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--selected);
+  color: var(--text-1);
+}
+.provider-logo svg {
+  width: 13px;
+  height: 13px;
+}
+.model-trigger .provider-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+.bot-sheet-model .model-trigger .provider-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+.bot-sheet-model .model-trigger .provider-logo svg {
+  width: 15px;
+  height: 15px;
+}
 .bot-sheet-identity input:focus,
 .bot-sheet-text:focus {
   outline: none;
@@ -309,7 +373,7 @@
   margin-bottom: 12px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: #fafafa;
+  background: var(--surface);
 }
 .bot-look fieldset {
   padding: 0;

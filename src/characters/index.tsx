@@ -13,7 +13,6 @@ import { ToolGrants } from "../tools";
 import { useAction } from "./action";
 export { BotSheet } from "./sheet";
 export { BotSwitcher } from "./switcher";
-export { ModelPicker } from "./model";
 import { ModelPicker, modelLabel } from "./model";
 import "./style.css";
 const deletionLabels: Record<string, string> = {

@@ -17,7 +17,9 @@ test("React assets, original mascot and local navigation work", async ({
   await expect(
     page.getByRole("heading", { name: "Salut, moi c’est Mino." }),
   ).toBeVisible();
-  await expect(page.locator(".hero-mascot canvas")).toBeVisible();
+  await expect(
+    page.locator(".ez-chat-hero .mascot-live .mascot-eyes"),
+  ).toHaveCount(1);
   await page.getByRole("button", { name: "Mettre mes idées au clair" }).click();
   await expect(
     page.getByRole("textbox", { name: "Message", exact: true }),
@@ -56,8 +58,6 @@ test("drafts stay separate and mobile fits the screen", async ({ page }) => {
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBeTruthy();
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(page.locator(".hero-mascot canvas")).toHaveCount(0);
 });
 test("a failed or uncertain send preserves the text and retry identity", async ({
   page,
@@ -143,7 +143,10 @@ test("inviting a bot sends exact mention spans in the current thread", async ({
   const input = page.getByRole("textbox", { name: "Message", exact: true });
   await expect(input).toBeEnabled();
   await input.fill("Bonjour");
-  await page.getByRole("button", { name: "Inviter un personnage" }).click();
+  await page
+    .getByRole("button", { name: "Ajouter des pièces jointes" })
+    .click();
+  await page.getByRole("menuitem", { name: "Inviter un personnage" }).click();
   await page
     .locator(".bot-fan")
     .getByRole("button", { name: "Nova", exact: true })

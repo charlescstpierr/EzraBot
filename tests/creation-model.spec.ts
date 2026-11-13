@@ -43,7 +43,7 @@ test("le modèle choisi avant création est envoyé une seule fois et reste apr�
   });
   await picker.getByRole("combobox").fill("Fake Sol");
   await picker.getByRole("option", { name: /Fake Sol/ }).click();
-  await expect(trigger).toContainText("Modèle : Fake Sol");
+  await expect(trigger).toContainText("Fake Sol");
   expect(sent).toEqual([]);
   mkdirSync("/tmp/creation-model-evidence", { recursive: true });
   await page.screenshot({
@@ -68,9 +68,11 @@ test("le modèle choisi avant création est envoyé une seule fois et reste apr�
     effort: null,
     speed: "standard",
   });
+  await page.locator("main > header .bot-title").click();
+  await page.getByRole("menuitem", { name: "Modifier Sol choisi" }).click();
   await expect(
     page
-      .locator("main > header")
+      .getByRole("dialog", { name: "Modifier Sol choisi" })
       .getByRole("button", { name: /^Modèle de Sol choisi/ }),
   ).toContainText("Fake Sol");
 });

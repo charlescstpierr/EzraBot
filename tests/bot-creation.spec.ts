@@ -9,6 +9,11 @@ const commands = (page: Page, type: string) => {
   });
   return seen;
 };
+const editSheet = async (page: Page, name: string) => {
+  await page.locator("main > header .bot-title").click();
+  await page.getByRole("menuitem", { name: `Modifier ${name}` }).click();
+  return page.getByRole("dialog", { name: `Modifier ${name}`, exact: true });
+};
 
 test("créer un personnage avec sa personnalité ouvre la conversation, puis se modifie sans la quitter", async ({
   page,
@@ -140,7 +145,7 @@ test("une création au résultat inconnu se réessaie sans créer de doublon", a
   ).toHaveLength(1);
 });
 
-test("le modèle choisi depuis l’en-tête du personnage reste enregistré", async ({
+test("le modèle choisi dans la feuille du personnage reste enregistré", async ({
   page,
 }) => {
   const base = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
@@ -150,7 +155,8 @@ test("le modèle choisi depuis l’en-tête du personnage reste enregistré", as
     .locator(".threads")
     .getByRole("button", { name: /^Pixel/ })
     .click();
-  const trigger = page.getByRole("button", { name: /^Modèle de Pixel :/ });
+  const sheet = await editSheet(page, "Pixel");
+  const trigger = sheet.getByRole("button", { name: /^Modèle de Pixel :/ });
   await trigger.click();
   const picker = page.getByRole("dialog", { name: "Modèle de Pixel" });
   await expect(
@@ -180,7 +186,9 @@ test("le modèle choisi depuis l’en-tête du personnage reste enregistré", as
     effort: "high",
   });
 
+  await expect(sheet).toBeVisible();
   await page.reload();
+  await editSheet(page, "Pixel");
   await expect(trigger).toContainText("Fake Sol");
   const view = await (await page.request.get(`${base}/api/view`)).json();
   expect(
@@ -238,7 +246,8 @@ test("un changement de personnage ne rejoue pas la configuration précédente", 
     .locator(".threads")
     .getByRole("button", { name: /^Pixel/ })
     .click();
-  await page.getByRole("button", { name: /^Modèle de Pixel :/ }).click();
+  const pixel = await editSheet(page, "Pixel");
+  await pixel.getByRole("button", { name: /^Modèle de Pixel :/ }).click();
   await page
     .getByRole("dialog", { name: "Modèle de Pixel" })
     .getByRole("option", { name: /Fake Sol/ })
@@ -246,8 +255,12 @@ test("un changement de personnage ne rejoue pas la configuration précédente", 
   await expect(
     page.getByRole("button", { name: "Réessayer la même action" }),
   ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(pixel).toHaveCount(0);
   await page.locator(".threads").getByRole("button", { name: /^Mino/ }).click();
-  await page.getByRole("button", { name: /^Modèle de Mino :/ }).click();
+  const mino = await editSheet(page, "Mino");
+  await mino.getByRole("button", { name: /^Modèle de Mino :/ }).click();
   await page
     .getByRole("dialog", { name: "Modèle de Mino" })
     .getByRole("option", { name: /Fake Sol/ })

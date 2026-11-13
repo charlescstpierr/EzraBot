@@ -20,7 +20,7 @@ import {
 } from "../../server/web/mentions";
 import { uid } from "../api";
 import type { Port } from "../port";
-import { Mascot } from "../Mascot";
+import { LiveMascot, Mascot } from "../Mascot";
 import { Markdown } from "../Markdown";
 import {
   isSendable,
@@ -30,6 +30,7 @@ import {
   type SavedSend,
 } from "./pending";
 import "./style.css";
+import { ArrowUp, LoaderCircle, RotateCw } from "lucide-react";
 import { AttachmentMenu } from "./AttachmentMenu";
 
 type Props = {
@@ -55,6 +56,20 @@ const suggestions = [
     "J’aimerais préparer un document. Peux-tu m’aider à définir ce dont tu as besoin ?",
   ],
 ];
+const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+/** A quiet time mark above the first message and after a pause of half an hour or more. */
+function moment(before: string | undefined, at: string): string | null {
+  const now = new Date(at);
+  const previous = before ? new Date(before) : null;
+  if (previous && now.getTime() - previous.getTime() < 30 * 60_000) return null;
+  const time = now.toLocaleTimeString("fr-CA", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (sameDay(now, new Date())) return `Aujourd’hui ${time}`;
+  if (previous && sameDay(now, previous)) return time;
+  return `${now.toLocaleDateString("fr-CA", { day: "numeric", month: "long" })} ${time}`;
+}
 export function ChatPage(props: Props) {
   return (
     <Thread key={`${props.port.view.spaceId}:${props.botId}`} {...props} />
@@ -108,6 +123,10 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
   const [hideQuery, setHideQuery] = useState(false);
   const [caret, setCaret] = useState(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const fanRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (fan) fanRef.current?.querySelector("button")?.focus();
+  }, [fan]);
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
@@ -122,6 +141,19 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
         b.name.toLocaleLowerCase().includes(query.query.toLocaleLowerCase())),
   );
   const foreign = drafts.others(scope);
+  const replying = port.view.works.some(
+    (w) =>
+      w.threadBotId === botId &&
+      w.taskId === null &&
+      w.versions.length === 0 &&
+      (w.state === "pending" || w.state === "running"),
+  );
+  const lastVoice = messages
+    .filter((m) => m.role === "assistant")
+    .at(-1)?.botId;
+  const presence =
+    port.view.bots.find((b) => b.id === lastVoice) ??
+    port.view.bots.find((b) => b.id === botId);
 
   function change(next: PromptContent) {
     current.current = next;
@@ -436,11 +468,11 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
         {!messages.length && (
           <div className="ez-chat-welcome">
             <button
-              className="ez-chat-hero hero-mascot"
+              className="ez-chat-hero"
               aria-label={`Modifier ${bot.name}`}
               onClick={() => port.openBot({ mode: "edit", botId })}
             >
-              <Mascot shape={bot.shape} color={bot.color} size={148} animated />
+              <LiveMascot shape={bot.shape} color={bot.color} size={120} />
             </button>
             <h1>Salut, moi c’est {bot.name}.</h1>
             <div className="ez-chat-suggestions">
@@ -459,35 +491,29 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             </div>
           </div>
         )}
-        {messages.map((m) => {
+        {messages.map((m, i) => {
           const author = port.view.bots.find((b) => b.id === m.botId);
+          const name =
+            m.role === "user"
+              ? "Vous"
+              : (author?.name ?? "Personnage supprimé");
+          const when = moment(messages[i - 1]?.createdAt, m.createdAt);
           return (
             <article
               key={m.id}
               data-message-id={m.id}
+              aria-label={name}
               className={`ez-chat-message ez-chat-${m.role}${focused === m.id ? " ez-chat-focused" : ""}`}
             >
+              {when && (
+                <time className="ez-chat-when" dateTime={m.createdAt}>
+                  {when}
+                </time>
+              )}
+              {m.role === "assistant" && m.botId !== botId && (
+                <span className="ez-chat-guest">{name}</span>
+              )}
               <div className="ez-chat-bubble">
-                <div className="ez-chat-author">
-                  {m.role === "assistant" && author && (
-                    <Mascot
-                      shape={author.shape}
-                      color={author.color}
-                      size={25}
-                    />
-                  )}
-                  <strong>
-                    {m.role === "user"
-                      ? "Vous"
-                      : (author?.name ?? "Personnage supprimé")}
-                  </strong>
-                  <time dateTime={m.createdAt}>
-                    {new Date(m.createdAt).toLocaleTimeString("fr-CA", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
                 <Markdown text={m.text} />
                 {!!m.attachments.length && (
                   <ul className="ez-chat-files">
@@ -506,11 +532,6 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
                     ))}
                   </ul>
                 )}
-                {m.stamp && (
-                  <small className="ez-chat-stamp">
-                    {m.stamp.model} · {m.stamp.effort} · {m.stamp.speed}
-                  </small>
-                )}
               </div>
               {slots.task(m)}
               {slots.mission(m)}
@@ -518,6 +539,11 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             </article>
           );
         })}
+        {!!messages.length && !replying && presence && (
+          <div className="ez-chat-presence">
+            <LiveMascot shape={presence.shape} color={presence.color} />
+          </div>
+        )}
       </div>
       <div className="ez-chat-compose-area">
         {!atBottom && (
@@ -620,16 +646,11 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
         >
           <AttachmentMenu
             onFiles={(files) => void addFiles(files)}
+            onInvite={
+              port.view.bots.length > 1 ? () => setFan(true) : undefined
+            }
             disabled={readingFiles}
           />
-          <button
-            type="button"
-            aria-label="Inviter un personnage"
-            aria-expanded={fan}
-            onClick={() => setFan(!fan)}
-          >
-            @
-          </button>
           <textarea
             ref={textarea}
             onPaste={(e) => {
@@ -642,6 +663,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
               }
             }}
             aria-label="Message"
+            rows={1}
             aria-describedby="message-keyboard-help"
             title="Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne"
             placeholder={`Écrire à ${bot.name}…`}
@@ -671,19 +693,40 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           <button
             type="submit"
             aria-label="Envoyer le message"
+            title={
+              busy ? "Envoi…" : pending ? "Réessayer le même envoi" : undefined
+            }
             disabled={
               busy ||
               readingFiles ||
               (!content.text.trim() && !content.files.length && !pending)
             }
           >
-            {busy ? "Envoi…" : pending ? "Réessayer" : "↑"}
+            {busy ? (
+              <LoaderCircle
+                size={18}
+                className="ez-chat-spin"
+                aria-hidden="true"
+              />
+            ) : pending ? (
+              <RotateCw size={18} aria-hidden="true" />
+            ) : (
+              <ArrowUp size={18} aria-hidden="true" />
+            )}
           </button>
         </form>
         {(fan || query) && (
           <div
+            ref={fanRef}
             className="ez-chat-fan bot-fan"
             aria-label="Personnages à inviter"
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              e.preventDefault();
+              setFan(false);
+              setHideQuery(true);
+              textarea.current?.focus();
+            }}
           >
             <strong>Inviter dans ce fil</strong>
             {choices.map((b) => (
