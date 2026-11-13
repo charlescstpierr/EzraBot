@@ -254,3 +254,65 @@ test('with the real adapter, official deltas become persisted states, and a cut 
     }
   }
 });
+
+test('over HTTP: a chat reply is visible before the engine completes and becomes one authoritative message', async () => {
+  const app = await start();
+  const done = gate();
+  try {
+    app.chat.next.push(async (input, ids) => {
+      input.onText?.({ ...ids, itemId: 'chat-item', text: '{"reply":"Bonjour\\nà toi', final: false });
+      await done.wait;
+      input.onText?.({ ...ids, itemId: 'chat-item', text: '{"reply":"Bonjour\\nà toi !","deliverable":null}', final: true });
+      return { kind: 'succeeded', reply: { reply: 'Bonjour\nà toi !', deliverable: null }, used, ...ids };
+    });
+    assert.equal((await app.post({ type: 'message.send', botId: 'mino', text: 'Bonjour', attachments: [] })).status, 200);
+    const partial = await app.until(v => {
+      const work = v.works[0];
+      return work && 'replyPreview' in work && work.replyPreview === 'Bonjour\nà toi' && v;
+    });
+    assert.equal(partial.works[0]?.state, 'running');
+    assert.equal(partial.messages.filter(m => m.role === 'assistant').length, 0);
+    done.open();
+    const final = await app.until(v => v.works[0]?.state === 'done' && v);
+    assert(final.rev > partial.rev);
+    assert.deepEqual(final.messages.filter(m => m.role === 'assistant').map(m => m.text), ['Bonjour\nà toi !']);
+    const work = final.works[0];
+    assert.equal(work && 'replyPreview' in work ? work.replyPreview : null, null);
+  } finally {
+    done.open();
+    await app.stop();
+  }
+});
+
+test('over HTTP: cancellation clears a running chat preview while its engine is still pending', async () => {
+  const app = await start();
+  const done = gate();
+  let late = () => {};
+  try {
+    app.chat.next.push(async (input, ids) => {
+      const emit = (text: string) => input.onText?.({ ...ids, itemId: 'chat-item', text, final: false });
+      emit('{"reply":"Je commence');
+      late = () => emit('{"reply":"Réponse tardive');
+      await done.wait;
+      late();
+      return { kind: 'succeeded', reply: { reply: 'Réponse tardive', deliverable: null }, used, ...ids };
+    });
+    await app.post({ type: 'message.send', botId: 'mino', text: 'Bonjour', attachments: [] });
+    const partial = await app.until(v => {
+      const work = v.works[0];
+      return work && 'replyPreview' in work && work.replyPreview === 'Je commence' && v;
+    });
+    assert.equal((await app.post({ type: 'work.cancel', workId: partial.works[0]?.id })).status, 200);
+    late();
+    const cancelled = await app.view();
+    assert.equal(cancelled.works[0]?.state, 'cancelled');
+    const work = cancelled.works[0];
+    assert.equal(work && 'replyPreview' in work ? work.replyPreview : null, null);
+    done.open();
+    await app.until(asyncView => asyncView.works[0]?.state === 'cancelled');
+    assert.equal((await app.view()).messages.filter(m => m.role === 'assistant').length, 0);
+  } finally {
+    done.open();
+    await app.stop();
+  }
+});

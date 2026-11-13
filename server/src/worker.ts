@@ -67,6 +67,7 @@ export function createWorker(options: {
       const controller = new AbortController();
       active = { workId: claim.workId, attemptId: claim.attemptId, controller };
       log({ event: 'job.claimed', lane: name, workId: claim.workId, attempt: claim.n });
+      let acceptingText = true;
       let pending: AgentText | null = null;
       let timer: NodeJS.Timeout | null = null;
       const flush = () => {
@@ -85,15 +86,15 @@ export function createWorker(options: {
         onStage: stage => guarded(() => store.setStage(claim, stage)),
         onThread: threadId => guarded(() => store.bindThread(claim, threadId)),
         onTurn: turnId => guarded(() => store.bindTurn(claim, turnId)),
-        ...(name === 'doc' ? {
-          onText: (text: AgentText) => {
-            pending = text;
-            if (text.final) flush();
-            else timer ??= setTimeout(flush, interval);
-          },
-        } : {}),
+        onText: (text: AgentText) => {
+          if (!acceptingText || controller.signal.aborted || closed) return;
+          pending = text;
+          if (text.final) flush();
+          else timer ??= setTimeout(flush, interval);
+        },
       }).catch(() => engineFailure('engine_exited'));
       flush();
+      acceptingText = false;
       active = null;
       if (closed) return;
       const recorded = store.finishJob(claim, outcome);

@@ -716,7 +716,19 @@ export function openStore(options: StoreOptions): Store {
   rev += 1;
   run('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)', 'view_revision', String(rev));
   const listeners = new Set<() => void>();
+  const replyPreviews = new Map<string, string>();
+
+  function previewAttempt(attemptId: string): Row | undefined {
+    return get(`SELECT a.*, w.bot_id FROM attempts a JOIN works w ON w.id = a.work_id JOIN bots b ON b.id = w.bot_id
+      WHERE a.id = ? AND a.lane = 'chat' AND a.state = 'running' AND w.state = 'running'
+        AND w.task_id IS NULL AND a.tool_execution_id IS NULL AND b.deleted_at IS NULL
+        AND a.n = (SELECT MAX(n) FROM attempts WHERE work_id = w.id)`, attemptId);
+  }
+
   const changed = () => {
+    for (const attemptId of replyPreviews.keys()) {
+      if (!previewAttempt(attemptId)) replyPreviews.delete(attemptId);
+    }
     rev += 1;
     run('UPDATE meta SET value = ? WHERE key = ?', String(rev), 'view_revision');
     for (const listener of listeners) listener();
@@ -1638,7 +1650,19 @@ export function openStore(options: StoreOptions): Store {
   }
 
   function recordProgress(claim: Claim, text: AgentText): void {
-    if (claim.lane !== 'doc') return;
+    if (claim.lane === 'chat') {
+      const attempt = previewAttempt(claim.attemptId);
+      if (!attempt || str(attempt, 'work_id') !== claim.workId || int(attempt, 'n') !== claim.n
+        || str(attempt, 'bot_id') !== claim.botId
+        || strOrNull(attempt, 'thread_id') !== text.threadId || strOrNull(attempt, 'turn_id') !== text.turnId) return;
+      const reply = decodeReplyProgress(text.text)?.reply;
+      if (!reply) return;
+      const preview = Array.from(reply.text).slice(0, 20_000).join('');
+      if (replyPreviews.get(claim.attemptId) === preview) return;
+      replyPreviews.set(claim.attemptId, preview);
+      changed();
+      return;
+    }
     if (!get('SELECT 1 AS x FROM attempts WHERE id = ? AND thread_id = ? AND turn_id = ?', claim.attemptId, text.threadId, text.turnId)) return;
     const decoded = decodeReplyProgress(text.text);
     const prior = get('SELECT * FROM attempt_progress WHERE attempt_id = ? AND item_id = ?', claim.attemptId, text.itemId);
@@ -1974,6 +1998,8 @@ export function openStore(options: StoreOptions): Store {
         updatedAt: str(row, 'updated_at'),
         attempt: attempt ? attemptView(attempt) : null,
         attempts: attemptCounts.get(id) ?? 0,
+        replyPreview: attempt && workState(row) === 'running' && str(attempt, 'state') === 'running'
+          ? replyPreviews.get(str(attempt, 'id')) ?? null : null,
         versions: versionsByWork.get(id) ?? [],
         proposals: proposalsByWork.get(id) ?? [],
       };
@@ -2146,6 +2172,7 @@ export function openStore(options: StoreOptions): Store {
       return () => listeners.delete(listener);
     },
     close() {
+      replyPreviews.clear();
       db.close();
     },
   };
