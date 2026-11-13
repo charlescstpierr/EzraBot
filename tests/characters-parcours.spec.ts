@@ -1,66 +1,59 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 test("les souvenirs concurrents restent distincts et la suppression purge les brouillons", async ({
   page,
   context,
 }) => {
   const name = "Compagnon synthétique";
+  const settings = async (p: Page) => {
+    await p.getByRole("button", { name: "Personnages", exact: true }).click();
+    await p.getByRole("button", { name: `Modifier ${name}` }).click();
+    await p
+      .getByRole("dialog")
+      .getByRole("button", { name: "Mémoire et réglages" })
+      .click();
+  };
   await page.goto("/");
-  await page.getByRole("button", { name: "Personnages", exact: true }).click();
   await page
-    .getByRole("button", { name: "Nouveau personnage", exact: true })
+    .locator(".sidebar")
+    .getByRole("button", { name: "Nouveau personnage" })
     .click();
-  await page.getByLabel("Nom", { exact: true }).fill(name);
-  await page.getByText("Apparence et description", { exact: true }).click();
-  await page
-    .getByLabel("Description (facultative)", { exact: true })
+  const sheet = page.getByRole("dialog", { name: "Nouveau personnage" });
+  await sheet.getByLabel("Nom", { exact: true }).fill(name);
+  await sheet
+    .getByLabel("Description courte", { exact: true })
     .fill("Données de recette");
-  await page
-    .getByRole("combobox", { name: "Forme", exact: true })
-    .selectOption("radish");
-  await page
-    .getByRole("button", { name: "Créer le personnage", exact: true })
-    .click();
+  await sheet.getByRole("button", { name: "Changer l’apparence" }).click();
+  await sheet.getByTitle("Radis").click();
+  await sheet
+    .getByLabel("Personnalité et instructions", { exact: true })
+    .fill("Pose une question à la fois et aide-moi à jardiner.");
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/commands") &&
+      response.request().postDataJSON().type === "bot.create",
+  );
+  await sheet.getByRole("button", { name: "Créer et discuter" }).click();
+  expect((await saved).ok()).toBeTruthy();
+  await page.reload();
   await expect(
-    page.getByRole("button", { name: "Discuter", exact: true }),
-  ).toBeVisible();
+    page.getByRole("textbox", { name: "Message", exact: true }),
+  ).toBeEnabled();
+  await settings(page);
+  await expect(page.locator(".ez-character blockquote")).toHaveText(
+    "Pose une question à la fois et aide-moi à jardiner.",
+  );
   await expect(
     page.getByLabel("Contexte relu", { exact: true }),
   ).not.toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Moteur de réponse" }),
   ).not.toBeVisible();
-  await page
-    .getByLabel("Personnalité et instructions", { exact: true })
-    .fill("Pose une question à la fois et aide-moi à jardiner.");
-  const saved = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/commands") &&
-      response.request().postDataJSON().type === "bot.update",
-  );
-  await page.getByRole("button", { name: "Enregistrer le profil" }).click();
-  expect((await saved).ok()).toBeTruthy();
-  await page.reload();
-  await expect(
-    page.getByRole("textbox", { name: "Message", exact: true }),
-  ).toBeEnabled();
-  await page.getByRole("button", { name: "Personnages", exact: true }).click();
-  await page
-    .locator(".character-tabs")
-    .getByRole("button", { name, exact: true })
-    .click();
-  await expect(
-    page.getByLabel("Personnalité et instructions", { exact: true }),
-  ).toHaveValue("Pose une question à la fois et aide-moi à jardiner.");
   await page.getByRole("button", { name: "Discuter", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Message", exact: true })
     .fill("Brouillon privé synthétique à effacer");
-  await page.getByRole("button", { name: "Personnages", exact: true }).click();
-  await page
-    .locator(".character-tabs")
-    .getByRole("button", { name, exact: true })
-    .click();
+  await settings(page);
   await page
     .getByLabel("Un souvenir à garder", { exact: true })
     .fill("Valeur initiale");
@@ -72,11 +65,7 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
   );
   const other = await context.newPage();
   await other.goto("/");
-  await other.getByRole("button", { name: "Personnages", exact: true }).click();
-  await other
-    .locator(".character-tabs")
-    .getByRole("button", { name, exact: true })
-    .click();
+  await settings(other);
   await page
     .getByRole("button", { name: "Modifier le souvenir", exact: true })
     .click();
@@ -139,10 +128,10 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
     })
     .click();
   await expect(
-    page.locator(".character-tabs").getByRole("button", { name, exact: true }),
+    page.locator(".threads").getByRole("button", { name: new RegExp(name) }),
   ).toHaveCount(0);
   await expect(
-    other.locator(".character-tabs").getByRole("button", { name, exact: true }),
+    other.locator(".threads").getByRole("button", { name: new RegExp(name) }),
   ).toHaveCount(0);
   expect(
     await other.evaluate(() =>

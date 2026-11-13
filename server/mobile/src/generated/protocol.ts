@@ -136,6 +136,7 @@ export const CommandSchema = z.discriminatedUnion('type', [
     title: z.string().trim().max(60),
     shape: id,
     color,
+    instructions: z.string().trim().max(LIMITS.botInstructionsChars).optional(),
   }),
   z.strictObject({
     type: z.literal('bot.update'),

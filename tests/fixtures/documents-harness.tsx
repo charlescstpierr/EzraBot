@@ -60,6 +60,7 @@ function Harness() {
           : location.pathname,
       );
     },
+    openBot() {},
   };
   if (route.page === "document")
     return (
