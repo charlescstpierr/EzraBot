@@ -14,6 +14,60 @@ const editSheet = async (page: Page, name: string) => {
   await page.getByRole("menuitem", { name: `Modifier ${name}` }).click();
   return page.getByRole("dialog", { name: `Modifier ${name}`, exact: true });
 };
+const tools = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
+const openWithDefaultModels = async (page: Page, botIds: string[]) => {
+  await page.goto(`${tools}/`);
+  await page.evaluate(async (ids) => {
+    const csrf =
+      document.querySelector<HTMLMetaElement>('meta[name="mino-csrf"]')
+        ?.content ?? "";
+    for (const botId of ids) {
+      const response = await fetch("/api/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-mino-csrf": csrf },
+        body: JSON.stringify({
+          type: "bot.configure",
+          requestId: crypto.randomUUID(),
+          botId,
+          model: null,
+          effort: null,
+          speed: "standard",
+        }),
+      });
+      if (!response.ok) throw Error("Réinitialisation du modèle impossible");
+    }
+  }, botIds);
+  await page.reload();
+};
+const holdConfigure = async (page: Page) => {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  await page.route("**/api/commands", async (route) => {
+    if (route.request().postDataJSON()?.type === "bot.configure") await gate;
+    await route.continue();
+  });
+  return async () => {
+    const answered = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/commands") &&
+        response.request().postDataJSON()?.type === "bot.configure",
+    );
+    open();
+    await answered;
+  };
+};
+const pixelSheet = async (page: Page) => {
+  await page
+    .locator(".threads")
+    .getByRole("button", { name: /^Pixel/ })
+    .click();
+  const sheet = await editSheet(page, "Pixel");
+  return {
+    sheet,
+    trigger: sheet.getByRole("button", { name: /^Modèle de Pixel :/ }),
+    picker: page.getByRole("dialog", { name: "Modèle de Pixel" }),
+  };
+};
 
 test("créer un personnage avec sa personnalité ouvre la conversation, puis se modifie sans la quitter", async ({
   page,
@@ -148,17 +202,10 @@ test("une création au résultat inconnu se réessaie sans créer de doublon", a
 test("le modèle choisi dans la feuille du personnage reste enregistré", async ({
   page,
 }) => {
-  const base = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
+  await openWithDefaultModels(page, ["pixel"]);
   const configures = commands(page, "bot.configure");
-  await page.goto(`${base}/`);
-  await page
-    .locator(".threads")
-    .getByRole("button", { name: /^Pixel/ })
-    .click();
-  const sheet = await editSheet(page, "Pixel");
-  const trigger = sheet.getByRole("button", { name: /^Modèle de Pixel :/ });
+  const { sheet, trigger, picker } = await pixelSheet(page);
   await trigger.click();
-  const picker = page.getByRole("dialog", { name: "Modèle de Pixel" });
   await expect(
     picker.getByRole("combobox", { name: "Chercher un modèle" }),
   ).toBeFocused();
@@ -192,7 +239,7 @@ test("le modèle choisi dans la feuille du personnage reste enregistré", async 
   await page.reload();
   await editSheet(page, "Pixel");
   await expect(trigger).toContainText("Fake Sol");
-  const view = await (await page.request.get(`${base}/api/view`)).json();
+  const view = await (await page.request.get(`${tools}/api/view`)).json();
   expect(
     view.bots.find((b: { id: string }) => b.id === "pixel").choice,
   ).toEqual({
@@ -205,28 +252,7 @@ test("le modèle choisi dans la feuille du personnage reste enregistré", async 
 test("un changement de personnage ne rejoue pas la configuration précédente", async ({
   page,
 }) => {
-  const base = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
-  await page.goto(`${base}/`);
-  await page.evaluate(async () => {
-    const csrf =
-      document.querySelector<HTMLMetaElement>('meta[name="mino-csrf"]')
-        ?.content ?? "";
-    for (const botId of ["pixel", "mino"]) {
-      const response = await fetch("/api/commands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-mino-csrf": csrf },
-        body: JSON.stringify({
-          type: "bot.configure",
-          requestId: crypto.randomUUID(),
-          botId,
-          model: null,
-          effort: null,
-          speed: "standard",
-        }),
-      });
-      if (!response.ok) throw Error("Réinitialisation du modèle impossible");
-    }
-  });
+  await openWithDefaultModels(page, ["pixel", "mino"]);
   const configures = commands(page, "bot.configure");
   let lost = false;
   await page.route("**/api/commands", async (route) => {
@@ -243,17 +269,9 @@ test("un changement de personnage ne rejoue pas la configuration précédente", 
     }
     await route.continue();
   });
-  await page.goto(`${base}/`);
-  await page
-    .locator(".threads")
-    .getByRole("button", { name: /^Pixel/ })
-    .click();
-  const pixel = await editSheet(page, "Pixel");
-  await pixel.getByRole("button", { name: /^Modèle de Pixel :/ }).click();
-  await page
-    .getByRole("dialog", { name: "Modèle de Pixel" })
-    .getByRole("option", { name: /Fake Sol/ })
-    .click();
+  const { sheet: pixel, trigger, picker } = await pixelSheet(page);
+  await trigger.click();
+  await picker.getByRole("option", { name: /Fake Sol/ }).click();
   await expect(
     page.getByRole("button", { name: "Réessayer la même action" }),
   ).toBeVisible();
@@ -270,4 +288,46 @@ test("un changement de personnage ne rejoue pas la configuration précédente", 
   await expect.poll(() => configures.length).toBe(2);
   expect(configures.map((command) => command.botId)).toEqual(["pixel", "mino"]);
   expect(configures[1].requestId).not.toBe(configures[0].requestId);
+});
+
+test("un modèle choisi au clavier rend le focus au sélecteur après son enregistrement", async ({
+  page,
+}) => {
+  await openWithDefaultModels(page, ["pixel"]);
+  const answer = await holdConfigure(page);
+  const { trigger, picker } = await pixelSheet(page);
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const search = picker.getByRole("combobox", { name: "Chercher un modèle" });
+  await expect(search).toBeFocused();
+  await page.keyboard.type("fake-sol");
+  await page.keyboard.press("Enter");
+  await expect(picker).toHaveCount(0);
+  await expect(trigger).toBeDisabled();
+  await expect(trigger).not.toBeFocused();
+
+  await answer();
+  await expect(trigger).toBeEnabled();
+  await expect(trigger).toContainText("Fake Sol");
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(search).toBeFocused();
+});
+
+test("le focus placé sur le nom pendant l’enregistrement du modèle y reste", async ({
+  page,
+}) => {
+  await openWithDefaultModels(page, ["pixel"]);
+  const answer = await holdConfigure(page);
+  const { sheet, trigger, picker } = await pixelSheet(page);
+  await trigger.click();
+  await picker.getByRole("option", { name: /Fake Sol/ }).click();
+  await expect(trigger).toBeDisabled();
+  const field = sheet.getByLabel("Nom", { exact: true });
+  await field.click();
+  await expect(field).toBeFocused();
+
+  await answer();
+  await expect(trigger).toBeEnabled();
+  await expect(field).toBeFocused();
 });
