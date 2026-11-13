@@ -27,7 +27,7 @@ const answers = new Map<string | number, { count: number; settle: (answer: Recor
 const fragileReports = new Set<string>();
 
 const MODELS = [
-  { id: 'fake-sol', displayName: 'Fake Sol', hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'low', serviceTiers: [{ id: 'priority', name: 'Fast', description: '2x' }] },
+  { id: 'fake-sol', inputModalities: scenario === 'no-images' ? ['text'] : ['text', 'image'], displayName: 'Fake Sol', hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'low', serviceTiers: [{ id: 'priority', name: 'Fast', description: '2x' }] },
   { id: 'fake-hidden', displayName: 'Hidden', hidden: true, isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low', serviceTiers: [] },
 ];
 
@@ -163,6 +163,10 @@ function startTurn(params: Record<string, unknown>) {
   const turnId = `turn-${Date.now()}-${serverRequestId++}`;
   activeTurn = { threadId, turnId };
   const first = Array.isArray(params.input) && isRecord(params.input[0]) ? String(params.input[0].text) : '';
+  if (scenario === 'vision-exact') {
+    setTimeout(() => {agentMessage(threadId, turnId, JSON.stringify({reply: JSON.stringify(params.input), deliverable: null})); complete(threadId, turnId, 'completed');}, 20);
+    return {turn:{id:turnId,status:'inProgress',items:[]}};
+  }
   const withTools = TOOL_SCENARIOS.has(scenario) && (threadTools.get(threadId)?.length ?? 0) > 0;
   // Sent before this function returns, so it reaches Mino before the answer to turn/start.
   const early = scenario === 'tool-call-early' && withTools

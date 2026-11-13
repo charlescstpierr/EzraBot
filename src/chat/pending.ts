@@ -1,3 +1,4 @@
+import { attachmentStorage } from "./durable";
 import { CommandSchema, type CommandOf } from "../../server/src/protocol";
 import type { PromptContent } from "../../server/web/drafts";
 
@@ -18,15 +19,15 @@ export const isSendable = (
 export function storageRead(key: string): string | null {
   try {
     if (unsaved.has(key)) return unsaved.get(key) ?? null;
-    return localStorage.getItem(key);
+    return attachmentStorage.getItem(key);
   } catch {
     return unsaved.get(key) ?? null;
   }
 }
 export function storageWrite(key: string, value: string | null): boolean {
   try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
+    if (value === null) attachmentStorage.removeItem(key);
+    else attachmentStorage.setItem(key, value);
     unsaved.delete(key);
     return true;
   } catch {

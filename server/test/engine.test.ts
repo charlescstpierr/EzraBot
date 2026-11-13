@@ -288,3 +288,14 @@ test('an engine without the tool option keeps the experimental API off and refus
     delete process.env.MINO_TEST_INIT_PROBE;
   }
 });
+
+for (const scenario of ['vision-exact', 'no-images']) test(`native image inputs and capability refusal (${scenario})`, async () => {
+  const engine = engineFor(scenario);
+  const images = [{kind:'image', name:'test.png',mimeType:'image/png',base64:'iVBORw0KGgo='}] as const;
+  try {
+    const outcome = await engine.run({turn:{...turn,images:[...images]},choice:defaultChoice,signal:new AbortController().signal,onStage:()=>{},onThread:()=>{},onTurn:()=>{}});
+    if (scenario === 'no-images') {assert.equal(failureCode(outcome),'choice_unavailable');return;}
+    assert.equal(outcome.kind,'succeeded');
+    if(outcome.kind === 'succeeded') assert.deepEqual(JSON.parse(outcome.reply.reply), [{type:'text',text:turn.input},{type:'image',url:'data:image/png;base64,iVBORw0KGgo='}]);
+  } finally {await engine.close();}
+});

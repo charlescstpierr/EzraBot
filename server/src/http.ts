@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
@@ -83,13 +83,13 @@ function sendDownload(res: ServerResponse, file: DownloadFile | null): void {
   });
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit: number = LIMITS.requestBodyBytes): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
     size += buffer.length;
-    if (size > LIMITS.requestBodyBytes) throw new HttpRefusal(413, 'Ce message est trop volumineux.');
+    if (size > limit) throw new HttpRefusal(413, 'Ce message est trop volumineux.');
     chunks.push(buffer);
   }
   try {
@@ -108,6 +108,7 @@ function sameSecret(given: string | undefined, expected: string): boolean {
 
 export function createHttpServer(options: HttpOptions): Server {
   const { store, worker, engine, port, root, csrfToken } = options;
+  const imageSession = randomBytes(32).toString('hex');
   const longPoll = options.longPollMs ?? 25_000;
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
@@ -142,7 +143,7 @@ export function createHttpServer(options: HttpOptions): Server {
 
   async function command(req: IncomingMessage, res: ServerResponse): Promise<void> {
     requireLocalPost(req);
-    const input = await readJson(req);
+    const input = await readJson(req, LIMITS.commandBodyBytes);
     const parsedChoice = CommandSchema.safeParse(input);
     if (parsedChoice.success && (parsedChoice.data.type === 'bot.configure' || (parsedChoice.data.type === 'bot.create' && parsedChoice.data.model != null))) {
       const choice = parsedChoice.data.type === 'bot.configure' ? parsedChoice.data : { model: parsedChoice.data.model ?? null, effort: null, speed: 'standard' };
@@ -228,9 +229,16 @@ export function createHttpServer(options: HttpOptions): Server {
     if (req.method === 'POST' && path === '/api/commands') return command(req, res);
     if (req.method !== 'GET') throw new HttpRefusal(405, 'Méthode refusée.');
     if (path === '/advanced') return send(res, 200, 'text/html; charset=utf-8', readFileSync(join(root, 'web/index.html'), 'utf8').replace('__MINO_CSRF__', csrfToken));
-    if (path === '/') return send(res, 200, 'text/html; charset=utf-8', indexHtml);
+    if (path === '/') return send(res, 200, 'text/html; charset=utf-8', indexHtml, {'set-cookie': `mino-images=${imageSession}; HttpOnly; SameSite=Strict; Path=/api/attachments`});
     const asset = STATIC_FILES[path];
     if (asset) return send(res, 200, asset.type, readFileSync(join(root, asset.file)));
+    if (req.method === 'GET' && /^\/api\/attachments\/[0-9]+$/.test(path)) {
+      if (req.headers.origin && !origins.has(req.headers.origin)) throw new HttpRefusal(403, 'Origine refusée.');
+      if (!(req.headers.cookie ?? '').split(';').some(cookie => sameSecret(cookie.trim().startsWith('mino-images=') ? cookie.trim().slice(12) : undefined, imageSession))) throw new HttpRefusal(403, 'Session expirée. Rechargez la page.');
+      const image = store.image(path.split('/').at(-1)!);
+      if (!image) return send(res, 404, 'text/plain', 'Image introuvable');
+      res.writeHead(200, {'content-type': image.mimeType, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'}); res.end(image.bytes); return;
+    }
     if (path === '/api/view') {
       const afterValue = url.searchParams.get('after');
       const after = Number(afterValue);

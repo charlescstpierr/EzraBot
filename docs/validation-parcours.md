@@ -50,3 +50,23 @@ Le ZIP des journaux contient aussi les trois conceptions comparées et le contra
 Les [preuves des corrections](https://github.com/charlescstpierr/EzraBot/releases/tag/preuves-revue-4-20261112) ciblent le commit `2a62a5ef0641ea530036b38f4606ca61799934de`. Elles contiennent les captures mobiles avant et après, une vidéo de reprise, les résultats des 48 contrôles et les journaux rouges et verts.
 
 La [recette GitHub Actions du même commit](https://github.com/charlescstpierr/EzraBot/actions/runs/43164995715) a réussi. Types, synchronisation mobile, compilation, tests serveur, tests d’interface et téléversement des preuves y passent.
+
+## Pièces jointes du ticket 11
+
+La branche des pièces jointes intègre `1e113fb` de la PR #12. Les bulles, les personnages et le style de cette PR restent la base de l'interface.
+
+La recette utilise `MINO_QA_PORT=4401 MINO_QA_TOOLS_PORT=4402 npx playwright test`. Les données SQLite et les comptes de service sont synthétiques. Les ports de l'application installée et du chantier d'interface ne sont pas utilisés.
+
+Les contrôles couvrent les images PNG, JPEG et WebP, le dossier mixte avec chemins relatifs, le retrait, un message sans texte, le rechargement d'une image conservée dans IndexedDB et la reprise d'une réponse perdue. Cette reprise compare la commande entière, y compris son identifiant et ses octets. La suppression est contrôlée dans deux onglets puis dans IndexedDB. Les fichiers PDF, les images corrompues et les images de plus de 4 Mio sont refusés sans modifier le brouillon.
+
+Les tests serveur vérifient les formes historiques `{name,text}`, les limites, les chemins interdits, la migration et la réouverture SQLite, le conflit d'une reprise, la suppression, le hash du contexte et les entrées natives exactes de Codex. Un appareil jumelé envoie un lot au-delà de l'ancien plafond de 256 Kio. Son aperçu exige une authentification. La vue générale ne contient aucun base64.
+
+Le Codex installé est `0.167.2`. Son schéma local `turn/start` accepte `image` avec `url`. Le catalogue réel annonce les images pour `gpt-6.1-sol`. Un seul tour réel de vision a reçu un PNG synthétique avec un carré bleu sur fond blanc, au travers de `createCodexEngine` et `composeContext`. Il a répondu « Je vois un carré bleu sur fond blanc. ». Aucun fichier privé ni conversation de la personne n'a été utilisé. Les permissions du moteur restent en lecture seule, sans accès réseau ni outil de fichiers.
+
+La migration SQLite 7 ajoute `mime_type`, `base64` et `relative_path` à la table existante. Les textes historiques sont conservés sans ajout de discriminant. Les images gardent leur colonne `text` vide. La politique de contexte passe de 8 à 9, car le commit de départ utilisait déjà la version 8.
+
+Le serveur contrôle le base64 canonique, la taille et la signature annoncée. Le navigateur contrôle aussi le décodage de l'image. Le serveur ne fait pas une analyse complète des codecs. Les fichiers PDF, DOCX, HEIC et SVG ne sont pas interprétés comme images. Aucune extraction PDF ni refonte du client mobile natif n'est incluse. Le collage et le dépôt concernent des fichiers, pas un parcours récursif des dossiers déposés. Les dossiers se choisissent avec le sélecteur dédié.
+
+La validation finale passe les types, la compilation, la synchronisation des quatre contrats mobiles, 286 tests serveur et 67 tests d'interface. Le test de hash et de conflit vérifie aussi un changement des octets et de leur ordre. Une ancienne assertion d'interface attendait le refus de toute image ; elle attend maintenant le refus d'une image corrompue. Les premières exécutions rouges ont aussi permis de corriger le validateur base64 des gros fichiers et la notification du stockage entre onglets.
+
+Les [images, la vidéo et les journaux du ticket 11](https://github.com/charlescstpierr/EzraBot/releases/tag/preuves-ticket-11-20261112) ciblent le commit de code `1bafb9b51829ce0d79d3b3ec189e62bda1966930`. La capture avant utilise le composeur de `1e113fb` dans le même shell de validation. La capture après montre les pièces jointes dans les nouvelles bulles. Le moteur de la vidéo est volontairement désactivé ; la preuve de vision réelle se trouve séparément dans les journaux. Aucun média n'est commis.

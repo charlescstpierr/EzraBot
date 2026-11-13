@@ -1,0 +1,69 @@
+.ez-attachment-menu {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  color: var(--attachment-text, #32323b);
+}
+.ez-chat-composer .ez-attachment-trigger {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+}
+.ez-attachment-trigger svg {
+  transition: transform 160ms ease;
+}
+.ez-attachment-trigger[aria-expanded="true"] svg {
+  transform: rotate(45deg);
+}
+.ez-chat-composer .ez-attachment-trigger:hover,
+.ez-chat-composer .ez-attachment-trigger[aria-expanded="true"] {
+  background: var(--attachment-hover, #f0edf9);
+  color: var(--attachment-accent, #7161c5);
+}
+.ez-attachment-popover {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 14px);
+  left: 0;
+  width: min(208px, calc(100vw - 72px));
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--attachment-border, #e4e4eb);
+  border-radius: 12px;
+  background: var(--attachment-surface, #fff);
+  box-shadow: 0 8px 28px #1818241a;
+}
+.ez-chat-composer .ez-attachment-popover button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: 13px;
+}
+.ez-chat-composer .ez-attachment-popover button:hover,
+.ez-chat-composer .ez-attachment-popover button:focus-visible {
+  background: var(--attachment-hover, #f0edf9);
+  color: var(--attachment-accent, #7161c5);
+}
+.ez-chat-composer .ez-attachment-menu button:focus-visible {
+  outline: 2px solid var(--attachment-accent, #7161c5);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ez-attachment-trigger svg {
+    transition: none;
+  }
+}

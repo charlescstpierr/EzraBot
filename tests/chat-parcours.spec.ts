@@ -53,7 +53,7 @@ test("une pièce textuelle est jointe puis retirée et un binaire est refusé", 
   page,
 }) => {
   await page.goto("/");
-  const files = page.getByLabel("Joindre des fichiers texte", { exact: true });
+  const files = page.getByLabel("Joindre photos et fichiers", { exact: true });
   await files.setInputFiles({
     name: "notes.md",
     mimeType: "text/markdown",
@@ -71,7 +71,7 @@ test("une pièce textuelle est jointe puis retirée et un binaire est refusé", 
     mimeType: "image/png",
     buffer: Buffer.from([0, 1, 2]),
   });
-  await expect(page.getByRole("alert")).toContainText("fichier texte");
+  await expect(page.getByRole("alert")).toContainText("image corrompue");
 });
 
 test("une invitation choisie au curseur garde son ID après insertion de texte", async ({

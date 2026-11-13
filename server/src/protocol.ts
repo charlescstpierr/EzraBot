@@ -32,9 +32,36 @@ const requestId = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
 const color = z.string().regex(/^#[0-9a-f]{6}$/);
 const text = (max: number) => z.string().trim().min(1).max(max);
 
-const attachment = z.strictObject({
-  name: text(LIMITS.attachmentNameChars),
-  text: z.string().max(LIMITS.attachmentChars),
+const relativePath = z.string().max(512).refine(value =>
+  !/[\x00-\x1f\x7f\\:]/.test(value) && value.split('/').every(part => part !== '' && part !== '.' && part !== '..'), 'Chemin relatif invalide');
+const attachmentName = text(LIMITS.attachmentNameChars).refine(value => !/[\x00-\x1f\x7f/\\]/.test(value), 'Nom de fichier invalide');
+export const AttachmentSchema = z.union([
+  z.strictObject({ name: attachmentName, text: z.string().max(LIMITS.attachmentChars).refine(value => !value.includes('\0'), 'Texte avec NUL refusé'), relativePath: relativePath.optional() }),
+  z.strictObject({ kind: z.literal('image'), name: attachmentName, mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+    base64: z.string().max(Math.ceil(LIMITS.imageBytes / 3) * 4).regex(/^[A-Za-z0-9+/]*={0,2}$/), relativePath: relativePath.optional() })
+]).superRefine((file, ctx) => {
+  if (!('kind' in file)) return;
+  if (file.base64.length % 4 !== 0) {ctx.addIssue({code: 'custom', message: 'Base64 invalide'}); return;}
+  if ( !/^[A-Za-z0-9+/]*={0,2}$/.test(file.base64) || file.base64.length > Math.ceil(LIMITS.imageBytes / 3) * 4) return;
+  const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
+  const head = Array.from(bytes.slice(0, 12));
+  const valid = file.mimeType === 'image/png' ? head.slice(0,8).join(',') === '137,80,78,71,13,10,26,10'
+    : file.mimeType === 'image/jpeg' ? head[0] === 255 && head[1] === 216 && head[2] === 255
+    : head.slice(0,4).join(',') === '82,73,70,70' && head.slice(8,12).join(',') === '87,69,66,80';
+  if (!valid || bytes.length < 32 || bytes.length > LIMITS.imageBytes) ctx.addIssue({ code: 'custom', message: `${file.relativePath ?? file.name} : signature ou taille image invalide` });
+  const tailBytes = bytes.slice(-(bytes.length % 3 || 3));
+  if (btoa(String.fromCharCode(...tailBytes)) !== file.base64.slice(-4)) ctx.addIssue({code: 'custom', message: 'Base64 non canonique'});
+
+});
+export type Attachment = z.infer<typeof AttachmentSchema>;
+const attachments = z.array(AttachmentSchema).max(LIMITS.attachments).superRefine((files, ctx) => {
+  const paths = new Set<string>(); let bytes = 0; let chars = 0;
+  for (const file of files) {
+    if (file.relativePath && paths.has(file.relativePath)) ctx.addIssue({ code: 'custom', message: `${file.relativePath} : chemin répété` });
+    if (file.relativePath) paths.add(file.relativePath);
+    if ('kind' in file) bytes += file.base64.length / 4 * 3 - (file.base64.endsWith('==') ? 2 : file.base64.endsWith('=') ? 1 : 0); else chars += file.text.length;
+  }
+  if (bytes > LIMITS.imageTotalBytes || chars > LIMITS.attachmentTotalChars) ctx.addIssue({ code: 'custom', message: 'Le lot dépasse la taille autorisée' });
 });
 
 /** What deleting a bot removes, and what stays elsewhere signed « Bot supprimé ». Shown before confirmation and checked again on the server. */
@@ -57,8 +84,8 @@ export type MentionSpan = z.infer<typeof MentionSpanSchema>;
 
 export const CommandSchema = z.discriminatedUnion('type', [
   z.strictObject({
-    type: z.literal('message.say'), requestId, botId: id, text: text(LIMITS.messageChars),
-    attachments: z.array(attachment).max(LIMITS.attachments),
+    type: z.literal('message.say'), requestId, botId: id, text: z.string().trim().max(LIMITS.messageChars),
+    attachments,
     mentions: z.array(MentionSpanSchema).max(LIMITS.bots).optional(),
     reviewerBotId: id.optional(),
   }),
@@ -67,8 +94,8 @@ export const CommandSchema = z.discriminatedUnion('type', [
     mentions: z.array(MentionSpanSchema).max(LIMITS.bots).optional(),
     requestId,
     botId: id,
-    text: text(LIMITS.messageChars),
-    attachments: z.array(attachment).max(LIMITS.attachments),
+    text: z.string().trim().max(LIMITS.messageChars),
+    attachments,
     /** A durable document task: written by the thread bot, optionally reviewed once by another selected bot. */
     document: z.strictObject({ reviewerBotId: id.nullable() }).optional(),
   }),
@@ -174,7 +201,7 @@ export const CommandSchema = z.discriminatedUnion('type', [
     baseUpdatedAt: z.iso.datetime({ precision: 3 }).optional(),
   }),
   z.strictObject({ type: z.literal('memory.delete'), requestId, botId: id, memoryId: id }),
-]);
+]).refine(command => (command.type !== 'message.send' && command.type !== 'message.say') || !!command.text || command.attachments.length > 0, 'Ajoutez un message ou une pièce jointe');
 
 export type Command = z.infer<typeof CommandSchema>;
 export type CommandType = Command['type'];
@@ -387,7 +414,7 @@ export type MessageView = {
   botId: string;
   text: string;
   workId: string;
-  attachments: { name: string; chars: number }[];
+  attachments: { id: string; name: string; chars: number; kind?: 'image'; mimeType?: string; relativePath?: string }[];
   createdAt: string;
   stamp: (ResolvedChoice & { threadId: string; turnId: string }) | null;
   taskStep: TaskStep | null;
@@ -533,6 +560,7 @@ export type StoreView = {
 };
 
 export type CatalogModel = {
+  inputModalities?: string[];
   id: string;
   displayName: string;
   isDefault: boolean;

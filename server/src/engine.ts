@@ -101,6 +101,7 @@ const ModelListSchema = z.object({
     id: z.string(),
     displayName: z.string(),
     hidden: z.boolean(),
+    inputModalities: z.array(z.string()).optional(),
     isDefault: z.boolean(),
     supportedReasoningEfforts: z.array(z.object({ reasoningEffort: z.string() })),
     defaultReasoningEffort: z.string(),
@@ -366,6 +367,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
           if (model.hidden) continue;
           listed.push({
             id: model.id,
+            ...(model.inputModalities ? {inputModalities: model.inputModalities} : {}),
             displayName: model.displayName,
             isDefault: model.isDefault,
             efforts: model.supportedReasoningEfforts.map(effort => effort.reasoningEffort),
@@ -422,6 +424,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
     const resolution = resolveChoice(models, choice);
     if (!resolution.ok) return engineFailure('choice_unavailable', resolution.message);
     const used = resolution.choice;
+    if (turn.images?.length && !models.find(model => model.id === used.model)?.inputModalities?.includes('image')) return engineFailure('choice_unavailable', 'Le modèle choisi ne déclare pas la prise en charge des images. Choisissez un modèle compatible.');
     const conn = ready.connection;
     let threadId: string;
     try {
@@ -598,7 +601,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
 
       conn.request('turn/start', {
         threadId,
-        input: [{ type: 'text', text: turn.input }],
+        input: [{ type: 'text', text: turn.input }, ...(turn.images ?? []).map(image => ({type: 'image', url: `data:${image.mimeType};base64,${image.base64}`}))],
         model: used.model,
         effort: used.effort,
         serviceTierForTurn: used.speed === STANDARD_SPEED ? 'default' : used.speed,

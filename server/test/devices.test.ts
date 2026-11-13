@@ -190,3 +190,26 @@ test('a paired device cannot grant, approve, refuse or retry a service action, a
     MobileSnapshotSchema.parse(snapshot);
   } finally { await f.close(); }
 });
+
+test('paired commands accept image-only batches above the old ceiling and protect their bytes', async () => {
+  const f = await fixture();
+  try {
+    await f.pair();
+    const bytes = Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', 'base64'), Buffer.alloc(300 * 1024)]);
+    const file = {kind:'image',name:'test.png',mimeType:'image/png',base64:bytes.toString('base64'),relativePath:'dossier/test.png'};
+    const command = {type:'message.send',requestId:randomUUID(),botId:'mino',text:'',attachments:[file]};
+    const accepted = await f.call('/m/commands', command, f.auth); assert.equal(accepted.status,200);
+    const view = MobileSnapshotSchema.parse((await f.call('/m/view', undefined, f.auth)).body);
+    const id = view.messages.find(message=>message.role==='user')?.attachments[0]?.id; assert(id);
+    assert(!JSON.stringify(view).includes(file.base64));
+    assert.equal((await f.call(`/m/attachments/${id}`)).status,401);
+    const image = await new Promise<Buffer>((resolve,reject)=>{
+      const req=request(f.url+`/m/attachments/${id}`, {ca:f.cert,servername:'localhost',headers:f.auth},res=>{
+        assert.equal(res.statusCode,200);assert.equal(res.headers['content-type'],'image/png');
+        const parts:Buffer[]=[];res.on('data',chunk=>parts.push(Buffer.from(chunk)));res.on('end',()=>resolve(Buffer.concat(parts)));
+      });req.on('error',reject);req.end();
+    });
+    assert.deepEqual(image,bytes);
+    assert.equal((await f.call('/m/commands',{...command,requestId:randomUUID(),attachments:[{...file,relativePath:'../interdit.png'}]},f.auth)).status,422);
+  } finally {await f.close();}
+});

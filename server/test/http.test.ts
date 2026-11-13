@@ -185,7 +185,7 @@ test('writes need the local origin and session token, and only allowlisted files
     const command = { type: 'bot.select', requestId: 'req-00000006', botId: 'pixel' };
     assert.equal((await app.post(command, { origin: 'http://evil.example' })).status, 403);
     assert.equal((await app.post(command, { 'x-mino-csrf': 'b'.repeat(64) })).status, 403);
-    assert.equal((await app.post('x'.repeat(300 * 1024))).status, 413);
+    assert.equal((await app.post('x'.repeat(12 * 1024 * 1024 + 1))).status, 413);
     assert.equal((await app.view()).activeBotId, 'mino');
     assert.equal((await app.post(command)).status, 200);
     assert.equal((await app.view()).activeBotId, 'pixel');
@@ -304,6 +304,29 @@ test('diagnostics expose only allowlisted metadata and keep late usage on the co
     const after=DiagnosticsSchema.parse(await(await waiting).json());assert(after.rev>before.rev);
     assert.equal(after.attempts[0]?.id,attempt.id);assert.equal(after.attempts[0]?.state,'succeeded');assert.deepEqual(after.attempts[0]?.usage?.last,counts);
     assert(!JSON.stringify(after).includes('SECRET_'));
+  } finally {await app.stop();}
+});
+
+test('image retrieval requires the session, keeps bytes private, and rejects large command bodies', async () => {
+  const app = await start();
+  try {
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=';
+    assert.equal((await app.post({type:'message.send',requestId:'image-http-11',botId:'pixel',text:'',attachments:[{kind:'image',name:'test.png',mimeType:'image/png',base64}]})).status,200);
+    const view = await app.view();
+    const file = view.messages.find(m=>m.role==='user')?.attachments[0]; assert(file);
+    const url = `${app.base}/api/attachments/${file.id}`;
+    assert.equal((await fetch(url)).status,403);
+    assert.equal((await fetch(url,{headers:{cookie:`mino-images=${'a'.repeat(64)}`}})).status,403);
+    const home = await fetch(app.base);
+    const cookie = home.headers.get('set-cookie')!;
+    assert(!cookie.includes('a'.repeat(64)));
+    assert(cookie.includes('HttpOnly')); assert(cookie.includes('SameSite=Strict'));
+    assert.equal((await fetch(url,{headers:{cookie, origin:'http://evil.example'}})).status,403);
+    const response = await fetch(url,{headers:{cookie}});
+    assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/png');
+    assert.equal(response.headers.get('cache-control'),'private, no-store');
+    assert.equal(Buffer.from(await response.arrayBuffer()).toString('base64'),base64);
+    assert(!JSON.stringify(view).includes(base64));
   } finally {await app.stop();}
 });
 

@@ -61,10 +61,10 @@ export function createDeviceHandler(options: Options) {
     const body = JSON.stringify(value);
     res.writeHead(status, headers); res.end(body);
   }
-  async function read(req: IncomingMessage): Promise<unknown> {
+  async function read(req: IncomingMessage, limit: number = LIMITS.requestBodyBytes): Promise<unknown> {
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) throw new DeviceError(415, 'content_type', 'Format refusé.');
     const parts: Buffer[] = []; let bytes = 0;
-    for await (const part of req) { const buffer = Buffer.isBuffer(part) ? part : Buffer.from(String(part)); bytes += buffer.length; if (bytes > LIMITS.requestBodyBytes) throw new DeviceError(413, 'body_too_large', 'Cette demande est trop volumineuse.'); parts.push(buffer); }
+    for await (const part of req) { const buffer = Buffer.isBuffer(part) ? part : Buffer.from(String(part)); bytes += buffer.length; if (bytes > limit) throw new DeviceError(413, 'body_too_large', 'Cette demande est trop volumineuse.'); parts.push(buffer); }
     try { return JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { throw new DeviceError(400, 'invalid_json', 'Contenu JSON invalide.'); }
   }
   const snapshot = () => {
@@ -164,10 +164,15 @@ export function createDeviceHandler(options: Options) {
       options.devices.authenticate(token, space);
       send(res, 200, snapshot()); return;
     }
+    if (req.method === 'GET' && /^\/m\/attachments\/[0-9]+$/.test(url.pathname)) {
+      const image = options.store.image(url.pathname.split('/').at(-1)!);
+      if (!image) throw new DeviceError(404, 'not_found', 'Image introuvable');
+      res.writeHead(200, {'content-type': image.mimeType, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'}); res.end(image.bytes); return;
+    }
     if (req.method === 'GET' && url.pathname === '/m/catalog') { const status = await options.engine.catalog(); options.devices.authenticate(token, space); send(res, 200, status); return; }
     if (req.method === 'POST' && url.pathname === '/m/commands') {
-      const parsed = CommandSchema.safeParse(await read(req));
-      if (!parsed.success) throw new DeviceError(422, 'invalid_command', 'Cette commande est invalide.');
+      const parsed = CommandSchema.safeParse(await read(req, LIMITS.commandBodyBytes));
+      if (!parsed.success) throw new DeviceError(422, 'invalid_command', 'Cette commande est invalide. ' + parsed.error.issues.slice(0, 3).map(issue => `${issue.path.join('.')} : ${issue.message}`).join(' ; '));
       const command = parsed.data;
       if (command.type === 'storage.purge' || command.type === 'bot.select') throw new DeviceError(403, 'command_refused', 'Cette commande se fait sur l’ordinateur.');
       if (command.type === 'bot.configure' || (command.type === 'bot.create' && command.model != null)) {
