@@ -272,6 +272,7 @@ test("la proposition conserve son origine et ouvre la mission dédupliquée", as
   await page.route("**/api/view*", async (route) => {
     const response = await route.fetch();
     const app: AppView = await response.json();
+    app.activeBotId = "mino";
     app.messages.push(proposal);
     await route.fulfill({ json: app });
   });

@@ -233,6 +233,10 @@ test("le modèle reste dans la création et la modification, puis persiste par b
   page,
 }) => {
   await page.goto(toolsBase);
+  const initial: AppView = await (
+    await page.request.get(new URL("/api/view", page.url()).href)
+  ).json();
+  const minoModel = initial.bots.find((bot) => bot.id === "mino")?.choice.model;
   const name = `Jardin ${Date.now().toString(36)}`;
   await page
     .locator(".sidebar")
@@ -287,7 +291,9 @@ test("le modèle reste dans la création et la modification, puis persiste par b
     instructions: "Tu poses une question à la fois.",
     choice: { model: "fake-sol" },
   });
-  expect(view.bots.find((bot) => bot.id === "mino")?.choice.model).toBeNull();
+  expect(view.bots.find((bot) => bot.id === "mino")?.choice.model).toBe(
+    minoModel,
+  );
   await page
     .locator("main > header")
     .getByRole("button", { name, exact: true })
