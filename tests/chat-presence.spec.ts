@@ -146,7 +146,7 @@ test("la réponse partielle grandit sans déplacer une lecture plus haut, puis l
   const scroll = page.locator(".ez-chat-scroll");
   const status = scroll.getByRole("status");
   await expect(status).toContainText("Mino prépare une réponse");
-  await expect(status.locator(".mascot-live")).toHaveAttribute(
+  await expect(scroll.locator(".ez-chat-reply .mascot-live")).toHaveAttribute(
     "data-activity",
     "thinking",
   );
@@ -158,8 +158,9 @@ test("la réponse partielle grandit sans déplacer une lecture plus haut, puis l
   await expect(scroll.locator(".ez-chat-partial strong")).toHaveText(
     "on range",
   );
-  await expect(status).toContainText("Mino écrit");
-  await expect(status.locator(".mascot-live")).toHaveAttribute(
+  await expect(status).toHaveText("Mino écrit…");
+  await expect(status.getByRole("button")).toHaveCount(0);
+  await expect(scroll.locator(".ez-chat-reply .mascot-live")).toHaveAttribute(
     "data-activity",
     "speaking",
   );

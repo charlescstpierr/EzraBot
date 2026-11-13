@@ -84,7 +84,7 @@ test("réponse progressive puis finale sans estampille, avec une seule mascotte 
     .click();
   const waiting = chat.getByRole("status").filter({ hasText: "Mino" });
   await expect(waiting).toBeVisible();
-  await expect(waiting.locator(".mascot")).toBeVisible();
+  await expect(page.locator(".ez-chat-reply .mascot")).toBeVisible();
   work.state = "running";
   work.replyPreview = "Commençons par deux plants";
   view.rev++;

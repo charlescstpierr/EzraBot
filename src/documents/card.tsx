@@ -101,11 +101,7 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
     const preview = active ? work.replyPreview?.trim() : "";
     const name = botNamer(port.view)(work.botId);
     return (
-      <div
-        className="ez-chat-reply"
-        data-work-id={work.id}
-        role={active ? "status" : undefined}
-      >
+      <div className="ez-chat-reply" data-work-id={work.id}>
         <div className="ez-chat-incoming">
           <div className="ez-chat-avatar">
             {bot &&
@@ -122,12 +118,13 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
           </div>
           <div
             className={`ez-chat-bubble${preview ? " ez-chat-partial" : ""}`}
-            aria-busy={active}
+            aria-busy={preview ? true : undefined}
           >
             {preview ? (
               <Markdown text={preview} />
             ) : (
               <p
+                role={active ? "status" : undefined}
                 className={work.state === "failed" ? "ez-doc-error" : undefined}
               >
                 {active
@@ -138,7 +135,7 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
           </div>
         </div>
         <div className="ez-chat-presence ez-chat-reply-controls">
-          {preview && <p>{name} écrit…</p>}
+          {preview && <p role="status">{name} écrit…</p>}
           <NonTaskWorkControls port={port} work={work} />
         </div>
       </div>

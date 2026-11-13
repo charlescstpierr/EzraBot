@@ -56,7 +56,7 @@ test("un échange ordinaire attend à gauche sans carte documentaire", async ({
     .locator(".ez-chat-user .ez-chat-bubble")
     .boundingBox();
   expect(pendingBox!.x).toBeLessThan(userBox!.x);
-  await expect(waiting.locator(".mascot")).toBeVisible();
+  await expect(page.locator(".ez-chat-reply .mascot")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Annuler", exact: true }),
   ).toBeVisible();
