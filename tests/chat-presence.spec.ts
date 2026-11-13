@@ -303,3 +303,67 @@ test("deux demandes gardent une seule présence et la réponse courante après l
   );
   await expect(page.locator(".ez-chat-scroll .mascot")).toHaveCount(1);
 });
+
+test("le travail suivant retrouve ses propres commandes après une annulation incertaine", async ({
+  page,
+}) => {
+  const view = await thread(page, [
+    message("q1", "user", "Première", 0),
+    message("q2", "user", "Seconde", 1),
+  ]);
+  const first: WorkView = {
+    id: "w-q1",
+    threadBotId: "mino",
+    botId: "mino",
+    taskId: null,
+    requestMessageId: "q1",
+    state: "running",
+    title: "",
+    createdAt: "2026-11-12T14:00:00Z",
+    updatedAt: "2026-11-12T14:00:00Z",
+    attempt: null,
+    attempts: 1,
+    versions: [],
+    proposals: [],
+  };
+  const second: WorkView = {
+    ...first,
+    id: "w-q2",
+    requestMessageId: "q2",
+    state: "pending",
+  };
+  view.works = [first, second];
+  const commands: { workId: string; requestId: string }[] = [];
+  await page.route("**/api/commands", async (route) => {
+    commands.push(route.request().postDataJSON());
+    if (commands.length === 1) await route.abort("failed");
+    else {
+      second.state = "cancelled";
+      view.rev++;
+      await route.fulfill({
+        json: { ok: true, result: { kind: "work", workId: second.id }, view },
+      });
+    }
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Arrêter", exact: true }).click();
+  await expect(
+    page.getByText("Résultat inconnu", { exact: true }),
+  ).toBeVisible();
+  first.state = "done";
+  second.state = "running";
+  view.rev++;
+  const current = page.locator('[data-work-id="w-q2"]');
+  await expect(
+    current.getByRole("button", { name: "Arrêter", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    current.getByText("Résultat inconnu", { exact: true }),
+  ).toHaveCount(0);
+  await current.getByRole("button", { name: "Arrêter", exact: true }).click();
+  expect(commands.map((command) => command.workId)).toEqual([
+    first.id,
+    second.id,
+  ]);
+  expect(commands[0].requestId).not.toBe(commands[1].requestId);
+});

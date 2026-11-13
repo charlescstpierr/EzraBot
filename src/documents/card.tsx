@@ -196,7 +196,7 @@ export function ReplyQueue({ port, botId }: { port: Port; botId: string }) {
             <NonTaskWorkControls port={port} work={work} />
           </div>
         ))}
-      {current && <WorkSummary port={port} work={current} />}
+      {current && <WorkSummary key={current.id} port={port} work={current} />}
     </>
   );
 }
