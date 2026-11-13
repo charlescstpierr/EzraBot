@@ -108,9 +108,9 @@ test("les rôles restent distincts et les accès téléphone et projets sont à 
   await page.goto("/");
   const user = page.locator('[data-message-id="qa-user"]');
   const bot = page.locator('[data-message-id="qa-bot"]');
-  await expect(user.getByText("Vous", { exact: true })).toBeVisible();
-  await expect(bot.getByText("Mino", { exact: true })).toBeVisible();
-  await expect(bot.locator(".mascot")).toBeVisible();
+  await expect(user).toHaveAccessibleName("Vous");
+  await expect(bot).toHaveAccessibleName("Mino");
+  await expect(page.locator(".ez-chat-scroll .mascot")).toHaveCount(1);
   await expect(page.locator("footer")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Parler à Mino" })).toHaveCount(
     0,

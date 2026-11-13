@@ -50,7 +50,7 @@ test("un échange ordinaire attend à gauche sans carte documentaire", async ({
     page.getByText("Aucune version enregistrée.", { exact: true }),
   ).toHaveCount(0);
   const waiting = page.getByRole("status").filter({ hasText: "Mino" });
-  await expect(waiting).toContainText("Prépare une réponse");
+  await expect(waiting).toContainText("Mino prépare une réponse");
   const pendingBox = await waiting.boundingBox();
   const userBox = await page
     .locator(".ez-chat-user .ez-chat-bubble")

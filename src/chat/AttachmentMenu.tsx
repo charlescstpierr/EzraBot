@@ -1,13 +1,15 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { FileText, FolderOpen, Image, Plus } from "lucide-react";
+import { AtSign, FileText, FolderOpen, Image, Plus } from "lucide-react";
 import "./AttachmentMenu.css";
 
 type Props = {
   onFiles: (files: FileList | File[]) => void;
+  /** Absent when no other character can join this thread. */
+  onInvite?: () => void;
   disabled: boolean;
 };
 
-export function AttachmentMenu({ onFiles, disabled }: Props) {
+export function AttachmentMenu({ onFiles, onInvite, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -131,6 +133,19 @@ export function AttachmentMenu({ onFiles, disabled }: Props) {
             <FolderOpen size={18} aria-hidden="true" />
             Dossier
           </button>
+          {onInvite && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onInvite();
+              }}
+            >
+              <AtSign size={18} aria-hidden="true" />
+              Inviter un personnage
+            </button>
+          )}
         </div>
       )}
       {[

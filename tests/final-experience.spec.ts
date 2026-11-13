@@ -50,7 +50,21 @@ test("un personnage créé avec sa personnalité ouvre son fil et conserve son m
   ).toBeVisible();
   expect(profileWrites).toEqual(["bot.create"]);
 
-  const model = page.getByRole("button", {
+  const openEditor = async () => {
+    await page
+      .locator("main > header")
+      .getByRole("button", { name, exact: true })
+      .click();
+    await page
+      .getByRole("menuitem", { name: `Modifier ${name}`, exact: true })
+      .click();
+  };
+  const editorSheet = page.getByRole("dialog", {
+    name: `Modifier ${name}`,
+    exact: true,
+  });
+  await openEditor();
+  const model = editorSheet.getByRole("button", {
     name: new RegExp(`^Modèle de ${name} :`),
   });
   await model.click();
@@ -71,6 +85,9 @@ test("un personnage créé avec sa personnalité ouvre son fil et conserve son m
     model: "fake-sol",
   });
   await expect(picker).toHaveCount(0);
+  await expect(model).toContainText("Fake Sol");
+  await page.keyboard.press("Escape");
+  await expect(editorSheet).toHaveCount(0);
   await page
     .getByRole("textbox", { name: "Message", exact: true })
     .fill("Bonjour, préparons un jardin synthétique.");
@@ -86,7 +103,10 @@ test("un personnage créé avec sa personnalité ouvre son fil et conserve son m
   ).toBeVisible();
 
   await page.reload();
+  await openEditor();
   await expect(model).toContainText("Fake Sol");
+  await page.keyboard.press("Escape");
+  await expect(editorSheet).toHaveCount(0);
   const view = await page.request.get(new URL("/api/view", page.url()).href);
   expect(view.ok()).toBe(true);
   expect(await view.json()).toMatchObject({
@@ -142,6 +162,7 @@ test("le menu joint une photo et un dossier au message sans créer de document",
     "Photos",
     "Fichiers",
     "Dossier",
+    "Inviter un personnage",
   ]);
   const close = page.getByRole("button", {
     name: "Fermer les pièces jointes",

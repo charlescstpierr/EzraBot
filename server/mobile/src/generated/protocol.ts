@@ -402,6 +402,8 @@ export type WorkView = {
   updatedAt: string;
   attempt: AttemptView | null;
   attempts: number;
+  /** Tentative decoded reply from the current running chat attempt. Never conversation history. */
+  replyPreview?: string | null;
   versions: VersionView[];
   proposals: ProposalView[];
 };

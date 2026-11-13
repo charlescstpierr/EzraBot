@@ -159,6 +159,14 @@ export function BotSheet({
               />
             </div>
           </div>
+          <div className="bot-sheet-model">
+            <span aria-hidden="true">Modèle</span>
+            {bot ? (
+              <ModelPicker port={port} bot={bot} />
+            ) : (
+              <DraftModelPicker port={port} model={model} onChange={setModel} />
+            )}
+          </div>
           <textarea
             className="bot-sheet-text"
             aria-label="Personnalité et instructions"
@@ -187,11 +195,6 @@ export function BotSheet({
               />
               Apparence
             </button>
-            {bot ? (
-              <ModelPicker port={port} bot={bot} />
-            ) : (
-              <DraftModelPicker port={port} model={model} onChange={setModel} />
-            )}
           </div>
           {look && (
             <div className="bot-look">

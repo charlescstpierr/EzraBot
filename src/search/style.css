@@ -1,7 +1,7 @@
 .ez-search {
   position: relative;
   margin: 14px 0;
-  color: #222;
+  color: var(--text-1);
 }
 .ez-search-field {
   display: flex;
@@ -38,8 +38,8 @@
 }
 .ez-search-navigation button,
 .ez-search-heading button {
-  border: 1px solid #ddd;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: 5px;
   padding: 3px 8px;
 }
@@ -54,8 +54,8 @@
   width: min(460px, 80vw);
   max-height: 55vh;
   overflow: auto;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 12px 30px #0002;
   padding: 8px;
@@ -64,7 +64,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #777;
+  color: var(--text-3);
   font-size: 11px;
   padding: 6px;
 }
@@ -75,12 +75,12 @@
   padding: 12px;
   border: 0;
   border-radius: 6px;
-  background: #fff;
-  color: #222;
+  background: var(--surface);
+  color: var(--text-1);
 }
 .ez-search-results > button:hover,
 .ez-search-results > .ez-search-current {
-  background: #f3f3f3;
+  background: var(--field);
 }
 .ez-search-results strong {
   display: block;
@@ -93,8 +93,8 @@
   overflow-wrap: anywhere;
 }
 .ez-search-results mark {
-  background: #ddd;
-  color: #111;
+  background: var(--selected);
+  color: var(--text-1);
 }
 .ez-search-results p {
   font-size: 12px;

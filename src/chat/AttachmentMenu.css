@@ -1,20 +1,14 @@
 .ez-attachment-menu {
   position: relative;
-  align-self: stretch;
   display: flex;
   align-items: flex-end;
   flex: 0 0 auto;
-  color: var(--attachment-text, #32323b);
+  align-self: flex-end;
+  color: var(--text-1);
 }
 .ez-chat-composer .ez-attachment-trigger {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: inherit;
+  background: var(--hover);
+  color: var(--text-2);
 }
 .ez-attachment-trigger svg {
   transition: transform 160ms ease;
@@ -24,8 +18,8 @@
 }
 .ez-chat-composer .ez-attachment-trigger:hover,
 .ez-chat-composer .ez-attachment-trigger[aria-expanded="true"] {
-  background: var(--attachment-hover, #f0edf9);
-  color: var(--attachment-accent, #7161c5);
+  background: var(--selected);
+  color: var(--text-1);
 }
 .ez-attachment-popover {
   position: absolute;
@@ -35,10 +29,9 @@
   width: min(208px, calc(100vw - 72px));
   padding: 6px;
   box-sizing: border-box;
-  border: 1px solid var(--attachment-border, #e4e4eb);
-  border-radius: 12px;
-  background: var(--attachment-surface, #fff);
-  box-shadow: 0 8px 28px #1818241a;
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
 }
 .ez-chat-composer .ez-attachment-popover button {
   display: flex;
@@ -47,7 +40,7 @@
   width: 100%;
   min-height: 42px;
   padding: 8px 10px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -55,11 +48,10 @@
 }
 .ez-chat-composer .ez-attachment-popover button:hover,
 .ez-chat-composer .ez-attachment-popover button:focus-visible {
-  background: var(--attachment-hover, #f0edf9);
-  color: var(--attachment-accent, #7161c5);
+  background: var(--hover);
 }
 .ez-chat-composer .ez-attachment-menu button:focus-visible {
-  outline: 2px solid var(--attachment-accent, #7161c5);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {

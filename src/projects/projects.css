@@ -2,7 +2,7 @@
   width: min(100%, 1000px);
   margin: auto;
   padding: 28px;
-  color: #171717;
+  color: var(--text-1);
   overflow-wrap: anywhere;
 }
 .projects-page header {
@@ -23,10 +23,10 @@
   line-height: 1.6;
 }
 .projects-page button {
-  border: 1px solid #bcbcbc;
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
-  background: #fff;
-  color: #171717;
+  background: var(--surface);
+  color: var(--text-1);
   padding: 10px 14px;
   cursor: pointer;
 }
@@ -46,20 +46,20 @@
   gap: 18px;
 }
 .projects-card {
-  border: 1px solid #dedede;
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px;
-  background: #fff;
+  background: var(--surface);
   min-width: 0;
 }
 .projects-path {
   font-family: monospace;
-  color: #555;
+  color: var(--text-2);
 }
 .projects-page pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  background: #f6f6f6;
+  background: var(--field);
   padding: 12px;
 }
 .projects-actions {
@@ -81,9 +81,9 @@
 }
 .projects-page input {
   font: inherit;
-  color: #171717;
-  background: #fff;
-  border: 1px solid #bcbcbc;
+  color: var(--text-1);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 11px;
   width: 100%;
@@ -94,7 +94,7 @@
 }
 .projects-confirm,
 .projects-error {
-  border-left: 3px solid #222;
+  border-left: 3px solid var(--border-strong);
   padding: 14px;
   margin-block: 16px;
 }
@@ -105,15 +105,15 @@
   background: #0005;
 }
 .projects-dialog {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   box-sizing: border-box;
-  color: #171717;
+  color: var(--text-1);
   width: min(calc(100% - 32px), 530px);
   max-height: 90dvh;
   overflow: auto;
   border-radius: 16px;
   padding: 24px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 16px 70px #0002;
 }
 .projects-page ul {
