@@ -49,7 +49,10 @@ export function ProjectsPage({ port }: { port: Port }) {
       <header>
         <div>
           <h1>Projets</h1>
-          <p>Les dossiers autorisés pour les missions.</p>
+          <p>
+            Choisissez les dossiers dans lesquels vos personnages peuvent
+            travailler.
+          </p>
         </div>
         <button disabled={locked} onClick={() => setAdding(true)}>
           Ajouter un dossier

@@ -348,7 +348,6 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
       >
         {!messages.length && (
           <div className="ez-chat-welcome">
-            <small>VOS IDÉES ONT DE LA COMPAGNIE</small>
             <button
               className="ez-chat-hero hero-mascot"
               aria-label="Personnaliser le personnage"
@@ -357,10 +356,6 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
               <Mascot shape={bot.shape} color={bot.color} size={148} animated />
             </button>
             <h1>Salut, moi c’est {bot.name}.</h1>
-            <p>
-              Une idée en tête ? Un projet à faire avancer ?<br />
-              On s’y met ensemble.
-            </p>
             <div className="ez-chat-suggestions">
               {suggestions.map(([title, value]) => (
                 <button
@@ -375,7 +370,6 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
                 </button>
               ))}
             </div>
-            <small>Un petit compagnon. De grandes possibilités.</small>
           </div>
         )}
         {messages.map((m) => {
@@ -386,37 +380,43 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
               data-message-id={m.id}
               className={`ez-chat-message ez-chat-${m.role}${focused === m.id ? " ez-chat-focused" : ""}`}
             >
-              <div className="ez-chat-author">
-                {m.role === "assistant" && author && (
-                  <Mascot shape={author.shape} color={author.color} size={25} />
+              <div className="ez-chat-bubble">
+                <div className="ez-chat-author">
+                  {m.role === "assistant" && author && (
+                    <Mascot
+                      shape={author.shape}
+                      color={author.color}
+                      size={25}
+                    />
+                  )}
+                  <strong>
+                    {m.role === "user"
+                      ? "Vous"
+                      : (author?.name ?? "Personnage supprimé")}
+                  </strong>
+                  <time dateTime={m.createdAt}>
+                    {new Date(m.createdAt).toLocaleTimeString("fr-CA", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </time>
+                </div>
+                <Markdown text={m.text} />
+                {!!m.attachments.length && (
+                  <ul className="ez-chat-files">
+                    {m.attachments.map((f, i) => (
+                      <li key={i}>
+                        {f.name} · {f.chars} caractères
+                      </li>
+                    ))}
+                  </ul>
                 )}
-                <strong>
-                  {m.role === "user"
-                    ? "Vous"
-                    : (author?.name ?? "Personnage supprimé")}
-                </strong>
-                <time dateTime={m.createdAt}>
-                  {new Date(m.createdAt).toLocaleTimeString("fr-CA", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </time>
+                {m.stamp && (
+                  <small className="ez-chat-stamp">
+                    {m.stamp.model} · {m.stamp.effort} · {m.stamp.speed}
+                  </small>
+                )}
               </div>
-              <Markdown text={m.text} />
-              {!!m.attachments.length && (
-                <ul className="ez-chat-files">
-                  {m.attachments.map((f, i) => (
-                    <li key={i}>
-                      {f.name} · {f.chars} caractères
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {m.stamp && (
-                <small className="ez-chat-stamp">
-                  {m.stamp.model} · {m.stamp.effort} · {m.stamp.speed}
-                </small>
-              )}
               {slots.task(m)}
               {slots.mission(m)}
               {slots.tools(m)}
@@ -520,6 +520,8 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           <textarea
             ref={textarea}
             aria-label="Message"
+            aria-describedby="message-keyboard-help"
+            title="Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne"
             placeholder={`Écrire à ${bot.name}…`}
             maxLength={LIMITS.messageChars}
             value={content.text}
@@ -619,7 +621,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             }}
           />
         </label>
-        <small className="ez-chat-footnote">
+        <small id="message-keyboard-help" className="sr-only">
           Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne
         </small>
       </div>

@@ -95,6 +95,30 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
   const current = currentVersion(work);
   if (work.state === "done" && !current) return null;
   const bot = port.view.bots.find((each) => each.id === work.botId);
+  if (!current && work.taskId === null) {
+    return (
+      <div
+        className="ez-chat-reply"
+        data-work-id={work.id}
+        role={
+          work.state === "pending" || work.state === "running"
+            ? "status"
+            : undefined
+        }
+      >
+        <div className="ez-chat-author">
+          {bot && <Mascot shape={bot.shape} color={bot.color} size={28} />}
+          <strong>{botNamer(port.view)(work.botId)}</strong>
+        </div>
+        <p className={work.state === "failed" ? "ez-doc-error" : undefined}>
+          {work.state === "pending" || work.state === "running"
+            ? "Prépare une réponse…"
+            : workNote(work, false)}
+        </p>
+        <NonTaskWorkControls port={port} work={work} />
+      </div>
+    );
+  }
   const busyElsewhere = port.view.works.some(
     (other) => other.state === "running" && other.id !== work.id,
   );
