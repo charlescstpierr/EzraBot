@@ -316,7 +316,13 @@ test('image retrieval requires the session, keeps bytes private, and rejects lar
     const file = view.messages.find(m=>m.role==='user')?.attachments[0]; assert(file);
     const url = `${app.base}/api/attachments/${file.id}`;
     assert.equal((await fetch(url)).status,403);
-    const response = await fetch(url,{headers:{cookie:`mino-images=${'a'.repeat(64)}`}});
+    assert.equal((await fetch(url,{headers:{cookie:`mino-images=${'a'.repeat(64)}`}})).status,403);
+    const home = await fetch(app.base);
+    const cookie = home.headers.get('set-cookie')!;
+    assert(!cookie.includes('a'.repeat(64)));
+    assert(cookie.includes('HttpOnly')); assert(cookie.includes('SameSite=Strict'));
+    assert.equal((await fetch(url,{headers:{cookie, origin:'http://evil.example'}})).status,403);
+    const response = await fetch(url,{headers:{cookie}});
     assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/png');
     assert.equal(response.headers.get('cache-control'),'private, no-store');
     assert.equal(Buffer.from(await response.arrayBuffer()).toString('base64'),base64);

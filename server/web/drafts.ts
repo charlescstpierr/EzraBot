@@ -10,6 +10,10 @@ export type KeyValueStorage = {
   key(index: number): string | null;
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  setDeferred?(key: string, value: () => string): void;
+  durable?(): boolean;
+  committed?(key: string): boolean;
+  flush?(key: string): Promise<boolean>;
   removeItem(key: string): void;
 };
 
@@ -133,15 +137,16 @@ export function openDrafts(options: {
       return null;
     }
   };
-  const set = (key: string, value: string, draft = false): boolean => {
+  const set = (key: string, value: string | (() => string), draft = false): boolean => {
     if (!local) return false;
     try {
-      local.setItem(key, value);
+      if (typeof value === 'function' && local.setDeferred) local.setDeferred(key, value);
+      else local.setItem(key, typeof value === 'function' ? value() : value);
       if (draft) {
         failedDrafts.delete(key);
         status = 'durable';
       }
-      return true;
+      return local.committed?.(key) ?? true;
     } catch (error) {
       status = isQuota(error) ? 'full' : 'unavailable';
       if (draft) failedDrafts.set(key, status);
@@ -173,6 +178,7 @@ export function openDrafts(options: {
   const goneHere = new Set<string>();
   const isGone = (key: string): boolean => space !== null && (goneHere.has(key) || get(`${GONE}${encodeURIComponent(space)}|${key}`) !== null);
   const seen = new Map<string, string>();
+  const foreignCache = new Map<string, { raw: string | null; stored: Stored | null; content: PromptContent | VersionContent | null }>();
   const own = new Map<string, { nonce: string; content: unknown; persisted: boolean }>();
 
   function markSeen(id: string, nonce: string, persist = true): void {
@@ -180,11 +186,20 @@ export function openDrafts(options: {
     if (persist) set(seenPrefix + id, nonce);
   }
 
+
+  function persistSeenAfterCommit(draftKey: string, id: string, nonce: string): void {
+    const marker = seenPrefix + id;
+    void local?.flush?.(draftKey).then(saved => {
+      if (saved) set(marker, nonce);
+    });
+  }
+
   function useSpace(spaceId: string): void {
     if (space === spaceId) return;
     space = spaceId;
     goneHere.clear();
     own.clear();
+    foreignCache.clear();
     seen.clear();
     failedDrafts.clear();
     const encodedSpace = encodeURIComponent(spaceId);
@@ -240,6 +255,7 @@ export function openDrafts(options: {
       const persisted = set(ownPrefix + scope, JSON.stringify(copy), true);
       own.set(scope, { ...copy, persisted });
       markSeen(key, stored.nonce, persisted);
+      if (!persisted) persistSeenAfterCommit(ownPrefix + scope, key, stored.nonce);
     }
   }
 
@@ -257,7 +273,9 @@ export function openDrafts(options: {
       remove(ownPrefix + key);
       return { scopeKey: key, nonce };
     }
-    const persisted = set(ownPrefix + key, JSON.stringify({ nonce, savedAt: now(), content }), true);
+    const savedAt = now();
+    const serialize = () => JSON.stringify({ nonce, savedAt, content });
+    const persisted = set(ownPrefix + key, 'files' in content && content.files.length ? serialize : serialize(), true);
     own.set(key, { nonce, content, persisted });
     return { scopeKey: key, nonce };
   }
@@ -275,7 +293,14 @@ export function openDrafts(options: {
     if (isGone(key)) return [];
     return keys().flatMap(storageKey => {
       if (!storageKey.startsWith(draftPrefix) || storageKey.startsWith(ownPrefix) || !storageKey.endsWith(`|${key}`)) return [];
-      const stored = parseStored(get(storageKey));
+      const raw = get(storageKey);
+      let cached = foreignCache.get(storageKey);
+      if (!cached || cached.raw !== raw) {
+        const stored = parseStored(raw);
+        cached = { raw, stored, content: stored ? parseContent(scope, stored.content) : null };
+        foreignCache.set(storageKey, cached);
+      }
+      const stored = cached.stored;
       if (!stored || seen.get(storageKey) === stored.nonce) return [];
       return [{ id: storageKey, stored }];
     });
@@ -284,7 +309,7 @@ export function openDrafts(options: {
   function others<S extends DraftScope>(scope: S): ForeignDraft<S>[] {
     return foreign(scope)
       .flatMap(({ id, stored }) => {
-        const content = parseContent(scope, stored.content);
+        const content = foreignCache.get(id)?.content as ContentOf<S> | null;
         return content ? [{ id, savedAt: stored.savedAt, content }] : [];
       })
       .sort((a, b) => b.savedAt - a.savedAt);
@@ -300,13 +325,15 @@ export function openDrafts(options: {
     const content = found ? parseContent(scope, found.stored.content) : null;
     if (!found || !content) return null;
     write(scope, content);
-    markSeen(id, found.stored.nonce, own.get(scopeKey(scope))?.persisted ?? false);
+    const persisted = own.get(scopeKey(scope))?.persisted ?? false;
+    markSeen(id, found.stored.nonce, persisted);
+    if (!persisted) persistSeenAfterCommit(ownPrefix + scopeKey(scope), id, found.stored.nonce);
     return content;
   }
 
   return {
     writerId,
-    status: () => [...failedDrafts.values()].includes('unavailable') ? 'unavailable' : failedDrafts.size ? 'full' : status,
+    status: () => local?.durable?.() === false ? 'unavailable' : [...failedDrafts.values()].includes('unavailable') ? 'unavailable' : failedDrafts.size ? 'full' : status,
     read,
     write,
     acknowledge,
@@ -332,6 +359,7 @@ export function openDrafts(options: {
         const scope = key.slice(key.lastIndexOf('|') + 1);
         if (targets.has(scope)) remove(key);
       }
+      for (const [id] of foreignCache) if (targets.has(id.slice(id.lastIndexOf('|') + 1))) foreignCache.delete(id);
       for (const [id] of seen) if (targets.has(id.slice(id.lastIndexOf('|') + 1))) seen.delete(id);
     },
   };

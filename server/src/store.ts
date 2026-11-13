@@ -1,4 +1,4 @@
-import { AttachmentSchema } from './protocol.js';
+import { AttachmentSchema, type Attachment } from './protocol.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
@@ -1463,7 +1463,7 @@ export function openStore(options: StoreOptions): Store {
         JOIN messages reply ON reply.attempt_id=a.id
         WHERE w.request_message_id=? AND w.state IN ('review','done') ORDER BY w.rowid, a.n`, str(request, 'id'));
       const lastVersion = responses.map(row => currentVersion(str(row, 'work_id'))).findLast(v => v !== undefined);
-      return { request: { text: str(request, 'text'), attachments: all('SELECT COALESCE(relative_path, name) AS name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
+      return { request: { text: str(request, 'text'), attachments: all('SELECT COALESCE(relative_path, name) AS name, mime_type, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars'), ...(strOrNull(f, 'mime_type') ? { kind: 'image' as const } : {}) })) },
         replies: responses.map(row => ({ by: str(row, 'name'), text: str(row, 'text') })),
         deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n') } : null };
     });
@@ -1517,8 +1517,13 @@ export function openStore(options: StoreOptions): Store {
 
   const memoriesOf = (botId: string) =>
     all('SELECT id, text FROM memories WHERE bot_id = ? ORDER BY seq', botId).map(row => ({ id: str(row, 'id'), text: str(row, 'text') }));
-  const requestAttachments = (messageId: string) =>
-    all('SELECT * FROM attachments WHERE message_id = ? ORDER BY seq', messageId).map(row => AttachmentSchema.parse({ name: str(row, 'name'), ...(strOrNull(row, 'relative_path') ? {relativePath: str(row, 'relative_path')} : {}), ...(strOrNull(row, 'mime_type') ? {kind: 'image', mimeType: str(row, 'mime_type'), base64: str(row, 'base64')} : {text: str(row, 'text')}) }));
+  const requestAttachments = (messageId: string): Attachment[] =>
+    all('SELECT * FROM attachments WHERE message_id = ? ORDER BY seq', messageId).map(row => {
+      const name = str(row, 'name');
+      const relativePath = strOrNull(row, 'relative_path');
+      if (!strOrNull(row, 'mime_type')) return { name, text: str(row, 'text'), ...(relativePath ? { relativePath } : {}) };
+      return AttachmentSchema.parse({ name, kind: 'image', mimeType: str(row, 'mime_type'), base64: str(row, 'base64'), ...(relativePath ? { relativePath } : {}) });
+    });
 
   /** The same work answers again, only to report the receipt of its approved action. No new request, no new work. */
   function claimReport(report: ReportClaim): Claim {

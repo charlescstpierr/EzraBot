@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { AttachmentSchema, CommandSchema, LIMITS } from "../src/protocol.js";
 import { openStore } from "../src/store.js";
@@ -184,4 +185,47 @@ test("context hashes image bytes, names and ordering without putting them in pro
   );
   assert.equal(original.turn.images?.[0]?.base64, image.base64);
   assert(!original.turn.input.includes(image.base64));
+});
+
+
+test("v6 queued text attachments keep legacy names and NUL through upgrade and retry", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "ezra-legacy-")), "test.sqlite");
+  const mascots = loadMascots(new URL("../../assets/mascots.json", import.meta.url));
+  let store = openStore({ path, mascots });
+  assert(store.dispatch({ ...command([], "legacy queued"), botId: "pixel" }).ok);
+  const messageId = store.view().messages[0]!.id;
+  store.close();
+  const db = new DatabaseSync(path);
+  db.exec("ALTER TABLE attachments DROP COLUMN mime_type; ALTER TABLE attachments DROP COLUMN base64; ALTER TABLE attachments DROP COLUMN relative_path; PRAGMA user_version=6;");
+  const name = "a\\b.txt";
+  const text = "avant\0après";
+  db.prepare("INSERT INTO attachments(message_id,name,text) VALUES (?,?,?)").run(messageId, name, text);
+  db.close();
+  store = openStore({ path, mascots });
+  const claim = store.claimNext("chat");
+  assert(claim);
+  assert(claim.turn.input.includes(name));
+  assert(claim.turn.input.includes(text));
+  store.close();
+  store = openStore({ path, mascots });
+  assert.equal(store.recoverInterrupted(), 1);
+  assert(store.dispatch({ type: "work.retry", workId: claim.workId, requestId: randomUUID() }).ok);
+  const retry = store.claimNext("chat");
+  assert(retry);
+  assert(retry.turn.input.includes(name));
+  assert(retry.turn.input.includes(text));
+  store.close();
+});
+
+
+test("old image history states that the image is not resent", () => {
+  const source: ContextSource = {
+    bot: { name: "Test", title: "", instructions: "", replyStyle: "concise", contextSize: "short" },
+    memories: [],
+    exchanges: [{ request: { text: "avant", attachments: [{ ...image, name: "photo.png", chars: 0 }] }, replies: [{ by: "Test", text: "Une photo" }], deliverable: null }],
+    request: { text: "suite", attachments: [] },
+  };
+  const input = composeContext(source).turn.input;
+  assert(input.includes("photo.png, image non renvoyée"));
+  assert(!input.includes("0 caractères"));
 });

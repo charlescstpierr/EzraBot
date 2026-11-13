@@ -1,12 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 
-async function syntheticPng(page: Page) {
-  const base64 = await page.evaluate(() => {
+async function syntheticPng(page: Page, size = 512) {
+  const base64 = await page.evaluate((size) => {
     const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 512;
+    canvas.width = size;
+    canvas.height = size;
     const ctx = canvas.getContext("2d")!;
-    const pixels = ctx.createImageData(512, 512);
+    const pixels = ctx.createImageData(size, size);
     let state = 11;
     for (let i = 0; i < pixels.data.length; i++) {
       state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
@@ -14,7 +14,7 @@ async function syntheticPng(page: Page) {
     }
     ctx.putImageData(pixels, 0, 0);
     return canvas.toDataURL("image/png").split(",")[1];
-  });
+  }, size);
   return Buffer.from(base64, "base64");
 }
 
@@ -30,6 +30,9 @@ test("les images restent dans le brouillon puis dans la commande exacte après u
   await expect(
     page.getByRole("button", { name: "Retirer pixel.png" }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Retirer pixel.png" }),
@@ -44,6 +47,9 @@ test("les images restent dans le brouillon puis dans la commande exacte après u
   await expect(
     page.getByText("Un envoi attend sa confirmation.", { exact: false }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
   await page.reload();
   await expect(
     page.getByText("Un envoi attend sa confirmation.", { exact: false }),
@@ -111,6 +117,11 @@ test("un dossier mixte conserve ses chemins et les trois formats image", async (
       value: "dossier/notes.txt",
     });
     dt.items.add(text);
+    const metadata = new File(["metadata"], ".DS_Store");
+    Object.defineProperty(metadata, "webkitRelativePath", {
+      value: "dossier/.DS_Store",
+    });
+    dt.items.add(metadata);
     const input = document.querySelector<HTMLInputElement>(
       'input[aria-label="Joindre un dossier"]',
     )!;
@@ -126,6 +137,9 @@ test("un dossier mixte conserve ses chemins et les trois formats image", async (
       .filter({ has: page.getByRole("button", { name: /^Retirer / }) })
       .locator("img.ez-attachment-preview"),
   ).toHaveCount(3);
+  await expect(page.getByRole("alert")).toContainText(
+    "1 fichier(s) système ignoré(s)",
+  );
   await page.getByRole("button", { name: "Retirer image.jpg" }).click();
   await expect(
     page
@@ -180,6 +194,9 @@ test("la suppression efface les images du brouillon dans les deux onglets", asyn
     });
     return botId;
   });
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
   await page.reload();
   await expect(page.getByLabel("Joindre un dossier")).toBeVisible();
   const png = await syntheticPng(page);
@@ -194,6 +211,9 @@ test("la suppression efface les images du brouillon dans les deux onglets", asyn
   const other = await context.newPage();
   await other.goto("/");
   await expect(other.getByLabel("Joindre un dossier")).toBeVisible();
+  await expect(
+    other.getByText("Brouillon d’une autre page", { exact: false }),
+  ).toBeVisible();
   await page.evaluate(async (botId) => {
     const view = await (await fetch("/api/view")).json();
     const bot = view.bots.find((bot: { id: string }) => bot.id === botId);
@@ -217,7 +237,10 @@ test("la suppression efface les images du brouillon dans les deux onglets", asyn
     page.getByRole("button", { name: "Retirer a-effacer.png" }),
   ).toHaveCount(0);
   await expect(
-    other.getByText("Autre brouillon", { exact: false }),
+    other.getByText("Brouillon d’une autre page", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
   ).toHaveCount(0);
   await page.reload();
   await expect(
@@ -263,4 +286,261 @@ test("une image corrompue ou trop grande laisse le brouillon intact", async ({
   });
   await expect(page.getByRole("alert")).toContainText("dépasse 4 Mio");
   await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(0);
+});
+
+test("le dépôt dans un fil actif garde la page et ajoute la photo", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator(".ez-chat")).toBeVisible();
+  const png = await syntheticPng(page);
+  const prevented = await page.evaluate((base64) => {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], "depot.png", { type: "image/png" }));
+    const chat = document.querySelector(".ez-chat")!;
+    const drag = new DragEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    });
+    chat.dispatchEvent(drag);
+    const drop = new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    });
+    chat.dispatchEvent(drop);
+    return [drag.defaultPrevented, drop.defaultPrevented];
+  }, png.toString("base64"));
+  expect(prevented).toEqual([true, true]);
+  await expect(
+    page.getByRole("button", { name: "Retirer depot.png" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+});
+
+test("IndexedDB indisponible ne bloque pas le texte après retrait", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    indexedDB.open = () => {
+      throw new DOMException("test open", "UnknownError");
+    };
+  });
+  await page.goto("/");
+  await page.getByLabel("Joindre photos et fichiers").setInputFiles({
+    name: "open.png",
+    mimeType: "image/png",
+    buffer: await syntheticPng(page),
+  });
+  await expect(
+    page.getByText("Le stockage local est indisponible", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Retirer open.png" }).click();
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("texte sans IndexedDB");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/commands"));
+  await page.getByRole("button", { name: "Envoyer le message" }).click();
+  expect((await sent).postDataJSON().text).toBe("texte sans IndexedDB");
+});
+
+test("quota garde la version validée, avertit puis récupère sans rechargement", async ({
+  page,
+  context,
+}) => {
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args) {
+      const request = put.apply(this, args);
+      if (Reflect.get(window, "failAttachmentPut"))
+        queueMicrotask(() => this.transaction.abort());
+      return request;
+    };
+  });
+  await page.goto("/");
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("version validée");
+  await page.getByLabel("Joindre photos et fichiers").setInputFiles({
+    name: "quota.png",
+    mimeType: "image/png",
+    buffer: await syntheticPng(page),
+  });
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Retirer quota.png" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  const pointer = await page.evaluate(() =>
+    Object.entries(localStorage).find(([k]) => k.startsWith("mino.draft.v2|"))!,
+  );
+  await page.evaluate(() => Reflect.set(window, "failAttachmentPut", true));
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("version en mémoire");
+  await expect(
+    page.getByText("Le stockage local est indisponible", { exact: false }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), pointer[0]),
+  ).toBe(pointer[1]);
+  const other = await context.newPage();
+  await other.goto("/");
+  await expect(
+    other.getByText("Brouillon d’une autre page · version validée"),
+  ).toBeVisible();
+  await page.evaluate(() => Reflect.set(window, "failAttachmentPut", false));
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("version récupérée");
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Le stockage local est indisponible", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    other.getByText("Brouillon d’une autre page · version récupérée"),
+  ).toBeVisible();
+  await other.getByRole("button", { name: "Reprendre ce brouillon" }).click();
+  await expect(
+    other.getByRole("button", { name: "Retirer quota.png" }),
+  ).toBeVisible();
+  await expect(
+    other.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  await other.reload();
+  await expect(
+    other.getByRole("textbox", { name: "Message", exact: true }),
+  ).toHaveValue("version récupérée");
+  await expect(
+    other.getByRole("button", { name: "Retirer quota.png" }),
+  ).toBeVisible();
+  await other.close();
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", { name: "Message", exact: true }),
+  ).toHaveValue("version récupérée");
+  await expect(
+    page.getByRole("button", { name: "Retirer quota.png" }),
+  ).toBeVisible();
+});
+
+test("la saisie rapide regroupe la sauvegarde et conserve le dernier brouillon exact", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    Reflect.set(window, "attachmentPuts", 0);
+    IDBObjectStore.prototype.put = function (...args) {
+      Reflect.set(
+        window,
+        "attachmentPuts",
+        Number(Reflect.get(window, "attachmentPuts")) + 1,
+      );
+      return put.apply(this, args);
+    };
+  });
+  await page.goto("/");
+  const png = await syntheticPng(page, 1024);
+  await page.getByLabel("Joindre photos et fichiers").setInputFiles([
+    { name: "a.png", mimeType: "image/png", buffer: png },
+    { name: "b.png", mimeType: "image/png", buffer: png },
+  ]);
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(2);
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  await page.evaluate(() => {
+    Reflect.set(window, "attachmentPuts", 0);
+    const input = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Message"]',
+    )!;
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!;
+    for (let i = 0; i < 100; i++) {
+      setter.call(input, `dernier texte ${i}`);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "attachmentPuts")))
+    .toBe(1);
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", { name: "Message", exact: true }),
+  ).toHaveValue("dernier texte 99");
+  await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(2);
+});
+
+test("un envoi attend le commit de sa commande figée puis reprend les mêmes octets", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    Reflect.set(window, "failPending", true);
+    IDBObjectStore.prototype.put = function (...args) {
+      const request = put.apply(this, args);
+      if (
+        typeof args[0] === "string" &&
+        args[0].includes('"command"') &&
+        Reflect.get(window, "failPending")
+      ) {
+        Reflect.set(window, "frozenPending", args[0]);
+        queueMicrotask(() => this.transaction.abort());
+      }
+      return request;
+    };
+  });
+  await page.goto("/");
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("commande originale");
+  const png = await syntheticPng(page);
+  await page
+    .getByLabel("Joindre photos et fichiers")
+    .setInputFiles({ name: "figee.png", mimeType: "image/png", buffer: png });
+  await expect(
+    page.getByRole("button", { name: "Retirer figee.png" }),
+  ).toBeVisible();
+  let sends = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/commands")) sends++;
+  });
+  await page.getByRole("button", { name: "Envoyer le message" }).click();
+  await expect(page.getByRole("alert")).toContainText("Envoi arrêté");
+  expect(sends).toBe(0);
+  const frozen = await page.evaluate(
+    () => JSON.parse(String(Reflect.get(window, "frozenPending"))).command,
+  );
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("nouveau brouillon");
+  await page.evaluate(() => Reflect.set(window, "failPending", false));
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/commands"));
+  await page.getByRole("button", { name: "Envoyer le message" }).click();
+  expect((await sent).postDataJSON()).toEqual(frozen);
+  expect(frozen.attachments[0].base64).toBe(png.toString("base64"));
+  await expect(
+    page.getByRole("textbox", { name: "Message", exact: true }),
+  ).toHaveValue("nouveau brouillon");
+  await expect(
+    page.getByText("Sauvegarde du brouillon en cours.", { exact: false }),
+  ).toHaveCount(0);
 });

@@ -1,5 +1,5 @@
 import { AttachmentSchema, type Attachment } from "../../server/src/protocol";
-import { flushAttachments } from "./durable";
+import { attachmentStatus, flushAttachments } from "./durable";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CommandSchema,
@@ -148,7 +148,12 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
   useEffect(() => {
     const update = () => refreshForeign((n) => n + 1);
     window.addEventListener("storage", update);
-    return () => window.removeEventListener("storage", update);
+    window.addEventListener("attachment-storage", update);
+    return () => {
+      window.removeEventListener("storage", update);
+      window.removeEventListener("attachment-storage", update);
+      void flushAttachments();
+    };
   }, []);
   useEffect(() => {
     if (!textarea.current) return;
@@ -208,7 +213,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
     setBusy(true);
     setError("");
     try {
-      if (!(await flushAttachments())) {
+      if (!(await flushAttachments(pendingKey))) {
         setStorageError(true);
         setError("Envoi arrêté : le stockage durable est indisponible.");
         return;
@@ -288,9 +293,19 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
     setError("");
     const additions: Attachment[] = [];
     try {
-      if (current.current.files.length + files.length > LIMITS.attachments)
+      const selected = Array.from(files).filter(
+        (file) =>
+          !file.webkitRelativePath ||
+          ![".DS_Store", "Thumbs.db", "desktop.ini"].includes(file.name),
+      );
+      const skipped = files.length - selected.length;
+      if (!selected.length) {
+        if (skipped) setError(`${skipped} fichier(s) système ignoré(s).`);
+        return;
+      }
+      if (current.current.files.length + selected.length > LIMITS.attachments)
         throw Error(`Maximum ${LIMITS.attachments} fichiers.`);
-      for (const file of Array.from(files)) {
+      for (const file of selected) {
         const name = file.name.trim();
         if (
           !name ||
@@ -363,6 +378,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           checked.error.issues.map((issue) => issue.message).join(" ; "),
         );
       change({ ...current.current, files: combined });
+      if (skipped) setError(`${skipped} fichier(s) système ignoré(s).`);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -395,7 +411,16 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
       </section>
     );
   return (
-    <section className="ez-chat">
+    <section
+      className="ez-chat"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        void addFiles(e.dataTransfer.files);
+      }}
+    >
       <div
         className="ez-chat-scroll"
         ref={scroll}
@@ -534,7 +559,14 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             </button>
           </div>
         ))}
-        {(storageError || drafts.status() !== "durable") && (
+        {attachmentStatus() === "saving" && (
+          <p role="status">
+            Sauvegarde du brouillon en cours. Gardez cette page ouverte.
+          </p>
+        )}
+        {(storageError ||
+          attachmentStatus() === "failed" ||
+          drafts.status() !== "durable") && (
           <p role="status">
             Le stockage local est indisponible ou plein. Gardez cette page
             ouverte pour conserver votre envoi.

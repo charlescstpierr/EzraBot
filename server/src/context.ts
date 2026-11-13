@@ -87,7 +87,7 @@ export type TaskSource = {
 
 /** One request in the originating thread, with its completed responses attributed to their actors. */
 export type Exchange = {
-  request: { text: string; attachments: { name: string; chars: number; relativePath?: string }[] };
+  request: { text: string; attachments: { name: string; chars: number; relativePath?: string; kind?: 'image' }[] };
   replies: { by: string; text: string }[];
   deliverable: { title: string; body: string; n: number } | null;
 };
@@ -212,7 +212,7 @@ function renderExchange(input: {
   const reply = clipMiddle(exchange.replies.map(reply => `${reply.by} : ${reply.text}`).join('\n'), turnChars);
   const lines = [`Personne : ${request.text}`];
   for (const file of exchange.request.attachments) {
-    lines.push(`(fichier joint : ${file.relativePath ?? file.name}, ${file.chars} caractères, non renvoyé)`);
+    lines.push(`(fichier joint : ${file.relativePath ?? file.name}, ${file.kind === 'image' ? 'image non renvoyée' : `${file.chars} caractères, non renvoyé`})`);
   }
   lines.push(reply.text);
   const deliverable = exchange.deliverable;
