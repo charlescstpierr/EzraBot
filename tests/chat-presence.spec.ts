@@ -46,14 +46,14 @@ async function thread(page: Page, messages: MessageView[]) {
 
 const gaze = (page: Page) =>
   page
-    .locator(".ez-chat-scroll .mascot-gaze")
+    .locator(".ez-chat-scroll .mascot-live .mascot-gaze")
     .evaluate((node) =>
       ((node as SVGGElement).style.transform.match(/-?[\d.]+/g) ?? []).map(
         (n) => Math.round(Number(n) * 10) / 10 || 0,
       ),
     );
 
-test("une seule mascotte vivante suit le pointeur sous la dernière réponse", async ({
+test("une seule mascotte vivante suit le pointeur à gauche de la dernière réponse", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -66,18 +66,19 @@ test("une seule mascotte vivante suit le pointeur sous la dernière réponse", a
   await page.goto("/");
   const chat = page.locator(".ez-chat-scroll");
   await expect(chat.getByText("Voici un plan")).toBeVisible();
-  await expect(chat.locator(".mascot")).toHaveCount(1);
+  await expect(chat.locator(".mascot")).toHaveCount(2);
   await expect(chat.getByText(/gpt-6\.1-sol|medium · standard/)).toHaveCount(0);
   const live = chat.locator(".mascot-live");
   await expect(live).toHaveAttribute("data-activity", "idle");
   await expect(live.locator(".mascot-eyes")).toHaveCount(1);
   const reply = await chat
-    .getByRole("article")
-    .filter({ hasText: "Voici un plan" })
+    .locator('[data-message-id="a2"] .ez-chat-bubble')
     .boundingBox();
   const box = (await live.boundingBox())!;
-  expect(box.y).toBeGreaterThanOrEqual(reply!.y + reply!.height - 1);
-  expect(box.y).toBeLessThan(reply!.y + reply!.height + 40);
+  expect(box.x + box.width).toBeLessThanOrEqual(reply!.x);
+  expect(Math.abs(box.y + box.height - reply!.y - reply!.height)).toBeLessThan(
+    2,
+  );
 
   await page.mouse.move(1270, box.y + box.height / 2);
   await expect.poll(() => gaze(page)).toEqual([3.2, 0]);
@@ -145,19 +146,21 @@ test("la réponse partielle grandit sans déplacer une lecture plus haut, puis l
   const scroll = page.locator(".ez-chat-scroll");
   const status = scroll.getByRole("status");
   await expect(status).toContainText("Mino prépare une réponse");
-  await expect(status.locator(".mascot-live")).toHaveAttribute(
+  await expect(scroll.locator(".ez-chat-reply .mascot-live")).toHaveAttribute(
     "data-activity",
     "thinking",
   );
-  await expect(scroll.locator(".mascot")).toHaveCount(1);
+  await expect(scroll.locator(".mascot")).toHaveCount(7);
+  await expect(scroll.locator(".mascot-live")).toHaveCount(1);
 
   work.replyPreview = "Ensuite, **on range** le bureau";
   view.rev++;
   await expect(scroll.locator(".ez-chat-partial strong")).toHaveText(
     "on range",
   );
-  await expect(status).toContainText("Mino écrit");
-  await expect(status.locator(".mascot-live")).toHaveAttribute(
+  await expect(status).toHaveText("Mino écrit…");
+  await expect(status.getByRole("button")).toHaveCount(0);
+  await expect(scroll.locator(".ez-chat-reply .mascot-live")).toHaveAttribute(
     "data-activity",
     "speaking",
   );
@@ -256,7 +259,7 @@ test("Mino se modifie vraiment : personnalité et modèle restent après recharg
   ).toBe(true);
 });
 
-test("deux demandes gardent une seule présence et la réponse courante après la précédente", async ({
+test("deux demandes gardent une seule mascotte vivante et la réponse courante après la précédente", async ({
   page,
 }) => {
   const view = await thread(page, [
@@ -301,7 +304,8 @@ test("deux demandes gardent une seule présence et la réponse courante après l
   expect(partialBox!.y).toBeGreaterThanOrEqual(
     previousBox!.y + previousBox!.height,
   );
-  await expect(page.locator(".ez-chat-scroll .mascot")).toHaveCount(1);
+  await expect(page.locator(".ez-chat-scroll .mascot")).toHaveCount(2);
+  await expect(page.locator(".ez-chat-scroll .mascot-live")).toHaveCount(1);
 });
 
 test("le travail suivant retrouve ses propres commandes après une annulation incertaine", async ({
@@ -366,4 +370,113 @@ test("le travail suivant retrouve ses propres commandes après une annulation in
     second.id,
   ]);
   expect(commands[0].requestId).not.toBe(commands[1].requestId);
+});
+
+for (const width of [1280, 390]) {
+  test(`les avatars et les bulles partagent une colonne à ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    const view = await thread(page, [
+      message("q1", "user", "Préparons le jardin.", 0),
+      message("a1", "assistant", "Choisissons deux plants de tomates.", 1),
+      message("q2", "user", "Et pour les arroser ?", 2),
+      message("a2", "assistant", "Arrosons le matin, au pied des plants.", 3),
+    ]);
+    await page.goto("/");
+    const scroll = page.locator(".ez-chat-scroll");
+    await expect(
+      scroll.getByText("Arrosons le matin, au pied des plants."),
+    ).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`placement-${width}.png`),
+    });
+    for (const id of ["a1", "a2"]) {
+      const row = scroll.locator(`[data-message-id="${id}"]`);
+      const avatar = row.locator(".mascot");
+      await expect(avatar).toBeVisible();
+      const a = (await avatar.boundingBox())!;
+      const b = (await row.locator(".ez-chat-bubble").boundingBox())!;
+      expect(a.x + a.width).toBeLessThanOrEqual(b.x);
+      expect(Math.abs(a.y + a.height - b.y - b.height)).toBeLessThan(2);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await expect(scroll.locator(".mascot-live")).toHaveCount(1);
+    const incomingX = (await scroll
+      .locator('[data-message-id="a2"] .ez-chat-bubble')
+      .boundingBox())!.x;
+    const work: WorkView = {
+      id: "layout-work",
+      threadBotId: "mino",
+      botId: "mino",
+      taskId: null,
+      requestMessageId: "q2",
+      state: "running",
+      title: "",
+      createdAt: "2026-11-12T14:00:00Z",
+      updatedAt: "2026-11-12T14:00:00Z",
+      attempt: null,
+      attempts: 1,
+      versions: [],
+      proposals: [],
+      replyPreview: null,
+    };
+    view.works = [work];
+    view.rev++;
+    const current = scroll.locator('[data-work-id="layout-work"]');
+    await expect(current).toContainText("Mino prépare une réponse");
+    for (const preview of [null, "Vérifions la terre avant chaque arrosage."]) {
+      work.replyPreview = preview;
+      view.rev++;
+      if (preview)
+        await expect(current.locator(".ez-chat-bubble")).toHaveText(preview);
+      const avatar = (await current.locator(".mascot-live").boundingBox())!;
+      const bubble = (await current.locator(".ez-chat-bubble").boundingBox())!;
+      expect(bubble.x).toBe(incomingX);
+      expect(avatar.x + avatar.width).toBeLessThanOrEqual(bubble.x);
+      expect(
+        Math.abs(avatar.y + avatar.height - bubble.y - bubble.height),
+      ).toBeLessThan(2);
+      await expect(scroll.locator(".mascot-live")).toHaveCount(1);
+    }
+    await page.screenshot({
+      path: testInfo.outputPath(`placement-progressive-${width}.png`),
+    });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+  });
+}
+
+test("un groupe garde son avatar final et un invité garde son identité", async ({
+  page,
+}) => {
+  const view = await thread(page, [
+    message("a1", "assistant", "Première partie du plan.", 0),
+    message("a2", "assistant", "Dernière partie du plan.", 1),
+    {
+      ...message("guest", "assistant", "Je vérifie le matériel.", 2),
+      botId: "guest",
+    },
+  ]);
+  view.bots.push({
+    ...view.bots[0],
+    id: "guest",
+    name: "Jardinier invité",
+    color: "#aabbcc",
+  });
+  await page.goto("/");
+  const scroll = page.locator(".ez-chat-scroll");
+  await expect(scroll.locator('[data-message-id="a1"] .mascot')).toHaveCount(0);
+  await expect(scroll.locator('[data-message-id="a2"] .mascot')).toBeVisible();
+  const guest = scroll.locator('[data-message-id="guest"]');
+  await expect(guest).toHaveAccessibleName("Jardinier invité");
+  await expect(guest.locator(".ez-chat-guest")).toHaveText("Jardinier invité");
+  await expect(guest.locator(".mascot-live svg")).toHaveAttribute(
+    "style",
+    /#aabbcc/,
+  );
+  await expect(scroll.locator(".mascot-live")).toHaveCount(1);
 });

@@ -102,24 +102,40 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
     const name = botNamer(port.view)(work.botId);
     return (
       <div className="ez-chat-reply" data-work-id={work.id}>
-        {preview && (
-          <div className="ez-chat-bubble ez-chat-partial" aria-busy="true">
-            <Markdown text={preview} />
+        <div className="ez-chat-incoming">
+          <div className="ez-chat-avatar">
+            {bot &&
+              (active ? (
+                <LiveMascot
+                  shape={bot.shape}
+                  color={bot.color}
+                  size={36}
+                  activity={preview ? "speaking" : "thinking"}
+                />
+              ) : (
+                <Mascot shape={bot.shape} color={bot.color} size={36} />
+              ))}
           </div>
-        )}
-        <div className="ez-chat-presence" role={active ? "status" : undefined}>
-          {active && bot && (
-            <LiveMascot
-              shape={bot.shape}
-              color={bot.color}
-              activity={preview ? "speaking" : "thinking"}
-            />
-          )}
-          <p className={work.state === "failed" ? "ez-doc-error" : undefined}>
-            {active
-              ? `${name} ${preview ? "écrit" : "prépare une réponse"}…`
-              : workNote(work, false)}
-          </p>
+          <div
+            className={`ez-chat-bubble${preview ? " ez-chat-partial" : ""}`}
+            aria-busy={preview ? true : undefined}
+          >
+            {preview ? (
+              <Markdown text={preview} />
+            ) : (
+              <p
+                role={active ? "status" : undefined}
+                className={work.state === "failed" ? "ez-doc-error" : undefined}
+              >
+                {active
+                  ? `${name} prépare une réponse…`
+                  : workNote(work, false)}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="ez-chat-presence ez-chat-reply-controls">
+          {preview && <p role="status">{name} écrit…</p>}
           <NonTaskWorkControls port={port} work={work} />
         </div>
       </div>
@@ -188,7 +204,7 @@ export function ReplyQueue({ port, botId }: { port: Port; botId: string }) {
         .filter((work) => work !== current)
         .map((work) => (
           <div
-            className="ez-chat-presence"
+            className="ez-chat-presence ez-chat-reply-controls"
             key={work.id}
             data-work-id={work.id}
           >

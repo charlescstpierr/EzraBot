@@ -3,7 +3,7 @@ import type { AppView, MessageView, WorkView } from "../server/src/protocol";
 
 const toolsBase = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
 
-test("réponse progressive puis finale sans estampille, avec une seule mascotte (vue simulée)", async ({
+test("réponse progressive puis finale sans estampille, avec une seule mascotte vivante (vue simulée)", async ({
   page,
   request,
 }, testInfo) => {
@@ -84,7 +84,7 @@ test("réponse progressive puis finale sans estampille, avec une seule mascotte 
     .click();
   const waiting = chat.getByRole("status").filter({ hasText: "Mino" });
   await expect(waiting).toBeVisible();
-  await expect(waiting.locator(".mascot")).toBeVisible();
+  await expect(page.locator(".ez-chat-reply .mascot")).toBeVisible();
   work.state = "running";
   work.replyPreview = "Commençons par deux plants";
   view.rev++;
@@ -116,19 +116,16 @@ test("réponse progressive puis finale sans estampille, avec une seule mascotte 
   await expect
     .soft(chat.getByRole("article").getByText(/gpt-5\.4|medium|standard/))
     .toHaveCount(0);
-  const mascots = page.locator(".ez-chat-scroll .mascot");
-  await expect
-    .soft(mascots, "Une mascotte reste près de la dernière réponse")
-    .toHaveCount(1);
-  if ((await mascots.count()) === 1) {
-    await expect(mascots).toBeVisible();
-    const mascotBox = await mascots.boundingBox();
-    const replyBox = await latest.boundingBox();
-    expect(mascotBox).not.toBeNull();
-    expect(replyBox).not.toBeNull();
-    expect(mascotBox!.y).toBeGreaterThanOrEqual(replyBox!.y);
-    expect(mascotBox!.y).toBeLessThan(replyBox!.y + replyBox!.height + 80);
-  }
+  await expect(page.locator(".ez-chat-scroll .mascot")).toHaveCount(2);
+  const live = page.locator(".ez-chat-scroll .mascot-live");
+  await expect(live).toHaveCount(1);
+  await expect(live).toBeVisible();
+  const mascotBox = (await live.boundingBox())!;
+  const replyBox = (await latest.locator(".ez-chat-bubble").boundingBox())!;
+  expect(mascotBox.x + mascotBox.width).toBeLessThanOrEqual(replyBox.x);
+  expect(
+    Math.abs(mascotBox.y + mascotBox.height - replyBox.y - replyBox.height),
+  ).toBeLessThan(2);
   await page.screenshot({ path: testInfo.outputPath("chat-final.png") });
 });
 
