@@ -35,7 +35,7 @@ import { Markdown } from "./Markdown";
 import { ChatPage } from "./chat";
 import { storageWrite } from "./chat/pending";
 import { SearchBox } from "./search";
-import { TaskCard, DocumentPanel } from "./documents";
+import { TaskCard, DocumentPanel, ReplyQueue } from "./documents";
 import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
 import {
@@ -474,6 +474,7 @@ function App() {
             focusMessageId={route.messageId}
             drafts={drafts}
             slots={{
+              replies: () => <ReplyQueue port={port} botId={route.botId} />,
               task: (message) => <TaskCard port={port} message={message} />,
               mission: (message) => (
                 <MissionProposal port={port} message={message} />

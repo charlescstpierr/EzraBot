@@ -44,7 +44,6 @@ async function thread(page: Page, messages: MessageView[]) {
   return view;
 }
 
-/** Where the eyes look, in SVG units, rounded to one decimal. */
 const gaze = (page: Page) =>
   page
     .locator(".ez-chat-scroll .mascot-gaze")
@@ -255,4 +254,52 @@ test("Mino se modifie vraiment : personnalité et modèle restent après recharg
     restored,
     "Mino retrouve le modèle par défaut pour les tests suivants",
   ).toBe(true);
+});
+
+test("deux demandes gardent une seule présence et la réponse courante après la précédente", async ({
+  page,
+}) => {
+  const view = await thread(page, [
+    message("q1", "user", "Première question", 0),
+    message("q2", "user", "Autre question", 1),
+  ]);
+  const makeWork = (id: string, state: WorkView["state"]): WorkView => ({
+    id: `w-${id}`,
+    threadBotId: "mino",
+    botId: "mino",
+    taskId: null,
+    requestMessageId: id,
+    state,
+    title: "",
+    createdAt: "2026-11-12T14:00:00Z",
+    updatedAt: "2026-11-12T14:00:00Z",
+    attempt: null,
+    attempts: 1,
+    versions: [],
+    proposals: [],
+    replyPreview: null,
+  });
+  const first = makeWork("q1", "running"),
+    second = makeWork("q2", "pending");
+  view.works = [first, second];
+  await page.goto("/");
+  await expect.soft(page.locator(".ez-chat-scroll .mascot")).toHaveCount(1);
+  first.state = "done";
+  second.state = "running";
+  second.replyPreview = "La deuxième réponse commence";
+  view.messages.push(
+    message("a1", "assistant", "La première réponse est terminée.", 2),
+  );
+  view.rev++;
+  const previous = page
+    .getByRole("article")
+    .filter({ hasText: "La première réponse est terminée." });
+  const partial = page.locator(".ez-chat-partial");
+  await expect(partial).toContainText(second.replyPreview);
+  const previousBox = await previous.boundingBox(),
+    partialBox = await partial.boundingBox();
+  expect(partialBox!.y).toBeGreaterThanOrEqual(
+    previousBox!.y + previousBox!.height,
+  );
+  await expect(page.locator(".ez-chat-scroll .mascot")).toHaveCount(1);
 });

@@ -50,7 +50,6 @@ test("réponse progressive puis finale sans estampille, avec une seule mascotte 
   view.messages = [previous];
   view.works = [];
   await page.route("**/api/view*", (route) => route.fulfill({ json: view }));
-  // The unavailable QA engine cannot pause a turn. Only this test simulates its view.
   await page.route("**/api/commands", async (route) => {
     const response = await route.fetch();
     const body = await response.json();

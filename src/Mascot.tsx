@@ -32,18 +32,22 @@ type Parts = { body: string; eyes: string };
 let sheet: Promise<Document | null> | null = null;
 const cache = new Map<string, Parts | null>();
 
-/** Splits a profile symbol into its body and its eyes, which are always the symbol's last group. */
 function parts(doc: Document | null, shape: string): Parts | null {
   if (cache.has(shape)) return cache.get(shape)!;
   const children = Array.from(
     doc?.getElementById(`profile-${shape}`)?.children ?? [],
   );
-  const eyes = children.pop();
+  const eyes = children.find(
+    (node) => node.getAttribute("data-part") === "eyes",
+  );
   const serializer = new XMLSerializer();
   const result =
     eyes && children.length
       ? {
-          body: children.map((n) => serializer.serializeToString(n)).join(""),
+          body: children
+            .filter((node) => node !== eyes)
+            .map((n) => serializer.serializeToString(n))
+            .join(""),
           eyes: serializer.serializeToString(eyes),
         }
       : null;
@@ -70,11 +74,6 @@ function useParts(shape: string): Parts | null {
 const REACH = 240;
 const TRAVEL = 3.2;
 
-/**
- * The bot's present self in the conversation: eyes follow a fine pointer, and the body
- * thinks or speaks while a reply is in progress. Pointer moves schedule one frame each;
- * nothing runs between moves.
- */
 export function LiveMascot({
   shape,
   color,

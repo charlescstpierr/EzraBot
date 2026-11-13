@@ -1,4 +1,4 @@
 import "./documents.css";
 
-export { TaskCard } from "./card";
+export { TaskCard, ReplyQueue } from "./card";
 export { DocumentPanel } from "./panel";

@@ -169,6 +169,38 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
   );
 }
 
+function isLiveReply(work: WorkView): boolean {
+  return (
+    work.taskId === null &&
+    work.versions.length === 0 &&
+    (work.state === "pending" || work.state === "running")
+  );
+}
+
+export function ReplyQueue({ port, botId }: { port: Port; botId: string }) {
+  const works = port.view.works.filter(
+    (work) => work.threadBotId === botId && isLiveReply(work),
+  );
+  const current = works.find((work) => work.state === "running") ?? works[0];
+  return (
+    <>
+      {works
+        .filter((work) => work !== current)
+        .map((work) => (
+          <div
+            className="ez-chat-presence"
+            key={work.id}
+            data-work-id={work.id}
+          >
+            <p>En attente de la réponse en cours…</p>
+            <NonTaskWorkControls port={port} work={work} />
+          </div>
+        ))}
+      {current && <WorkSummary port={port} work={current} />}
+    </>
+  );
+}
+
 export function TaskCard({
   port,
   message,
@@ -181,7 +213,9 @@ export function TaskCard({
   return (
     <>
       {port.view.works
-        .filter((work) => work.requestMessageId === message.id)
+        .filter(
+          (work) => work.requestMessageId === message.id && !isLiveReply(work),
+        )
         .map((work) => (
           <WorkSummary key={work.id} port={port} work={work} />
         ))}

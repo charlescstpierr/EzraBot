@@ -4,7 +4,7 @@ import "./AttachmentMenu.css";
 
 type Props = {
   onFiles: (files: FileList | File[]) => void;
-  /** Absent when no other character can join this thread. */
+
   onInvite?: () => void;
   disabled: boolean;
 };

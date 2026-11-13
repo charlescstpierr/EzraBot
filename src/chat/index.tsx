@@ -39,6 +39,7 @@ type Props = {
   focusMessageId?: string;
   drafts: DraftBook;
   slots: {
+    replies(): ReactNode;
     task(message: MessageView): ReactNode;
     mission(message: MessageView): ReactNode;
     tools(message: MessageView): ReactNode;
@@ -57,7 +58,7 @@ const suggestions = [
   ],
 ];
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-/** A quiet time mark above the first message and after a pause of half an hour or more. */
+
 function moment(before: string | undefined, at: string): string | null {
   const now = new Date(at);
   const previous = before ? new Date(before) : null;
@@ -113,7 +114,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
   const sending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  /** Offered only when this bot has service rights. On by default; every action still waits for the person's approval. */
+
   const canUseServices =
     port.view.tools.status.state === "ready" &&
     (port.view.tools.grants[botId]?.length ?? 0) > 0;
@@ -539,6 +540,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             </article>
           );
         })}
+        {slots.replies()}
         {!!messages.length && !replying && presence && (
           <div className="ez-chat-presence">
             <LiveMascot shape={presence.shape} color={presence.color} />

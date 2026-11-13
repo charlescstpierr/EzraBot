@@ -27,7 +27,6 @@ const PROVIDERS: [RegExp, Provider][] = [
   [/mistral|mixtral|codestral|magistral/i, "mistral"],
 ];
 
-/** The maker's logo when the model id names it; a neutral chip otherwise, never a guessed brand. */
 export function ProviderLogo({ model }: { model: string | null }) {
   const provider = model
     ? PROVIDERS.find(([pattern]) => pattern.test(model))?.[1]
