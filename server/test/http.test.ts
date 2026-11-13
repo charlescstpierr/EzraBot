@@ -267,6 +267,7 @@ test('HTML versions preview in a sandbox, download as HTML and keep approval, re
     assert.equal(await(await fetch(`${app.base}/api/publications/${approved.publicationId}/download`)).text(),HTML_PAGE);
     const normal = await fetch(`${app.base}/`);
     assert.match(normal.headers.get('content-security-policy')??'',/frame-src 'self'/);
+    assert.match(normal.headers.get('content-security-policy') ?? '', /font-src 'self' data:/);
     assert(!((normal.headers.get('content-security-policy')??'').includes("script-src 'unsafe-inline'")));
   } finally {await app.stop();}
 });
