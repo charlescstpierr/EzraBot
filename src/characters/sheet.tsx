@@ -46,11 +46,13 @@ function freshDraft(bots: BotView[]): Draft {
 export function BotSheet({
   port,
   target,
+  open = true,
   onClose,
   onCreated,
 }: {
   port: Port;
   target: BotSheetTarget;
+  open?: boolean;
   onClose: () => void;
   onCreated: (botId: string) => void;
 }) {
@@ -77,6 +79,7 @@ export function BotSheet({
   const colors = [
     ...new Set([defaultColor(draft.shape), ...catalogue.colors, draft.color]),
   ];
+  if (!open) return null;
   if (target.mode === "edit" && !bot)
     return (
       <Sheet
