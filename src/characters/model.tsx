@@ -1,21 +1,26 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu } from "lucide-react";
 import { PROVIDER_PATHS } from "./provider-paths";
-import type {
-  BotChoice,
-  BotView,
-  CatalogModel,
+import {
+  STANDARD_SPEED,
+  type BotChoice,
+  type BotView,
+  type CatalogModel,
 } from "../../server/src/protocol";
 import type { Port } from "../port";
 import { uid } from "../api";
 import { useAction } from "./action";
+import { chosenModel, matchesModel, withModel } from "./choice";
 
-const effortNames: Record<string, string> = {
+/** French reading aids for the engine's level tokens. A token missing here is shown alone, as the engine names it. */
+const EFFORT_GLOSS: Record<string, string> = {
   minimal: "Minimale",
   low: "Légère",
   medium: "Moyenne",
   high: "Poussée",
   xhigh: "Très poussée",
+  max: "Maximale",
+  ultra: "Extrême",
 };
 
 type Provider = keyof typeof PROVIDER_PATHS;
@@ -49,83 +54,173 @@ export function ProviderLogo({ model }: { model: string | null }) {
 
 export function modelLabel(port: Port, bot: BotView): string {
   const engine = port.view.engine;
-  if (engine.state !== "ready") return bot.choice.model ?? "Modèle par défaut";
-  const model = engine.models.find((m) =>
-    bot.choice.model ? m.id === bot.choice.model : m.isDefault,
-  );
+  const model =
+    engine.state === "ready"
+      ? chosenModel(engine.models, bot.choice.model)
+      : null;
   return model?.displayName ?? bot.choice.model ?? "Modèle par défaut";
 }
 
 export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
   const action = useAction(port);
   return (
-    <ModelChoicePicker
+    <ChoiceSettings
       port={port}
       name={bot.name}
       choice={bot.choice}
-      busy={action.busy}
+      locked={action.disabled && !action.busy}
       feedback={action.feedback}
-      configure={(model, effort, speed, done) => {
-        void action.perform(
-          {
-            type: "bot.configure",
-            requestId: uid(),
-            botId: bot.id,
-            model: model?.id ?? null,
-            effort,
-            speed,
-          },
-          done,
-        );
-      }}
+      onChange={(choice) =>
+        void action.perform({
+          type: "bot.configure",
+          requestId: uid(),
+          botId: bot.id,
+          ...choice,
+        })
+      }
     />
   );
 }
 
 export function DraftModelPicker({
   port,
-  model,
+  choice,
   onChange,
 }: {
   port: Port;
-  model: BotChoice["model"];
-  onChange: (model: BotChoice["model"]) => void;
+  choice: BotChoice;
+  onChange: (choice: BotChoice) => void;
 }) {
   return (
-    <ModelChoicePicker
+    <ChoiceSettings
       port={port}
       name="ce personnage"
-      choice={{ model, effort: null, speed: "standard" }}
-      draft
-      configure={(selected, _effort, _speed, done) => {
-        onChange(selected?.id ?? null);
-        done?.();
-      }}
+      choice={choice}
+      onChange={onChange}
     />
   );
 }
 
-function ModelChoicePicker({
+type Level = { value: string; token: string; gloss?: string; hint?: string };
+/** A saved level or speed the model no longer announces: shown as saved, so the person sees what a turn would be refused for. */
+const notOffered = (token: string): Level => ({
+  value: token,
+  token,
+  gloss: "Non proposé",
+});
+
+function ChoiceSettings({
   port,
   name,
   choice,
-  configure,
-  draft = false,
-  busy = false,
+  onChange,
+  locked = false,
   feedback,
 }: {
   port: Port;
   name: string;
   choice: BotChoice;
-  configure: (
-    model: CatalogModel | null,
-    effort: string | null,
-    speed: string,
-    done?: () => void,
-  ) => void;
-  draft?: boolean;
-  busy?: boolean;
+  onChange: (choice: BotChoice) => void;
+  locked?: boolean;
   feedback?: React.ReactNode;
+}) {
+  const engine = port.view.engine;
+  const models = engine.state === "ready" ? engine.models : [];
+  const current = chosenModel(models, choice.model);
+  return (
+    <div className="model-settings">
+      <ModelMenu
+        name={name}
+        engine={engine}
+        choice={choice}
+        current={current}
+        onPick={(id) => {
+          const next = withModel(choice, id, chosenModel(models, id));
+          if (
+            next.model !== choice.model ||
+            next.effort !== choice.effort ||
+            next.speed !== choice.speed
+          )
+            onChange(next);
+        }}
+      />
+      {current ? (
+        <fieldset className="model-levels" disabled={locked}>
+          <Levels
+            legend="Réflexion"
+            value={choice.effort ?? ""}
+            fallback={current.defaultEffort}
+            options={[
+              ...current.efforts.map((token) => ({
+                value: token,
+                token,
+                gloss: EFFORT_GLOSS[token],
+              })),
+              ...(choice.effort !== null &&
+              !current.efforts.includes(choice.effort)
+                ? [notOffered(choice.effort)]
+                : []),
+            ]}
+            onChange={(effort) =>
+              onChange({ ...choice, effort: effort || null })
+            }
+          />
+          <Levels
+            legend="Vitesse"
+            value={choice.speed}
+            options={[
+              {
+                value: STANDARD_SPEED,
+                token: STANDARD_SPEED,
+                gloss: "Normale",
+              },
+              ...current.speeds.map((s) => ({
+                value: s.id,
+                token: s.id,
+                gloss: s.name,
+                hint: s.description,
+              })),
+              ...(choice.speed !== STANDARD_SPEED &&
+              !current.speeds.some((s) => s.id === choice.speed)
+                ? [notOffered(choice.speed)]
+                : []),
+            ]}
+            onChange={(speed) => onChange({ ...choice, speed })}
+          />
+        </fieldset>
+      ) : (
+        <p className="model-note" role="status">
+          {engine.state === "starting"
+            ? "Les niveaux s’affichent dès que le catalogue de Codex répond."
+            : engine.state === "unavailable"
+              ? "Le catalogue de Codex ne répond pas : ses niveaux ne peuvent pas être listés."
+              : "Ce modèle n’est plus au catalogue. Choisissez un modèle pour voir ses niveaux."}{" "}
+          Réglage actuel : réflexion{" "}
+          {choice.effort ? (
+            <code>{choice.effort}</code>
+          ) : (
+            "par défaut du modèle"
+          )}
+          , vitesse <code>{choice.speed}</code>.
+        </p>
+      )}
+      {feedback}
+    </div>
+  );
+}
+
+function ModelMenu({
+  name,
+  engine,
+  choice,
+  current,
+  onPick,
+}: {
+  name: string;
+  engine: Port["view"]["engine"];
+  choice: BotChoice;
+  current: CatalogModel | null;
+  onPick: (id: BotChoice["model"]) => void;
 }) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(""),
@@ -133,22 +228,19 @@ function ModelChoicePicker({
   const trigger = useRef<HTMLButtonElement>(null),
     panel = useRef<HTMLDivElement>(null);
   const id = useId();
-  const engine = port.view.engine;
   const models = engine.state === "ready" ? engine.models : [];
-  const current =
-    models.find((m) => (choice.model ? m.id === choice.model : m.isDefault)) ??
-    null;
-  const shown = models.filter((m) =>
-    m.displayName.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
-  );
+  const shown = models.filter((m) => matchesModel(m, query));
   function close(refocus: boolean) {
     setOpen(false);
     setQuery("");
     if (refocus) trigger.current?.focus();
   }
+  function pick(model: BotChoice["model"]) {
+    close(true);
+    onPick(model);
+  }
   useEffect(() => {
-    if (open && engine.state !== "ready")
-      void fetch("/api/catalog").catch(() => {});
+    if (engine.state !== "ready") void fetch("/api/catalog").catch(() => {});
   }, [open, engine.state]);
   useEffect(() => {
     if (!open) return;
@@ -163,16 +255,14 @@ function ModelChoicePicker({
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [open]);
-  function choose(model: CatalogModel) {
-    if (model.id === current?.id && choice.model !== null) close(true);
-    else configure(model, null, "standard", () => close(true));
-  }
+  const modelId = current?.id ?? choice.model;
   const label =
     engine.state === "starting"
       ? "Chargement des modèles…"
       : engine.state === "unavailable"
         ? "Modèles indisponibles"
         : (current?.displayName ?? choice.model ?? "Modèle par défaut");
+  const identified = engine.state === "ready" && current !== null;
   return (
     <div className="model-picker">
       <button
@@ -181,11 +271,15 @@ function ModelChoicePicker({
         className="model-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Modèle de ${name} : ${label}`}
+        aria-label={`Modèle de ${name} : ${label}${identified ? ` (${current.id})` : ""}`}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
-        <ProviderLogo model={current?.id ?? choice.model} />
-        <span>{busy ? "Enregistrement…" : label}</span>
+        <ProviderLogo model={modelId} />
+        <span className="model-name">{label}</span>
+        {identified && <code className="model-id">{current.id}</code>}
+        {identified && choice.model === null && (
+          <small className="model-default">par défaut</small>
+        )}
         <ChevronDown size={13} aria-hidden="true" />
       </button>
       {open && (
@@ -202,17 +296,9 @@ function ModelChoicePicker({
             }
           }}
         >
-          {draft && (
-            <button
-              type="button"
-              className="link"
-              onClick={() =>
-                configure(null, null, "standard", () => close(true))
-              }
-            >
-              Modèle par défaut
-            </button>
-          )}
+          <button type="button" className="link" onClick={() => pick(null)}>
+            Modèle par défaut
+          </button>
           {engine.state !== "ready" ? (
             <p className="model-note" role="status">
               {engine.state === "starting"
@@ -231,7 +317,7 @@ function ModelChoicePicker({
                   shown[active] ? `${id}-${shown[active].id}` : undefined
                 }
                 aria-label="Chercher un modèle"
-                placeholder="Chercher un modèle…"
+                placeholder="Chercher par nom ou identifiant…"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -244,7 +330,7 @@ function ModelChoicePicker({
                     setActive((a) => (a + step + shown.length) % shown.length);
                   } else if (e.key === "Enter") {
                     e.preventDefault();
-                    if (shown[active]) choose(shown[active]);
+                    if (shown[active]) pick(shown[active].id);
                   }
                 }}
               />
@@ -257,10 +343,11 @@ function ModelChoicePicker({
                     aria-selected={m.id === current?.id}
                     data-active={i === active || undefined}
                     onPointerEnter={() => setActive(i)}
-                    onClick={() => choose(m)}
+                    onClick={() => pick(m.id)}
                   >
                     <ProviderLogo model={m.id} />
-                    <span>{m.displayName}</span>
+                    <span className="model-name">{m.displayName}</span>
+                    <code className="model-id">{m.id}</code>
                     {m.isDefault && <small>par défaut</small>}
                     {m.id === current?.id && (
                       <Check size={14} aria-hidden="true" />
@@ -271,59 +358,26 @@ function ModelChoicePicker({
                   <li className="model-note">Aucun modèle trouvé.</li>
                 )}
               </ul>
-              {current && !draft && (
-                <div className="model-tuning">
-                  <Choices
-                    legend="Réflexion"
-                    value={choice.effort ?? ""}
-                    options={[
-                      [
-                        "",
-                        `Par défaut (${effortNames[current.defaultEffort] ?? current.defaultEffort})`,
-                      ],
-                      ...current.efforts.map(
-                        (e) => [e, effortNames[e] ?? e] as const,
-                      ),
-                    ]}
-                    onChange={(effort) =>
-                      configure(current, effort || null, choice.speed)
-                    }
-                  />
-                  {current.speeds.some((s) => s.id !== "standard") && (
-                    <Choices
-                      legend="Vitesse"
-                      value={choice.speed}
-                      options={[
-                        ["standard", "Standard"],
-                        ...current.speeds
-                          .filter((s) => s.id !== "standard")
-                          .map((s) => [s.id, s.name] as const),
-                      ]}
-                      onChange={(speed) =>
-                        configure(current, choice.effort, speed)
-                      }
-                    />
-                  )}
-                </div>
-              )}
             </>
           )}
-          {feedback}
         </div>
       )}
     </div>
   );
 }
 
-function Choices({
+function Levels({
   legend,
   value,
   options,
+  fallback,
   onChange,
 }: {
   legend: string;
   value: string;
-  options: readonly (readonly [string, string])[];
+  options: readonly Level[];
+  /** The level the model applies when none is chosen. Offered first, as the empty value. */
+  fallback?: string;
   onChange: (value: string) => void;
 }) {
   const name = useId();
@@ -331,16 +385,34 @@ function Choices({
     <fieldset className="model-choices">
       <legend>{legend}</legend>
       <div>
-        {options.map(([id, text]) => (
-          <label key={id}>
+        {fallback !== undefined && (
+          <label title="Suit le niveau par défaut du modèle">
+            <input
+              type="radio"
+              name={name}
+              value=""
+              aria-label={`Par défaut (${fallback})`}
+              checked={value === ""}
+              onChange={() => onChange("")}
+            />
+            <span>Par défaut</span>
+            <small>
+              <code>{fallback}</code>
+            </small>
+          </label>
+        )}
+        {options.map(({ value: id, token, gloss, hint }) => (
+          <label key={id} title={hint}>
             <input
               type="radio"
               name={name}
               value={id}
+              aria-label={gloss ? `${token} (${gloss})` : token}
               checked={value === id}
               onChange={() => onChange(id)}
             />
-            {text}
+            <code>{token}</code>
+            {gloss && <small>{gloss}</small>}
           </label>
         ))}
       </div>

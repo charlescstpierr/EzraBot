@@ -178,9 +178,11 @@ test("le modèle choisi dans la feuille du personnage reste enregistré", async 
     speed: "standard",
   });
 
-  await trigger.click();
-  await picker.getByText("Poussée", { exact: true }).click();
-  await expect(picker.getByRole("radio", { name: "Poussée" })).toBeChecked();
+  const high = sheet
+    .getByRole("group", { name: "Réflexion" })
+    .getByRole("radio", { name: "high (Poussée)", exact: true });
+  await sheet.locator('label:has(input[value="high"])').click();
+  await expect(high).toBeChecked();
   expect(configures.at(-1)).toMatchObject({
     model: "fake-sol",
     effort: "high",
