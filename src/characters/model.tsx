@@ -123,11 +123,24 @@ function ChoiceSettings({
   locked?: boolean;
   feedback?: React.ReactNode;
 }) {
+  const focusedControl = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (locked) return;
+    const control = focusedControl.current;
+    focusedControl.current = null;
+    if (control?.isConnected && document.activeElement === document.body)
+      control.focus();
+  }, [locked]);
   const engine = port.view.engine;
   const models = engine.state === "ready" ? engine.models : [];
   const current = chosenModel(models, choice.model);
   return (
-    <div className="model-settings">
+    <div
+      className="model-settings"
+      onFocus={(e) => {
+        focusedControl.current = e.target;
+      }}
+    >
       <ModelMenu
         disabled={locked}
         name={name}
@@ -229,8 +242,7 @@ function ModelMenu({
     [query, setQuery] = useState(""),
     [active, setActive] = useState(0);
   const trigger = useRef<HTMLButtonElement>(null),
-    panel = useRef<HTMLDivElement>(null),
-    blurredByLock = useRef(false);
+    panel = useRef<HTMLDivElement>(null);
   const id = useId();
   const models = engine.state === "ready" ? engine.models : [];
   const shown = models.filter((m) => matchesModel(m, query));
@@ -244,11 +256,6 @@ function ModelMenu({
     close(true);
     onPick(model);
   }
-  useLayoutEffect(() => {
-    if (disabled || !blurredByLock.current) return;
-    blurredByLock.current = false;
-    if (document.activeElement === document.body) trigger.current?.focus();
-  }, [disabled]);
   useEffect(() => {
     if (engine.state !== "ready") void fetch("/api/catalog").catch(() => {});
   }, [open, engine.state]);
@@ -283,9 +290,6 @@ function ModelMenu({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Modèle de ${name} : ${label}${identified ? ` (${current.id})` : ""}`}
-        onBlur={(e) => {
-          if (e.currentTarget.disabled) blurredByLock.current = true;
-        }}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
         <ProviderLogo model={modelId} />
