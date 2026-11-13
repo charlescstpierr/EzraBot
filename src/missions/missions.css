@@ -2,7 +2,7 @@
   width: min(100%, 1000px);
   margin: auto;
   padding: 28px;
-  color: #171717;
+  color: var(--text-1);
 }
 .missions-page header {
   display: flex;
@@ -26,10 +26,10 @@
 }
 .missions-page button,
 .missions-proposal button {
-  border: 1px solid #bcbcbc;
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
-  background: #fff;
-  color: #171717;
+  background: var(--surface);
+  color: var(--text-1);
   padding: 10px 14px;
   cursor: pointer;
 }
@@ -44,10 +44,10 @@
 }
 .missions-card,
 .missions-proposal {
-  border: 1px solid #dedede;
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 20px;
-  background: #fff;
+  background: var(--surface);
   margin: 16px 0;
 }
 .missions-list .missions-card {
@@ -84,9 +84,9 @@
 .missions-form textarea,
 .missions-form select {
   font: inherit;
-  color: #171717;
-  background: #fff;
-  border: 1px solid #bcbcbc;
+  color: var(--text-1);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 11px;
   width: 100%;
@@ -113,12 +113,12 @@
 }
 .missions-budget {
   font-size: 13px;
-  border-block: 1px solid #eee;
+  border-block: 1px solid var(--border);
 }
 .missions-page pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  background: #f6f6f6;
+  background: var(--field);
   padding: 12px;
   border-radius: 8px;
   max-height: 450px;
@@ -132,16 +132,16 @@
   line-height: 1.6;
 }
 .missions-error {
-  border-left: 3px solid #222;
+  border-left: 3px solid var(--border-strong);
   padding-left: 14px;
 }
 .missions-attempt {
   padding: 14px;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--border);
 }
 .missions-eyebrow {
   font-size: 13px;
-  color: #555;
+  color: var(--text-2);
 }
 .missions-evidence {
   font-size: 14px;

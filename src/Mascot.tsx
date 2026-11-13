@@ -1,124 +1,173 @@
 import { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
+import "./mascot.css";
+
+export type MascotActivity = "idle" | "thinking" | "speaking";
+
 export function Mascot({
   shape = "sprout",
   color = "#8de343",
   size = 40,
-  animated = false,
 }: {
   shape?: string;
   color?: string;
   size?: number;
-  animated?: boolean;
 }) {
-  const [reduced, setReduced] = useState(
-    () => matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
-  useEffect(() => {
-    const mq = matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduced(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  const host = useRef<HTMLSpanElement>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (!animated || !host.current || reduced) return;
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    } catch {
-      return;
-    }
-    const node = host.current;
-    let disposed = false,
-      frame = 0;
-    const scene = new THREE.Scene();
-    const camera = new THREE.OrthographicCamera(-50, 50, 45, -45, 0.1, 100);
-    camera.position.z = 10;
-    renderer.setSize(size, size * 0.9);
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    node.appendChild(renderer.domElement);
-    const material = new THREE.MeshBasicMaterial({
-      transparent: true,
-      depthWrite: false,
-    });
-    const geometry = new THREE.PlaneGeometry(100, 90);
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-    let texture: THREE.Texture | undefined;
-    const controller = new AbortController();
-    fetch("/assets/symbols.svg", { signal: controller.signal })
-      .then((r) => r.text())
-      .then((raw) => {
-        const doc = new DOMParser().parseFromString(raw, "image/svg+xml");
-        const symbol = doc.getElementById(`profile-${shape}`);
-        if (!symbol) throw Error("Mascotte inconnue");
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="360" viewBox="0 0 100 90">${symbol.innerHTML.replace(/var\(--bot-color,[^)]+\)/g, color)}</svg>`;
-        const url =
-          "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-        new THREE.TextureLoader().load(
-          url,
-          (t) => {
-            if (disposed) {
-              t.dispose();
-              return;
-            }
-            texture = t;
-            t.colorSpace = THREE.SRGBColorSpace;
-            material.map = t;
-            material.needsUpdate = true;
-            setReady(true);
-            draw();
-          },
-          undefined,
-          () => {},
-        );
-      })
-      .catch(() => {});
-    function draw() {
-      if (disposed || document.hidden) return;
-      const t = performance.now() / 1000;
-      mesh.rotation.z = Math.sin(t * 0.8) * 0.025;
-      mesh.scale.setScalar(1 + Math.sin(t * 1.6) * 0.012);
-      renderer.render(scene, camera);
-      frame = requestAnimationFrame(draw);
-    }
-    const visibility = () => {
-      cancelAnimationFrame(frame);
-      if (!document.hidden && texture) draw();
-    };
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      disposed = true;
-      controller.abort();
-      cancelAnimationFrame(frame);
-      document.removeEventListener("visibilitychange", visibility);
-      geometry.dispose();
-      material.dispose();
-      texture?.dispose();
-      renderer.dispose();
-      renderer.domElement.remove();
-      setReady(false);
-    };
-  }, [shape, color, size, animated, reduced]);
   return (
     <span
-      ref={host}
       className="mascot"
       style={{ width: size, height: size * 0.9 }}
       aria-hidden="true"
     >
       <svg
         viewBox="0 0 100 90"
-        style={
-          {
-            "--bot-color": color,
-            visibility: ready ? "hidden" : "visible",
-          } as React.CSSProperties
-        }
+        style={{ "--bot-color": color } as React.CSSProperties}
       >
         <use href={`/assets/symbols.svg#profile-${shape}`} />
+      </svg>
+    </span>
+  );
+}
+
+type Parts = { body: string; eyes: string };
+let sheet: Promise<Document | null> | null = null;
+const cache = new Map<string, Parts | null>();
+
+function parts(doc: Document | null, shape: string): Parts | null {
+  if (cache.has(shape)) return cache.get(shape)!;
+  const children = Array.from(
+    doc?.getElementById(`profile-${shape}`)?.children ?? [],
+  );
+  const eyes = children.find(
+    (node) => node.getAttribute("data-part") === "eyes",
+  );
+  const serializer = new XMLSerializer();
+  const result =
+    eyes && children.length
+      ? {
+          body: children
+            .filter((node) => node !== eyes)
+            .map((n) => serializer.serializeToString(n))
+            .join(""),
+          eyes: serializer.serializeToString(eyes),
+        }
+      : null;
+  cache.set(shape, result);
+  return result;
+}
+
+function useParts(shape: string): Parts | null {
+  const [found, setFound] = useState(() => cache.get(shape) ?? null);
+  useEffect(() => {
+    let live = true;
+    sheet ??= fetch("/assets/symbols.svg")
+      .then((r) => r.text())
+      .then((raw) => new DOMParser().parseFromString(raw, "image/svg+xml"))
+      .catch(() => null);
+    void sheet.then((doc) => live && setFound(parts(doc, shape)));
+    return () => {
+      live = false;
+    };
+  }, [shape]);
+  return found;
+}
+
+const REACH = 240;
+const TRAVEL = 3.2;
+
+export function LiveMascot({
+  shape,
+  color,
+  size = 34,
+  activity = "idle",
+}: {
+  shape: string;
+  color: string;
+  size?: number;
+  activity?: MascotActivity;
+}) {
+  const found = useParts(shape);
+  const host = useRef<HTMLSpanElement>(null);
+  const gaze = useRef<SVGGElement>(null);
+  useEffect(() => {
+    const still = matchMedia("(prefers-reduced-motion: reduce)");
+    const fine = matchMedia("(hover: hover) and (pointer: fine)");
+    let frame = 0;
+    let at: { x: number; y: number } | null = null;
+    const look = () => {
+      frame = 0;
+      const node = host.current;
+      if (!node || !gaze.current) return;
+      let x = 0,
+        y = 0;
+      if (at) {
+        const box = node.getBoundingClientRect();
+        const dx = at.x - (box.left + box.width / 2);
+        const dy = at.y - (box.top + box.height / 2);
+        const distance = Math.hypot(dx, dy) || 1;
+        const pull = (TRAVEL * Math.min(1, distance / REACH)) / distance;
+        x = dx * pull;
+        y = dy * pull;
+      }
+      gaze.current.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`;
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(look);
+    };
+    const move = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      at = { x: e.clientX, y: e.clientY };
+      schedule();
+    };
+    const leave = (e: PointerEvent) => {
+      if (e.relatedTarget) return;
+      at = null;
+      schedule();
+    };
+    const sync = () => {
+      window.removeEventListener("pointermove", move);
+      document.documentElement.removeEventListener("pointerleave", leave);
+      at = null;
+      schedule();
+      if (still.matches || !fine.matches) return;
+      window.addEventListener("pointermove", move, { passive: true });
+      document.documentElement.addEventListener("pointerleave", leave);
+    };
+    sync();
+    still.addEventListener("change", sync);
+    fine.addEventListener("change", sync);
+    return () => {
+      cancelAnimationFrame(frame);
+      still.removeEventListener("change", sync);
+      fine.removeEventListener("change", sync);
+      window.removeEventListener("pointermove", move);
+      document.documentElement.removeEventListener("pointerleave", leave);
+    };
+  }, [found]);
+  return (
+    <span
+      ref={host}
+      className="mascot mascot-live"
+      data-activity={activity}
+      style={{ width: size, height: size * 0.9 }}
+      aria-hidden="true"
+    >
+      <svg
+        viewBox="0 0 100 90"
+        style={{ "--bot-color": color } as React.CSSProperties}
+      >
+        {found ? (
+          <g className="mascot-figure">
+            <g dangerouslySetInnerHTML={{ __html: found.body }} />
+            <g ref={gaze} className="mascot-gaze">
+              <g
+                className="mascot-eyes"
+                dangerouslySetInnerHTML={{ __html: found.eyes }}
+              />
+            </g>
+          </g>
+        ) : (
+          <use href={`/assets/symbols.svg#profile-${shape}`} />
+        )}
       </svg>
     </span>
   );

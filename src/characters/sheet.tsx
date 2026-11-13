@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import catalogue from "../../server/assets/mascots.json";
 import {
   LIMITS,
+  STANDARD_SPEED,
   type BotChoice,
   type BotView,
 } from "../../server/src/protocol";
@@ -75,7 +76,11 @@ export function BotSheet({
         }
       : freshDraft(port.view.bots),
   );
-  const [model, setModel] = useState<BotChoice["model"]>(null);
+  const [choice, setChoice] = useState<BotChoice>({
+    model: null,
+    effort: null,
+    speed: STANDARD_SPEED,
+  });
   const [look, setLook] = useState(false);
   const action = useAction(port);
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
@@ -105,12 +110,7 @@ export function BotSheet({
           e.preventDefault();
           if (!bot)
             void action.perform(
-              {
-                type: "bot.create",
-                requestId: uid(),
-                ...draft,
-                ...(model === null ? {} : { model }),
-              },
+              { type: "bot.create", requestId: uid(), ...draft, ...choice },
               (r) => {
                 if (r.result.kind === "bot") onCreated(r.result.botId);
               },
@@ -159,6 +159,18 @@ export function BotSheet({
               />
             </div>
           </div>
+          <div className="bot-sheet-model">
+            <span aria-hidden="true">Modèle</span>
+            {bot ? (
+              <ModelPicker port={port} bot={bot} />
+            ) : (
+              <DraftModelPicker
+                port={port}
+                choice={choice}
+                onChange={setChoice}
+              />
+            )}
+          </div>
           <textarea
             className="bot-sheet-text"
             aria-label="Personnalité et instructions"
@@ -187,11 +199,6 @@ export function BotSheet({
               />
               Apparence
             </button>
-            {bot ? (
-              <ModelPicker port={port} bot={bot} />
-            ) : (
-              <DraftModelPicker port={port} model={model} onChange={setModel} />
-            )}
           </div>
           {look && (
             <div className="bot-look">

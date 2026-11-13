@@ -1,9 +1,9 @@
 .agent-outbox {
   margin: 12px 24px 0;
   padding: 12px 14px;
-  background: #f7f7f7;
-  color: #9c5528;
-  border: 1px solid #dadada;
+  background: var(--field);
+  color: var(--warn);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 12px;
   display: grid;

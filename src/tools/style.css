@@ -3,7 +3,7 @@
   overflow-wrap: anywhere;
 }
 .modal .ez-tools {
-  border-top: 1px solid #e9e9e9;
+  border-top: 1px solid var(--border);
   margin-top: 22px;
   padding-top: 6px;
   width: 100%;
@@ -20,14 +20,14 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 14px;
-  border: 1px solid #e9e9e9;
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 13px;
-  color: #5f5f5f;
+  color: var(--text-2);
 }
 .ez-tools-list li strong {
-  color: #2d2d2d;
+  color: var(--text-1);
 }
 .ez-tools-list li button {
   margin-left: auto;
@@ -36,7 +36,7 @@
   display: block;
   font-size: 12px;
   line-height: 1.6;
-  color: #838383;
+  color: var(--text-3);
 }
 .ez-tools fieldset {
   border: 0;
@@ -61,9 +61,9 @@
   flex: none;
 }
 .ez-tools-card {
-  border: 1px solid #d7d7d7;
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: #fcfcfc;
+  background: var(--surface);
   padding: 14px 16px;
   margin-top: 12px;
   max-width: 640px;
@@ -72,8 +72,8 @@
 .ez-tools-card[data-state="unknown"],
 .ez-tools-card[data-state="failed"],
 .ez-tools-card[data-state="blocked"] {
-  border-color: #e0b98a;
-  background: #fbfbfb;
+  border-color: var(--warn);
+  background: var(--surface);
 }
 .ez-tools-card dl {
   display: grid;
@@ -88,20 +88,20 @@
 .ez-tools-card dt {
   width: 72px;
   flex: none;
-  color: #838383;
+  color: var(--text-3);
 }
 .ez-tools-card dd {
   margin: 0;
-  color: #2d2d2d;
+  color: var(--text-1);
   font-weight: 550;
 }
 .ez-tools-arguments-title {
   font-size: 12px;
-  color: #838383;
+  color: var(--text-3);
   margin: 8px 0 4px;
 }
 .ez-tools-arguments {
-  background: #f3f3f3;
+  background: var(--field);
   border-radius: 9px;
   padding: 10px 12px;
   font-size: 12px;
@@ -114,13 +114,13 @@
 .ez-tools-outcome {
   font-size: 13px;
   margin: 10px 0;
-  color: #464646;
+  color: var(--text-1);
 }
 .ez-tools-card small,
 .ez-tools-card details {
   display: block;
   font-size: 12px;
-  color: #838383;
+  color: var(--text-3);
   margin-top: 8px;
 }
 .ez-chat-services {
@@ -128,7 +128,7 @@
   align-items: flex-start;
   gap: 8px;
   font-size: 12px;
-  color: #5f5f5f;
+  color: var(--text-2);
   margin: 6px 4px 0;
 }
 .ez-chat-services input {
@@ -140,7 +140,7 @@
 .ez-tools summary {
   cursor: pointer;
   font-size: 13px;
-  color: #5f5f5f;
+  color: var(--text-2);
 }
 .ez-tools select,
 .ez-tools input {

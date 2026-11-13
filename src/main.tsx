@@ -35,13 +35,12 @@ import { Markdown } from "./Markdown";
 import { ChatPage } from "./chat";
 import { storageWrite } from "./chat/pending";
 import { SearchBox } from "./search";
-import { TaskCard, DocumentPanel } from "./documents";
+import { TaskCard, DocumentPanel, ReplyQueue } from "./documents";
 import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
 import {
   BotSheet,
   BotSwitcher,
-  ModelPicker,
   CharacterGallery,
   CharacterPanel,
 } from "./characters";
@@ -403,14 +402,7 @@ function App() {
               <PanelLeft size={20} />
             </button>
             {port && selectedBot && route.page === "chat" ? (
-              <>
-                <BotSwitcher port={port} bot={selectedBot} />
-                <ModelPicker
-                  key={`${port.view.spaceId}:${selectedBot.id}`}
-                  port={port}
-                  bot={selectedBot}
-                />
-              </>
+              <BotSwitcher port={port} bot={selectedBot} />
             ) : (
               <strong>
                 {route.page === "document"
@@ -482,6 +474,7 @@ function App() {
             focusMessageId={route.messageId}
             drafts={drafts}
             slots={{
+              replies: () => <ReplyQueue port={port} botId={route.botId} />,
               task: (message) => <TaskCard port={port} message={message} />,
               mission: (message) => (
                 <MissionProposal port={port} message={message} />

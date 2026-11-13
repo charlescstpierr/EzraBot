@@ -4,7 +4,7 @@ import { createRunner, getAppView } from "../../src/api";
 import type { PcView } from "../../server/src/tools-protocol";
 import type { Port, Route } from "../../src/port";
 import { openDrafts } from "../../server/web/drafts";
-import { DocumentPanel, TaskCard } from "../../src/documents";
+import { DocumentPanel, TaskCard, ReplyQueue } from "../../src/documents";
 
 const routeOf = (): Route => {
   const query = new URLSearchParams(location.search);
@@ -84,6 +84,7 @@ function Harness() {
           <TaskCard port={port} message={message} />
         </article>
       ))}
+      <ReplyQueue port={port} botId="mino" />
     </main>
   );
 }

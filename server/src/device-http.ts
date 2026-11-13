@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createBrowserStatic } from './browser-static.js';
 import type { BrowserAdmission } from './web-admission.js';
 import { DeviceError, type Devices } from './devices.js';
-import { resolveChoice } from './domain.js';
+import { requestedChoice, resolveChoice } from './domain.js';
 import type { Engine } from './engine.js';
 import { CommandSchema, LIMITS, type AppView } from './protocol.js';
 import { MobileSnapshotSchema } from './mobile-protocol.js';
@@ -175,10 +175,11 @@ export function createDeviceHandler(options: Options) {
       if (!parsed.success) throw new DeviceError(422, 'invalid_command', 'Cette commande est invalide. ' + parsed.error.issues.slice(0, 3).map(issue => `${issue.path.join('.')} : ${issue.message}`).join(' ; '));
       const command = parsed.data;
       if (command.type === 'storage.purge' || command.type === 'bot.select') throw new DeviceError(403, 'command_refused', 'Cette commande se fait sur l’ordinateur.');
-      if (command.type === 'bot.configure' || (command.type === 'bot.create' && command.model != null)) {
+      const choice = options.store.knows(command.requestId) ? null : requestedChoice(command);
+      if (choice) {
         const catalog = await options.engine.catalog();
         if (catalog.state !== 'ready') throw new DeviceError(409, 'choice_unavailable', 'Le catalogue est indisponible.');
-        const result = resolveChoice(catalog.models, command.type === 'bot.configure' ? command : { model: command.model ?? null, effort: null, speed: 'standard' });
+        const result = resolveChoice(catalog.models, choice);
         if (!result.ok) throw new DeviceError(422, 'choice_unavailable', result.message);
       }
       options.devices.authenticate(token, space);

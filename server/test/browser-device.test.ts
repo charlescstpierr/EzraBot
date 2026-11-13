@@ -110,7 +110,7 @@ async function fixture() {
     assert.ok(device);
     devices.approve(device.pairingId, device.id, device.confirmCode);
   }
-  return { dir, staticDir, call, web, admin, claim, approve, url, localUrl, store,
+  return { dir, staticDir, call, web, admin, claim, approve, url, localUrl, store, engine,
     get devices() { return devices; }, get admission() { return admission; },
     advance(ms: number) { now += ms; },
     async restart() {
@@ -327,5 +327,31 @@ test('paired creation refuses an unavailable explicit model without creating a b
     assert.equal((await f.call('/m/commands', command, f.web(cookie))).status, 200);
     assert.equal(f.store.view().bots.length, count + 1);
     assert.deepEqual(f.store.view().bots.find(b => b.name === command.name)?.choice, { model: null, effort: null, speed: 'standard' });
+  } finally { await f.close(); }
+});
+
+test('paired creation checks a level and a speed against the catalogue even without a model, and replays with the catalogue gone', async () => {
+  const f = await fixture();
+  try {
+    const { cookie, session } = await f.claim();
+    f.approve(session.session.deviceId);
+    const offline = f.engine.catalog;
+    f.engine.catalog = async () => ({ state: 'ready', account: 'chatgpt', models: [{ id: 'fake', displayName: 'Fake', isDefault: true, efforts: ['low', 'max'], defaultEffort: 'low', speeds: [{ id: 'priority', name: 'Fast', description: '' }] }] });
+    const command = { type: 'bot.create', requestId: 'device-create-choice', name: 'Mobile réglé', title: '', shape: 'sprout', color: '#8de343' };
+    const count = f.store.view().bots.length;
+    for (const choice of [{ effort: 'ultra' }, { speed: 'turbo' }, { model: 'fake', effort: 'high' }]) {
+      const refused = await f.call('/m/commands', { ...command, ...choice }, f.web(cookie));
+      assert.equal(refused.status, 422, JSON.stringify(choice));
+    }
+    assert.equal(f.store.view().bots.length, count);
+    const chosen = { ...command, effort: 'max', speed: 'priority' };
+    assert.equal((await f.call('/m/commands', chosen, f.web(cookie))).status, 200);
+    assert.deepEqual(f.store.view().bots.find(b => b.name === command.name)?.choice, { model: null, effort: 'max', speed: 'priority' });
+    f.engine.catalog = offline;
+    const replay = await f.call('/m/commands', chosen, f.web(cookie));
+    assert.equal(replay.status, 200);
+    assert.equal(z.object({ replayed: z.boolean() }).parse(replay.body).replayed, true);
+    assert.equal((await f.call('/m/commands', { ...chosen, effort: 'low' }, f.web(cookie))).status, 409);
+    assert.equal(f.store.view().bots.length, count + 1);
   } finally { await f.close(); }
 });
