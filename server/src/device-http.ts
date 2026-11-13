@@ -170,10 +170,10 @@ export function createDeviceHandler(options: Options) {
       if (!parsed.success) throw new DeviceError(422, 'invalid_command', 'Cette commande est invalide.');
       const command = parsed.data;
       if (command.type === 'storage.purge' || command.type === 'bot.select') throw new DeviceError(403, 'command_refused', 'Cette commande se fait sur l’ordinateur.');
-      if (command.type === 'bot.configure') {
+      if (command.type === 'bot.configure' || (command.type === 'bot.create' && command.model != null)) {
         const catalog = await options.engine.catalog();
         if (catalog.state !== 'ready') throw new DeviceError(409, 'choice_unavailable', 'Le catalogue est indisponible.');
-        const result = resolveChoice(catalog.models, command);
+        const result = resolveChoice(catalog.models, command.type === 'bot.configure' ? command : { model: command.model ?? null, effort: null, speed: 'standard' });
         if (!result.ok) throw new DeviceError(422, 'choice_unavailable', result.message);
       }
       options.devices.authenticate(token, space);

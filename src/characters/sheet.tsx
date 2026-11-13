@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import catalogue from "../../server/assets/mascots.json";
-import { LIMITS, type BotView } from "../../server/src/protocol";
+import {
+  LIMITS,
+  type BotChoice,
+  type BotView,
+} from "../../server/src/protocol";
 import type { BotSheetTarget, Port } from "../port";
 import { uid } from "../api";
 import { Mascot } from "../Mascot";
 import { Sheet } from "../Sheet";
 import { useAction } from "./action";
-import { ModelPicker } from "./model";
+import { DraftModelPicker, ModelPicker } from "./model";
 
 const colorNames: Record<string, string> = {
   "#f3ecd7": "Crème",
@@ -71,6 +75,7 @@ export function BotSheet({
         }
       : freshDraft(port.view.bots),
   );
+  const [model, setModel] = useState<BotChoice["model"]>(null);
   const [look, setLook] = useState(false);
   const action = useAction(port);
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
@@ -100,7 +105,12 @@ export function BotSheet({
           e.preventDefault();
           if (!bot)
             void action.perform(
-              { type: "bot.create", requestId: uid(), ...draft },
+              {
+                type: "bot.create",
+                requestId: uid(),
+                ...draft,
+                ...(model === null ? {} : { model }),
+              },
               (r) => {
                 if (r.result.kind === "bot") onCreated(r.result.botId);
               },
@@ -177,7 +187,11 @@ export function BotSheet({
               />
               Apparence
             </button>
-            {bot && <ModelPicker port={port} bot={bot} />}
+            {bot ? (
+              <ModelPicker port={port} bot={bot} />
+            ) : (
+              <DraftModelPicker port={port} model={model} onChange={setModel} />
+            )}
           </div>
           {look && (
             <div className="bot-look">
