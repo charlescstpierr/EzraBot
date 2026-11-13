@@ -17,6 +17,12 @@ const root = resolve("server"),
   data = mkdtempSync(join(tmpdir(), "mimobot-react-qa-"));
 const port = Number(process.env.MINO_QA_PORT ?? 4399);
 const withTools = process.env.MINO_QA_TOOLS === "1";
+// The fake App Server also lists the models read from the installed engine, so the pickers show real identifiers and levels.
+if (withTools)
+  process.env.MINO_TEST_CATALOG = join(
+    root,
+    "test/fixtures/engine-catalogue.json",
+  );
 const store = openStore({
   path: join(data, "mino.sqlite"),
   mascots: loadMascots(join(root, "assets/mascots.json")),
