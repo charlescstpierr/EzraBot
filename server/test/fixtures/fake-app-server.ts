@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 // Test-only stand-in for `codex app-server`, driven by a scenario name.
@@ -29,7 +29,16 @@ const fragileReports = new Set<string>();
 const MODELS = [
   { id: 'fake-sol', inputModalities: scenario === 'no-images' ? ['text'] : ['text', 'image'], displayName: 'Fake Sol', hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'low', serviceTiers: [{ id: 'priority', name: 'Fast', description: '2x' }] },
   { id: 'fake-hidden', displayName: 'Hidden', hidden: true, isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low', serviceTiers: [] },
+  ...mirroredModels(),
 ];
+
+function mirroredModels(): Record<string, unknown>[] {
+  const path = process.env.MINO_TEST_CATALOG;
+  if (!path) return [];
+  const snapshot: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  const models = isRecord(snapshot) && Array.isArray(snapshot.models) ? snapshot.models : [];
+  return models.filter(isRecord).map(model => ({ ...model, isDefault: false }));
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -163,8 +172,9 @@ function startTurn(params: Record<string, unknown>) {
   const turnId = `turn-${Date.now()}-${serverRequestId++}`;
   activeTurn = { threadId, turnId };
   const first = Array.isArray(params.input) && isRecord(params.input[0]) ? String(params.input[0].text) : '';
-  if (scenario === 'vision-exact') {
-    setTimeout(() => {agentMessage(threadId, turnId, JSON.stringify({reply: JSON.stringify(params.input), deliverable: null})); complete(threadId, turnId, 'completed');}, 20);
+  if (scenario === 'vision-exact' || scenario === 'choice-exact') {
+    const received = scenario === 'vision-exact' ? params.input : { model: params.model, effort: params.effort, serviceTierForTurn: params.serviceTierForTurn };
+    setTimeout(() => {agentMessage(threadId, turnId, JSON.stringify({reply: JSON.stringify(received), deliverable: null})); complete(threadId, turnId, 'completed');}, 20);
     return {turn:{id:turnId,status:'inProgress',items:[]}};
   }
   const withTools = TOOL_SCENARIOS.has(scenario) && (threadTools.get(threadId)?.length ?? 0) > 0;

@@ -100,6 +100,8 @@ export type Store = {
   /** Connected services: accounts, rights, proposals and receipts, in this same database. */
   readonly tools: ToolLedger;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
+  /** True once a command with this identity is in the journal: its replay or its conflict is then the journal's to answer. */
+  knows(requestId: string): boolean;
   image(id: string): { mimeType: string; bytes: Buffer } | null;
   view(): StoreView;
   diagnostics(): StoreDiagnostics;
@@ -1122,8 +1124,9 @@ export function openStore(options: StoreOptions): Store {
         const botId = newId('b');
         run(
           `INSERT INTO bots(id, position, name, title, shape, color, default_shape, default_color, model, effort, speed, instructions, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
-          botId, position, command.name, command.title, command.shape, command.color, command.shape, defaultColor, command.model ?? null, STANDARD_SPEED, command.instructions ?? '', now(),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          botId, position, command.name, command.title, command.shape, command.color, command.shape, defaultColor,
+          command.model ?? null, command.effort ?? null, command.speed ?? STANDARD_SPEED, command.instructions ?? '', now(),
         );
         return { kind: 'bot', botId };
       }
@@ -2107,6 +2110,7 @@ export function openStore(options: StoreOptions): Store {
     get rev() { return rev; },
     tools,
     dispatch,
+    knows: requestId => get('SELECT 1 FROM commands WHERE request_id = ?', requestId) !== undefined,
     view,
     diagnostics,
     claimNextJob: () => claimNext('chat'),

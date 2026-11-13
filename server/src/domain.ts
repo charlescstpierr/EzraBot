@@ -8,6 +8,7 @@ import {
   STANDARD_SPEED,
   type BotChoice,
   type CatalogModel,
+  type Command,
   type EngineReply,
   type ResolvedChoice,
   type UsageSnapshot,
@@ -84,6 +85,14 @@ export function resolveChoice(models: readonly CatalogModel[], choice: BotChoice
     return { ok: false, message: `La vitesse choisie n’est pas proposée pour ${model.displayName}.` };
   }
   return { ok: true, choice: { model: model.id, effort, speed: choice.speed } };
+}
+
+/** The setting a command asks the catalogue to honour. Null for a creation that leaves model, level and speed to the engine's defaults. */
+export function requestedChoice(command: Command): BotChoice | null {
+  if (command.type === 'bot.configure') return { model: command.model, effort: command.effort, speed: command.speed };
+  if (command.type !== 'bot.create') return null;
+  const choice = { model: command.model ?? null, effort: command.effort ?? null, speed: command.speed ?? STANDARD_SPEED };
+  return choice.model === null && choice.effort === null && choice.speed === STANDARD_SPEED ? null : choice;
 }
 
 export const ENGINE_ERRORS = {

@@ -164,6 +164,8 @@ export const CommandSchema = z.discriminatedUnion('type', [
     shape: id,
     color,
     model: token.nullable().optional(),
+    effort: token.nullable().optional(),
+    speed: token.optional(),
     instructions: z.string().trim().max(LIMITS.botInstructionsChars).optional(),
   }),
   z.strictObject({
