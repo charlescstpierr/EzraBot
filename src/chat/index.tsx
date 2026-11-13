@@ -149,12 +149,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
       w.versions.length === 0 &&
       (w.state === "pending" || w.state === "running"),
   );
-  const lastVoice = messages
-    .filter((m) => m.role === "assistant")
-    .at(-1)?.botId;
-  const presence =
-    port.view.bots.find((b) => b.id === lastVoice) ??
-    port.view.bots.find((b) => b.id === botId);
+  const lastReply = messages.filter((m) => m.role === "assistant").at(-1);
 
   function change(next: PromptContent) {
     current.current = next;
@@ -514,25 +509,53 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
               {m.role === "assistant" && m.botId !== botId && (
                 <span className="ez-chat-guest">{name}</span>
               )}
-              <div className="ez-chat-bubble">
-                <Markdown text={m.text} />
-                {!!m.attachments.length && (
-                  <ul className="ez-chat-files">
-                    {m.attachments.map((f, i) => (
-                      <li key={i}>
-                        {f.kind === "image" && (
-                          <img
-                            className="ez-attachment-preview"
-                            src={`/api/attachments/${f.id}`}
-                            alt={f.name}
-                          />
-                        )}
-                        {f.relativePath ?? f.name} ·{" "}
-                        {f.kind === "image" ? "Image" : `${f.chars} caractères`}
-                      </li>
-                    ))}
-                  </ul>
+              <div
+                className={
+                  m.role === "assistant"
+                    ? "ez-chat-incoming"
+                    : "ez-chat-outgoing"
+                }
+              >
+                {m.role === "assistant" && author && (
+                  <div className="ez-chat-avatar">
+                    {m.id === lastReply?.id && !replying ? (
+                      <LiveMascot
+                        shape={author.shape}
+                        color={author.color}
+                        size={36}
+                      />
+                    ) : messages[i + 1]?.role !== "assistant" ||
+                      messages[i + 1]?.botId !== m.botId ? (
+                      <Mascot
+                        shape={author.shape}
+                        color={author.color}
+                        size={36}
+                      />
+                    ) : null}
+                  </div>
                 )}
+                <div className="ez-chat-bubble">
+                  <Markdown text={m.text} />
+                  {!!m.attachments.length && (
+                    <ul className="ez-chat-files">
+                      {m.attachments.map((f, i) => (
+                        <li key={i}>
+                          {f.kind === "image" && (
+                            <img
+                              className="ez-attachment-preview"
+                              src={`/api/attachments/${f.id}`}
+                              alt={f.name}
+                            />
+                          )}
+                          {f.relativePath ?? f.name} ·{" "}
+                          {f.kind === "image"
+                            ? "Image"
+                            : `${f.chars} caractères`}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
               {slots.task(m)}
               {slots.mission(m)}
@@ -541,11 +564,6 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           );
         })}
         {slots.replies()}
-        {!!messages.length && !replying && presence && (
-          <div className="ez-chat-presence">
-            <LiveMascot shape={presence.shape} color={presence.color} />
-          </div>
-        )}
       </div>
       <div className="ez-chat-compose-area">
         {!atBottom && (

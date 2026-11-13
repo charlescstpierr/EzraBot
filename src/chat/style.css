@@ -72,7 +72,7 @@
 .ez-chat-user {
   align-items: flex-end;
 }
-.ez-chat-message > :not(.ez-chat-bubble, .ez-chat-when, .ez-chat-guest) {
+.ez-chat-message > :not(.ez-chat-when, .ez-chat-guest) {
   align-self: stretch;
 }
 .ez-chat-when {
@@ -82,7 +82,7 @@
   font-size: 12px;
 }
 .ez-chat-guest {
-  margin: 6px 0 4px 12px;
+  margin: 6px 0 4px 60px;
   color: var(--text-3);
   font-size: 12px;
   font-weight: 500;
@@ -95,7 +95,7 @@
   background: var(--bubble-bot);
   border: 1px solid var(--line);
 }
-.ez-chat-user > .ez-chat-bubble {
+.ez-chat-user .ez-chat-bubble {
   max-width: min(78%, 560px);
   background: var(--bubble-user);
 }
@@ -117,17 +117,42 @@
   overflow: auto;
   max-width: 100%;
 }
-.ez-chat-focused > .ez-chat-bubble {
+.ez-chat-focused .ez-chat-bubble {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 
-.ez-chat-reply {
+.ez-chat-incoming {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: end;
+  column-gap: 10px;
+  width: 100%;
+}
+.ez-chat-avatar {
+  grid-column: 1;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: flex-end;
+}
+.ez-chat-incoming > .ez-chat-bubble {
+  grid-column: 2;
+  max-width: min(100%, 620px);
+  min-width: 0;
+}
+.ez-chat-outgoing {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+.ez-chat-reply {
   margin: 2px 0 10px;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ez-chat-presence.ez-chat-reply-controls {
+  flex-wrap: wrap;
+  margin: 8px 0 6px 46px;
 }
 .ez-chat-partial {
   animation: ez-chat-arrive 160ms ease-out;
@@ -373,7 +398,7 @@
   .ez-chat-bubble {
     max-width: 88%;
   }
-  .ez-chat-user > .ez-chat-bubble {
+  .ez-chat-user .ez-chat-bubble {
     max-width: 84%;
   }
   .ez-chat-welcome {
