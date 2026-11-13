@@ -71,7 +71,7 @@ async function editSheet(page: Page, name: string) {
   await page.getByRole("menuitem", { name: `Modifier ${name}` }).click();
   return page.getByRole("dialog", { name: `Modifier ${name}`, exact: true });
 }
-/** Chooses a model through the search field, by its exact identifier. */
+
 async function chooseModel(sheet: Locator, model: Listed) {
   await sheet.getByRole("button", { name: /^Modèle de / }).click();
   await sheet
@@ -414,6 +414,97 @@ test("une réponse perdue rejoue la même création avec le même réglage, sans
   expect(await choiceOf(page, TOOLS, name)).toEqual({
     model: withoutUltra.id,
     effort: "max",
+    speed: "standard",
+  });
+});
+
+test("la modification attend la confirmation avant un autre réglage", async ({
+  page,
+}) => {
+  const name = uniqueName("Confirmation");
+  await page.goto(TOOLS);
+  await createByCommand(page, name, { model: withUltra.id });
+  await page.reload();
+  const sheet = await editSheet(page, name);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let received = () => {};
+  const started = new Promise<void>((resolve) => {
+    received = resolve;
+  });
+  await page.route(
+    "**/api/commands",
+    async (route) => {
+      if (route.request().postDataJSON()?.type !== "bot.configure")
+        return route.continue();
+      const response = await route.fetch();
+      received();
+      await held;
+      await route.fulfill({ response });
+    },
+    { times: 1 },
+  );
+  await chip(levels(sheet, "Réflexion"), "high").click();
+  await started;
+  try {
+    await expect
+      .soft(level(levels(sheet, "Vitesse"), "priority"))
+      .toBeDisabled({ timeout: 1000 });
+    await expect
+      .soft(sheet.getByRole("button", { name: /^Modèle de / }))
+      .toBeDisabled({ timeout: 1000 });
+  } finally {
+    release();
+  }
+  await expect(level(levels(sheet, "Réflexion"), "high")).toBeChecked();
+  await chip(levels(sheet, "Vitesse"), "priority").click();
+  await expect(level(levels(sheet, "Vitesse"), "priority")).toBeChecked();
+  expect(await choiceOf(page, TOOLS, name)).toEqual({
+    model: withUltra.id,
+    effort: "high",
+    speed: "priority",
+  });
+});
+
+test("un résultat inconnu fige aussi le modèle et réessaie le même réglage", async ({
+  page,
+}) => {
+  const name = uniqueName("Incertain");
+  await page.goto(TOOLS);
+  await createByCommand(page, name, { model: withUltra.id });
+  await page.reload();
+  const sent = choiceCommands(page);
+  const sheet = await editSheet(page, name);
+  let lost = false;
+  await page.route("**/api/commands", async (route) => {
+    if (!lost && route.request().postDataJSON()?.type === "bot.configure") {
+      lost = true;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  await chip(levels(sheet, "Réflexion"), "ultra").click();
+  const retry = sheet.getByRole("button", { name: "Réessayer la même action" });
+  await expect(retry).toBeVisible();
+  await expect(
+    sheet.getByRole("button", { name: /^Modèle de / }),
+  ).toBeDisabled();
+  await expect(level(levels(sheet, "Réflexion"), "max")).toBeDisabled();
+  await retry.click();
+  await expect(retry).toHaveCount(0);
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toEqual(sent[0]);
+  await chooseModel(sheet, withoutUltra);
+  await expect(
+    sheet.getByRole("button", { name: /^Modèle de / }),
+  ).toContainText(withoutUltra.id);
+  expect(sent).toHaveLength(3);
+  expect(sent[2].requestId).not.toBe(sent[0].requestId);
+  expect(await choiceOf(page, TOOLS, name)).toEqual({
+    model: withoutUltra.id,
+    effort: null,
     speed: "standard",
   });
 });

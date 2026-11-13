@@ -12,7 +12,6 @@ import { uid } from "../api";
 import { useAction } from "./action";
 import { chosenModel, matchesModel, withModel } from "./choice";
 
-/** French reading aids for the engine's level tokens. A token missing here is shown alone, as the engine names it. */
 const EFFORT_GLOSS: Record<string, string> = {
   minimal: "Minimale",
   low: "Légère",
@@ -68,7 +67,7 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
       port={port}
       name={bot.name}
       choice={bot.choice}
-      locked={action.disabled && !action.busy}
+      locked={action.disabled}
       feedback={action.feedback}
       onChange={(choice) =>
         void action.perform({
@@ -102,7 +101,7 @@ export function DraftModelPicker({
 }
 
 type Level = { value: string; token: string; gloss?: string; hint?: string };
-/** A saved level or speed the model no longer announces: shown as saved, so the person sees what a turn would be refused for. */
+
 const notOffered = (token: string): Level => ({
   value: token,
   token,
@@ -130,11 +129,13 @@ function ChoiceSettings({
   return (
     <div className="model-settings">
       <ModelMenu
+        disabled={locked}
         name={name}
         engine={engine}
         choice={choice}
         current={current}
         onPick={(id) => {
+          if (locked) return;
           const next = withModel(choice, id, chosenModel(models, id));
           if (
             next.model !== choice.model ||
@@ -210,12 +211,14 @@ function ChoiceSettings({
 }
 
 function ModelMenu({
+  disabled,
   name,
   engine,
   choice,
   current,
   onPick,
 }: {
+  disabled: boolean;
   name: string;
   engine: Port["view"]["engine"];
   choice: BotChoice;
@@ -236,6 +239,7 @@ function ModelMenu({
     if (refocus) trigger.current?.focus();
   }
   function pick(model: BotChoice["model"]) {
+    if (disabled) return;
     close(true);
     onPick(model);
   }
@@ -269,6 +273,7 @@ function ModelMenu({
         ref={trigger}
         type="button"
         className="model-trigger"
+        disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Modèle de ${name} : ${label}${identified ? ` (${current.id})` : ""}`}
@@ -376,7 +381,7 @@ function Levels({
   legend: string;
   value: string;
   options: readonly Level[];
-  /** The level the model applies when none is chosen. Offered first, as the empty value. */
+
   fallback?: string;
   onChange: (value: string) => void;
 }) {

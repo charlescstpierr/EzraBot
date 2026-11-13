@@ -32,7 +32,6 @@ const MODELS = [
   ...mirroredModels(),
 ];
 
-/** The models of a `model/list` snapshot, listed after the fake ones. Fake Sol stays the only default. */
 function mirroredModels(): Record<string, unknown>[] {
   const path = process.env.MINO_TEST_CATALOG;
   if (!path) return [];
