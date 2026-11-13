@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
-const BASE = "http://127.0.0.1:4398";
+const BASE = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
 const EVIDENCE = ".audit/composio-ux/evidence";
 const connections = (page: Page) =>
   page.getByRole("dialog").getByRole("region", { name: "Services connectés" });

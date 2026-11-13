@@ -102,6 +102,21 @@ test("images survive reopening, retries compare bytes and purge removes retrieva
       attachments: [{ ...image, relativePath: "other/pixel.png" }],
     }).ok,
   );
+  const changedBytes = Buffer.from(image.base64, "base64");
+  changedBytes[40] = (changedBytes[40] ?? 0) ^ 1;
+  const byteConflict = store.dispatch({
+    ...input,
+    attachments: [
+      {
+        ...image,
+        relativePath: "folder/pixel.png",
+        base64: changedBytes.toString("base64"),
+      },
+      { name: "notes.txt", text: "bonjour" },
+    ],
+  });
+  assert(!byteConflict.ok);
+  if (!byteConflict.ok) assert.equal(byteConflict.code, "request_conflict");
   const claim = store.claimNext("chat");
   assert(claim);
   assert.equal(claim.turn.images?.[0]?.base64, image.base64);
@@ -149,6 +164,24 @@ test("context hashes image bytes, names and ordering without putting them in pro
     },
   });
   assert.notEqual(original.sha256, changed.sha256);
+  const altered = { ...image, base64: image.base64.slice(0, -4) + "AAAA" };
+  assert.notEqual(
+    original.sha256,
+    composeContext({
+      ...source,
+      request: { text: "Décris", attachments: [altered] },
+    }).sha256,
+  );
+  assert.notEqual(
+    composeContext({
+      ...source,
+      request: { text: "Décris", attachments: [image, altered] },
+    }).sha256,
+    composeContext({
+      ...source,
+      request: { text: "Décris", attachments: [altered, image] },
+    }).sha256,
+  );
   assert.equal(original.turn.images?.[0]?.base64, image.base64);
   assert(!original.turn.input.includes(image.base64));
 });

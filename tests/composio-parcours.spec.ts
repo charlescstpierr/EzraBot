@@ -11,7 +11,7 @@ import type { PcView, ToolsReplyOf } from "../server/src/tools-protocol";
 // Real isolated store, worker and HTTP server. The provider and the App Server are fakes started by scripts/test-server.mjs:
 // every account, action, address and result on these pages is synthetic.
 
-const TOOLS = "http://127.0.0.1:4398";
+const TOOLS = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
 const EVIDENCE = ".audit/composio-ux/evidence";
 const HEADERS = { origin: TOOLS, "x-mino-csrf": "test-only-token" };
 
