@@ -10,20 +10,49 @@ test("les souvenirs concurrents restent distincts et la suppression purge les br
   await page
     .getByRole("button", { name: "Nouveau personnage", exact: true })
     .click();
-  await page.getByLabel("Son petit nom", { exact: true }).fill(name);
-  await page.getByLabel("Son rôle", { exact: true }).fill("Données de recette");
+  await page.getByLabel("Nom", { exact: true }).fill(name);
+  await page.getByText("Apparence et description", { exact: true }).click();
   await page
-    .getByRole("combobox", { name: "Sa forme", exact: true })
+    .getByLabel("Description (facultative)", { exact: true })
+    .fill("Données de recette");
+  await page
+    .getByRole("combobox", { name: "Forme", exact: true })
     .selectOption("radish");
   await page
     .getByRole("button", { name: "Créer le personnage", exact: true })
     .click();
   await expect(
-    page.getByRole("button", { name: "Ouvrir son fil", exact: true }),
+    page.getByRole("button", { name: "Discuter", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByLabel("Contexte relu", { exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Moteur de réponse" }),
+  ).not.toBeVisible();
   await page
-    .getByRole("button", { name: "Ouvrir son fil", exact: true })
+    .getByLabel("Personnalité et instructions", { exact: true })
+    .fill("Pose une question à la fois et aide-moi à jardiner.");
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/commands") &&
+      response.request().postDataJSON().type === "bot.update",
+  );
+  await page.getByRole("button", { name: "Enregistrer le profil" }).click();
+  expect((await saved).ok()).toBeTruthy();
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", { name: "Message", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Personnages", exact: true }).click();
+  await page
+    .locator(".character-tabs")
+    .getByRole("button", { name, exact: true })
     .click();
+  await expect(
+    page.getByLabel("Personnalité et instructions", { exact: true }),
+  ).toHaveValue("Pose une question à la fois et aide-moi à jardiner.");
+  await page.getByRole("button", { name: "Discuter", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Message", exact: true })
     .fill("Brouillon privé synthétique à effacer");

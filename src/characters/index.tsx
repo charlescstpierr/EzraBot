@@ -110,7 +110,7 @@ function Appearance({
     <>
       <Mascot shape={shape} color={color} size={84} animated />
       <label>
-        Son petit nom
+        Nom
         <input
           required
           maxLength={24}
@@ -118,32 +118,35 @@ function Appearance({
           onChange={(e) => setName(e.target.value)}
         />
       </label>
-      <label>
-        Son rôle
-        <input
-          maxLength={60}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </label>
-      <label>
-        Sa forme
-        <select value={shape} onChange={(e) => setShape(e.target.value)}>
-          {catalogue.shapes.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Sa couleur
-        <input
-          type="color"
-          value={color}
-          onChange={(e) => setColor(e.target.value)}
-        />
-      </label>
+      <details className="ez-character-appearance">
+        <summary>Apparence et description</summary>
+        <label>
+          Description (facultative)
+          <input
+            maxLength={60}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label>
+          Forme
+          <select value={shape} onChange={(e) => setShape(e.target.value)}>
+            {catalogue.shapes.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Couleur
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+          />
+        </label>
+      </details>
     </>
   );
 }
@@ -155,7 +158,10 @@ export function CharacterCreate({ port }: { port: Port }) {
   const action = useAction(port);
   return (
     <div className="ez-character">
-      <h2>Un nouveau compagnon.</h2>
+      <h2>Créer un personnage</h2>
+      <p>
+        Choisissez son nom, puis écrivez ses instructions à l’étape suivante.
+      </p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -224,17 +230,28 @@ function Profile({ port, bot }: { port: Port; bot: BotView }) {
     <div className="ez-character">
       <div className="ez-character-heading">
         <div>
-          <span className="card-label">VOTRE COMPAGNON</span>
-          <h2>Un compagnon à votre image.</h2>
+          <h2>Personnaliser {bot.name}</h2>
         </div>
-        <button
-          className="outline"
-          onClick={() => port.go({ page: "chat", botId: bot.id })}
-        >
-          Ouvrir son fil
-        </button>
+        <div className="ez-character-heading-actions">
+          <button
+            className="black"
+            type="submit"
+            form="character-profile"
+            disabled={profile.disabled}
+          >
+            Enregistrer le profil
+            <Check size={16} />
+          </button>
+          <button
+            className="outline"
+            onClick={() => port.go({ page: "chat", botId: bot.id })}
+          >
+            Discuter
+          </button>
+        </div>
       </div>
       <form
+        id="character-profile"
         onSubmit={(e) => {
           e.preventDefault();
           void profile.perform({
@@ -265,57 +282,66 @@ function Profile({ port, bot }: { port: Port; bot: BotView }) {
             }}
           />
           <label>
-            Consignes personnelles
+            Personnalité et instructions
             <textarea
+              aria-label="Personnalité et instructions"
+              placeholder="Comment souhaitez-vous échanger ? Que doit retenir ce personnage ?"
               maxLength={LIMITS.botInstructionsChars}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
             />
           </label>
-          <div className="ez-character-columns">
-            <label>
-              Style des réponses
-              <select
-                value={replyStyle}
-                onChange={(e) => {
-                  const value = REPLY_STYLES.find((s) => s === e.target.value);
-                  if (value) setReplyStyle(value);
-                }}
-              >
-                {REPLY_STYLES.map((s) => (
-                  <option key={s} value={s}>
-                    {
+          <details>
+            <summary>Réglages avancés des réponses</summary>
+            <div className="ez-character-columns">
+              <label>
+                Style des réponses
+                <select
+                  value={replyStyle}
+                  onChange={(e) => {
+                    const value = REPLY_STYLES.find(
+                      (s) => s === e.target.value,
+                    );
+                    if (value) setReplyStyle(value);
+                  }}
+                >
+                  {REPLY_STYLES.map((s) => (
+                    <option key={s} value={s}>
                       {
-                        concise: "Court",
-                        normal: "Normal",
-                        detailed: "Détaillé",
-                      }[s]
-                    }
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Contexte relu
-              <select
-                value={contextSize}
-                onChange={(e) => {
-                  const value = CONTEXT_SIZES.find((s) => s === e.target.value);
-                  if (value) setContextSize(value);
-                }}
-              >
-                {CONTEXT_SIZES.map((s) => (
-                  <option key={s} value={s}>
-                    {{ short: "Court", standard: "Standard", long: "Long" }[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <button className="black">
-            Enregistrer le profil
-            <Check size={16} />
-          </button>
+                        {
+                          concise: "Court",
+                          normal: "Normal",
+                          detailed: "Détaillé",
+                        }[s]
+                      }
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Contexte relu
+                <select
+                  value={contextSize}
+                  onChange={(e) => {
+                    const value = CONTEXT_SIZES.find(
+                      (s) => s === e.target.value,
+                    );
+                    if (value) setContextSize(value);
+                  }}
+                >
+                  {CONTEXT_SIZES.map((s) => (
+                    <option key={s} value={s}>
+                      {
+                        { short: "Court", standard: "Standard", long: "Long" }[
+                          s
+                        ]
+                      }
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </details>
         </fieldset>
       </form>
       {profile.feedback}
@@ -341,14 +367,19 @@ function Profile({ port, bot }: { port: Port; bot: BotView }) {
         <RefreshCw size={15} />
       </button>
       {reset.feedback}
-      <EngineSettings port={port} bot={bot} />
+      <details>
+        <summary>Réglages avancés du moteur</summary>
+        <EngineSettings port={port} bot={bot} />
+      </details>
       <ToolGrants port={port} bot={bot} />
       <section>
         <h3>Sa mémoire</h3>
-        <p>
-          Ces souvenirs appartiennent uniquement à {bot.name}. {bot.memoryChars}{" "}
-          / {LIMITS.memoryTotalChars} caractères.
-        </p>
+        <details>
+          <summary>Utilisation de la mémoire</summary>
+          <p>
+            {bot.memoryChars} / {LIMITS.memoryTotalChars} caractères.
+          </p>
+        </details>
         {bot.memories.map((item) => (
           <MemoryEditor
             key={item.id}

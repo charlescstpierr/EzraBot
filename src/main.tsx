@@ -7,7 +7,7 @@ import {
   MessageCircle,
   Folder,
   BookOpen,
-  Monitor,
+  Smartphone,
   Settings,
   PanelLeft,
   ChevronDown,
@@ -297,10 +297,10 @@ function App() {
           : view.activeBotId),
   );
   const nav = [
-    { id: "chat", label: "Conversation", Icon: MessageCircle },
+    { id: "chat", label: "Conversations", Icon: MessageCircle },
     { id: "missions", label: "Missions", Icon: Sparkles },
     { id: "projects", label: "Projets", Icon: Folder },
-    { id: "carnet", label: "Carnet", Icon: BookOpen },
+    { id: "carnet", label: "Documents", Icon: BookOpen },
     { id: "characters", label: "Personnages", Icon: Users },
   ];
   function openHome() {
@@ -320,7 +320,7 @@ function App() {
           <span className="brand-icon">
             e<span>·</span>
           </span>{" "}
-          ezrabot<span className="local-label">LOCAL</span>
+          ezrabot
         </a>
         <button
           className="mobile-close icon"
@@ -328,11 +328,6 @@ function App() {
           onClick={() => setSidebar(false)}
         >
           <X size={20} />
-        </button>
-        <button className="new-chat" onClick={openHome}>
-          <Plus size={18} />
-          Parler à Mino
-          <ArrowRight size={16} />
         </button>
         {port && <SearchBox port={port} />}
         <nav>
@@ -358,7 +353,7 @@ function App() {
           ))}
         </nav>
         <div className="section-label">
-          CONVERSATIONS<span>{view?.bots.length ?? "—"}</span>
+          Conversations<span>{view?.bots.length ?? "—"}</span>
         </div>
         <div className="threads">
           {view?.bots.map((bot) => (
@@ -376,7 +371,7 @@ function App() {
                 <strong>{bot.name}</strong>
                 <small>
                   {view.messages.filter((m) => m.threadBotId === bot.id).at(-1)
-                    ?.text ?? bot.title}
+                    ?.text ?? ""}
                 </small>
               </span>
               {route.page === "chat" && route.botId === bot.id && (
@@ -386,22 +381,15 @@ function App() {
           ))}
         </div>
         <div className="sidebar-bottom">
-          <button className="computer" onClick={() => setDialog("computer")}>
-            <span className="computer-icon">
-              <Monitor size={20} />
-            </span>
-            <span>
-              <strong>Mon ordinateur</strong>
-              <small>
-                <i className={offline ? "dot muted" : "dot"} />
-                {offline
-                  ? "Connexion interrompue"
-                  : view
-                    ? "Service local connecté"
-                    : "Connexion…"}
-              </small>
-            </span>
-            <ChevronDown size={14} />
+          <button
+            className="nav-item"
+            onClick={() => {
+              setDialog("computer");
+              setSidebar(false);
+            }}
+          >
+            <Smartphone size={18} />
+            Connexion téléphone
           </button>
           <button className="settings" onClick={() => setDialog("settings")}>
             <Settings size={17} />
@@ -459,17 +447,6 @@ function App() {
             )}
           </div>
           <div className="header-right">
-            <span className="private">
-              <span className="lock-dot" />
-              Espace personnel
-            </span>
-            <button
-              className="icon"
-              aria-label="Ordinateur et connexion téléphone"
-              onClick={() => setDialog("computer")}
-            >
-              <Monitor size={19} />
-            </button>
             <button
               className="icon"
               aria-label="Options de la conversation"
@@ -562,7 +539,12 @@ function App() {
                 <div className="character-tabs">
                   {port.view.bots.map((bot) => (
                     <button
-                      className="outline"
+                      className={
+                        route.botId === bot.id
+                          ? "character-choice selected"
+                          : "character-choice"
+                      }
+                      aria-pressed={route.botId === bot.id}
                       key={bot.id}
                       onClick={() => go({ page: "characters", botId: bot.id })}
                     >
@@ -590,8 +572,7 @@ function App() {
               </>
             ) : (
               <div className="content-page">
-                <div className="eyebrow">VOTRE CARNET LOCAL</div>
-                <h1>Les idées à garder.</h1>
+                <h1>Documents</h1>
                 {port.view.carnet.map((publication) => (
                   <article key={publication.id} className="publication">
                     <span className="card-label">
@@ -629,10 +610,10 @@ function App() {
                 {!port.view.carnet.length && (
                   <div className="empty">
                     <BookOpen size={38} />
-                    <h3>Votre carnet attend ses premières idées.</h3>
+                    <h3>Aucun document publié.</h3>
                     <p>
-                      Un document doit être confirmé avant sa publication
-                      locale.
+                      Demandez un document dans une conversation, puis
+                      validez-le et publiez-le pour le retrouver ici.
                     </p>
                   </div>
                 )}
@@ -663,11 +644,6 @@ function App() {
             ))}
           </div>
         )}
-        <footer>
-          <span className="brand-tiny">ezrabot</span>
-          <span>À vos côtés, sur votre ordinateur.</span>
-          <span className="footer-dot">✳</span>
-        </footer>
       </main>
       {dialog && (
         <div
@@ -691,12 +667,21 @@ function App() {
             </button>
             {dialog === "computer" ? (
               <>
-                <Monitor size={32} />
-                <h2>Votre ordinateur, votre espace.</h2>
-                <p>
-                  Le PC conserve les échanges et exécute les missions acceptées.
-                  Il doit rester allumé pendant le travail.
-                </p>
+                <Smartphone size={28} />
+                <h2>Connexion téléphone</h2>
+                <a className="black" href="/devices">
+                  Associer un téléphone
+                  <ArrowRight size={16} />
+                </a>
+                <small>
+                  Connexion privée HTTPS et Tailscale requise. L’association
+                  doit être approuvée sur le PC.
+                </small>
+              </>
+            ) : (
+              <>
+                <Settings size={28} />
+                <h2>Préférences</h2>
                 <div className="info-row">
                   <span>Service PC</span>
                   <strong>
@@ -714,22 +699,6 @@ function App() {
                 {view?.engine.state === "unavailable" && (
                   <p className="notice">{view.engine.message}</p>
                 )}
-                <a className="black" href="/devices">
-                  Connecter mon téléphone
-                  <ArrowRight size={16} />
-                </a>
-                <small>
-                  Connexion privée HTTPS et Tailscale requise. L’association
-                  doit être approuvée sur le PC.
-                </small>
-              </>
-            ) : (
-              <>
-                <Settings size={28} />
-                <h2>Votre espace personnel</h2>
-                <p>
-                  React et Three.js avec les données conservées sur votre PC.
-                </p>
                 <a
                   className="outline"
                   href={`/api/export?threadBotId=${encodeURIComponent(view?.activeBotId ?? "")}`}
@@ -753,10 +722,6 @@ function App() {
                   <ArrowRight size={16} />
                 </a>
                 {port && <ToolConnections port={port} />}
-                <p className="notice">
-                  Les animations suivent le mouvement réduit du système. Aucun
-                  secret n’est stocké dans le client.
-                </p>
               </>
             )}
           </section>

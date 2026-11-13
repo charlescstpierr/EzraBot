@@ -177,9 +177,7 @@ test("parcours complet : relier un compte, donner un droit, proposer, approuver 
     fullPage: true,
   });
 
-  await page
-    .getByRole("button", { name: "Ouvrir son fil", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Discuter", exact: true }).click();
   await expect(
     page.getByRole("checkbox", { name: /Utiliser les services connectés/ }),
   ).toBeChecked();
