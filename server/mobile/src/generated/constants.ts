@@ -9,7 +9,11 @@ export const DEFAULT_CONTEXT_SIZE: ContextSize = 'short';
 export const LIMITS = {
   messageChars: 6000,
   taskIntentTotalChars: 12000,
-  attachments: 8,
+  attachments: 32,
+  imageBytes: 4 * 1024 * 1024,
+  imageTotalBytes: 8 * 1024 * 1024,
+  commandBodyBytes: 12 * 1024 * 1024,
+  attachmentTotalChars: 120000,
   attachmentChars: 15000,
   attachmentNameChars: 120,
   memoryChars: 500,

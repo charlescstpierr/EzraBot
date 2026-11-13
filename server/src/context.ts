@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { LIMITS, type ContextPlan, type ContextSize, type ReplyStyle, type TaskStep } from './protocol.js';
+import { LIMITS, type Attachment, type ContextPlan, type ContextSize, type ReplyStyle, type TaskStep } from './protocol.js';
 import type { MissionChatContext } from './mission-context.js';
 
 /** Bump whenever the rendered text or the budgets change, so equal hashes always mean equal policies. */
-export const CONTEXT_POLICY_VERSION = 8;
+export const CONTEXT_POLICY_VERSION = 9;
 
 export const OUTPUT_SCHEMA = {
   type: 'object',
@@ -87,7 +87,7 @@ export type TaskSource = {
 
 /** One request in the originating thread, with its completed responses attributed to their actors. */
 export type Exchange = {
-  request: { text: string; attachments: { name: string; chars: number }[] };
+  request: { text: string; attachments: { name: string; chars: number; relativePath?: string }[] };
   replies: { by: string; text: string }[];
   deliverable: { title: string; body: string; n: number } | null;
 };
@@ -97,7 +97,7 @@ export type ContextSource = {
   memories: { text: string }[];
   /** Oldest first. */
   exchanges: Exchange[];
-  request: { text: string; attachments: { name: string; text: string }[] };
+  request: { text: string; attachments: Attachment[] };
   task?: TaskSource;
   /** Document tasks of this thread that are not finished, for the chat lane. Titles and states only. */
   ongoing?: { title: string; state: string }[];
@@ -131,6 +131,7 @@ export type ReceiptContext = {
 export type ComposedTurn = {
   readonly baseInstructions: string;
   readonly input: string;
+  readonly images?: Extract<Attachment, {kind: "image"}>[];
   readonly outputSchema: OutputSchema;
 };
 
@@ -211,7 +212,7 @@ function renderExchange(input: {
   const reply = clipMiddle(exchange.replies.map(reply => `${reply.by} : ${reply.text}`).join('\n'), turnChars);
   const lines = [`Personne : ${request.text}`];
   for (const file of exchange.request.attachments) {
-    lines.push(`(fichier joint : ${file.name}, ${file.chars} caractères, non renvoyé)`);
+    lines.push(`(fichier joint : ${file.relativePath ?? file.name}, ${file.chars} caractères, non renvoyé)`);
   }
   lines.push(reply.text);
   const deliverable = exchange.deliverable;
@@ -335,8 +336,8 @@ export function composeContext(source: ContextSource): ComposedContext {
     parts.push(body.text, `--- fin du livrable « ${latest.title} » ---`, '');
   }
   if (source.request.attachments.length) {
-    parts.push('Fichiers texte joints à la demande :');
-    for (const file of source.request.attachments) parts.push(`--- ${file.name} ---`, file.text, `--- fin de ${file.name} ---`);
+    parts.push('Pièces jointes à la demande :');
+    for (const file of source.request.attachments) parts.push(`--- ${file.relativePath ?? file.name} ---`, 'kind' in file ? 'Image jointe, transmise séparément dans cet ordre.' : file.text, `--- fin de ${file.relativePath ?? file.name} ---`);
     parts.push('');
   }
   if (source.ongoing?.length) {
@@ -353,7 +354,8 @@ export function composeContext(source: ContextSource): ComposedContext {
   const input = parts.join('\n');
   const outputSchema: OutputSchema = receipt ? OPINION_SCHEMA : orchestrating ? MINO_OUTPUT_SCHEMA : !source.task ? OUTPUT_SCHEMA : source.task.step === 'review' ? OPINION_SCHEMA : DOCUMENT_SCHEMA;
 
-  const turn: ComposedTurn = { baseInstructions, input, outputSchema };
+  const images = source.request.attachments.filter((file): file is Extract<Attachment, {kind: 'image'}> => 'kind' in file);
+  const turn: ComposedTurn = { baseInstructions, input, outputSchema, ...(images.length ? {images} : {}) };
   const memoryChars = source.memories.reduce((sum, memory) => sum + chars(memory.text), 0);
   const plan: ContextPlan = {
     policyVersion: CONTEXT_POLICY_VERSION,
@@ -363,14 +365,14 @@ export function composeContext(source: ContextSource): ComposedContext {
     clippedChars: clipped,
     deliverable: deliverablePlan,
     memory: { count: source.memories.length, chars: memoryChars, overBudget: memoryChars > LIMITS.memoryTotalChars },
-    attachments: { count: source.request.attachments.length, chars: source.request.attachments.reduce((sum, file) => sum + chars(file.text), 0) },
+    attachments: { count: source.request.attachments.length, chars: source.request.attachments.reduce((sum, file) => sum + ('text' in file ? chars(file.text) : 0), 0) },
     instructionsChars: chars(instructions),
     baseChars: chars(baseInstructions),
     inputChars: chars(input),
     utf8Bytes: Buffer.byteLength(baseInstructions, 'utf8') + Buffer.byteLength(input, 'utf8'),
   };
   const sha256 = createHash('sha256')
-    .update(canonicalJson({ policyVersion: CONTEXT_POLICY_VERSION, baseInstructions, input, outputSchema }), 'utf8')
+    .update(canonicalJson({ policyVersion: CONTEXT_POLICY_VERSION, baseInstructions, input, outputSchema, images }), 'utf8')
     .digest('hex');
   return { turn, plan, sha256 };
 }

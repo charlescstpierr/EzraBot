@@ -1,4 +1,4 @@
-import type { MentionSpan } from '../src/protocol.js';
+import { AttachmentSchema, type Attachment, type MentionSpan } from '../src/protocol.js';
 /**
  * Browser-local drafts. Each page instance is a writer that only ever creates, rewrites or deletes its own keys;
  * other writers' drafts are copied on reload or request, or hidden by a marker that belongs to the reader.
@@ -13,7 +13,7 @@ export type KeyValueStorage = {
   removeItem(key: string): void;
 };
 
-export type DraftFile = { name: string; text: string };
+export type DraftFile = Attachment;
 /** `document` keeps the composer's document mode and reviewer with the draft it was chosen for. */
 export type PromptContent = { text: string; files: DraftFile[]; mentions?: MentionSpan[]; document?: { reviewerBotId: string | null } };
 /** `baseVersionId` is null for a document typed before any version existed. */
@@ -74,7 +74,7 @@ function parseJson(raw: string | null): unknown {
 }
 
 function isFile(value: unknown): value is DraftFile {
-  return isRecord(value) && typeof value.name === 'string' && typeof value.text === 'string';
+  return AttachmentSchema.safeParse(value).success;
 }
 
 function isMentionSpan(value: unknown): value is MentionSpan {
@@ -92,7 +92,7 @@ function parseContent(scope: DraftScope, value: unknown): PromptContent | Versio
     if (!Array.isArray(mentions) || !mentions.every(isMentionSpan)) return null;
     const document = isRecord(value.document) && (value.document.reviewerBotId === null || typeof value.document.reviewerBotId === 'string')
       ? { document: { reviewerBotId: value.document.reviewerBotId } } : {};
-    return { ...(value.mentions === undefined ? {} : { mentions: mentions.map(m => ({ botId: m.botId, start: m.start, end: m.end })) }), ...document, text: value.text, files: value.files.map(file => ({ name: file.name, text: file.text })) };
+    return { ...(value.mentions === undefined ? {} : { mentions: mentions.map(m => ({ botId: m.botId, start: m.start, end: m.end })) }), ...document, text: value.text, files: value.files.map(file => AttachmentSchema.parse(file)) };
   }
   if ((typeof value.baseVersionId !== 'string' && value.baseVersionId !== null) || typeof value.title !== 'string' || typeof value.body !== 'string') return null;
   return { baseVersionId: value.baseVersionId, title: value.title, body: value.body };

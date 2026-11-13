@@ -1,3 +1,4 @@
+import { attachmentStorage, hydrateAttachments } from './chat/durable';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -64,7 +65,7 @@ function App() {
   const drafts = useMemo(
     () =>
       openDrafts({
-        local: browserStorage("localStorage"),
+        local: attachmentStorage,
         session: browserStorage("sessionStorage"),
       }),
     [],
@@ -765,4 +766,4 @@ function App() {
   );
   return <AgentOutboxProvider value={outbox}>{shell}</AgentOutboxProvider>;
 }
-createRoot(document.getElementById("root")!).render(<App />);
+void hydrateAttachments().then(() => createRoot(document.getElementById("root")!).render(<App />));

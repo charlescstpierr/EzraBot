@@ -445,7 +445,7 @@ test('an existing database upgrades in place: data kept, old bots become concise
       assert.equal(mino?.memories.length, 10, 'memories over the new cap are all kept');
       assert.equal(mino?.memoryChars, 5000);
       assert.deepEqual(view.messages.map(m => m.text), ['ANCIENNE_DEMANDE', 'ANCIENNE_REPONSE']);
-      assert.deepEqual(view.messages[0]?.attachments, [{ name: 'vieux.txt', chars: 7 }]);
+      assert.deepEqual(view.messages[0]?.attachments, [{ id: '1', name: 'vieux.txt', chars: 7 }]);
       const old = work(view, 'w1');
       assert.equal(old.state, 'done');
       assert.equal(old.attempt?.plan, null);
@@ -649,7 +649,7 @@ test('v1 migration preserves real links, HMAC replay and immutable history, and 
   assert.equal(store.view().carnet[0]?.threadBotId, 'mino');
   store.close();
   db = new DatabaseSync(path);
-  assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 6);
+  assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 7);
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
   const project = (rows: Record<string, unknown>[], like: Record<string, unknown>[]) => rows.map((row, i) => Object.fromEntries(Object.keys(like[i] ?? {}).map(key => [key, row[key]])));
   assert.deepEqual(tables.map((table, i) => project(db.prepare(`SELECT * FROM ${table}`).all(), before[i] ?? [])), before.map(rows => project(rows, rows)));

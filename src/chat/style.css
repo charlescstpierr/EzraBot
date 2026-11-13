@@ -328,3 +328,5 @@
 .ez-chat-welcome {
   margin: 18px auto 28px;
 }
+
+.ez-attachment-preview { display: block; width: 120px; height: 90px; object-fit: contain; border-radius: 8px; }

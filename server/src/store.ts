@@ -1,3 +1,4 @@
+import { AttachmentSchema } from './protocol.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
@@ -99,6 +100,7 @@ export type Store = {
   /** Connected services: accounts, rights, proposals and receipts, in this same database. */
   readonly tools: ToolLedger;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
+  image(id: string): { mimeType: string; bytes: Buffer } | null;
   view(): StoreView;
   diagnostics(): StoreDiagnostics;
   claimNextJob(): Claim | null;
@@ -571,6 +573,7 @@ CREATE TRIGGER doc_proposals_kept BEFORE DELETE ON doc_proposals
 ` },
   { sql: `ALTER TABLE messages ADD COLUMN handoff TEXT CHECK(handoff IS NULL OR json_valid(handoff));` },
   { sql: TOOL_MIGRATION },
+  { sql: `ALTER TABLE attachments ADD COLUMN mime_type TEXT; ALTER TABLE attachments ADD COLUMN base64 TEXT; ALTER TABLE attachments ADD COLUMN relative_path TEXT;` },
 ];
 
 /** Migration backups Mino writes next to the database. Each holds the whole space at that time. */
@@ -1183,7 +1186,7 @@ export function openStore(options: StoreOptions): Store {
     const at = now();
     run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at) VALUES (?, ?, 'user', ?, NULL, ?)`, messageId, command.botId, command.text, at);
     for (const file of command.attachments) {
-      run('INSERT INTO attachments(message_id, name, text) VALUES (?, ?, ?)', messageId, file.name, file.text);
+      run('INSERT INTO attachments(message_id, name, text, mime_type, base64, relative_path) VALUES (?, ?, ?, ?, ?, ?)', messageId, file.name, 'text' in file ? file.text : '', 'kind' in file ? file.mimeType : null, 'kind' in file ? file.base64 : null, file.relativePath ?? null);
     }
     if (command.document) {
       const taskId = newId('t');
@@ -1422,7 +1425,7 @@ export function openStore(options: StoreOptions): Store {
 
   function dispatch(input: unknown, context: DispatchContext = { activeWorkIds: [] }): DispatchOutcome {
     const parsed = CommandSchema.safeParse(input);
-    if (!parsed.success) return { ok: false, code: 'invalid_command', message: 'Cette commande est incomplète ou invalide.' };
+    if (!parsed.success) return { ok: false, code: 'invalid_command', message: 'Cette commande est incomplète ou invalide. ' + parsed.error.issues.slice(0, 3).map(issue => `${issue.path.join('.')} : ${issue.message}`).join(' ; ') };
     const command = parsed.data;
     if (command.type === 'storage.purge') return { ok: true, replayed: false, result: { kind: 'purge', erased: completeErasure() } };
     try {
@@ -1460,7 +1463,7 @@ export function openStore(options: StoreOptions): Store {
         JOIN messages reply ON reply.attempt_id=a.id
         WHERE w.request_message_id=? AND w.state IN ('review','done') ORDER BY w.rowid, a.n`, str(request, 'id'));
       const lastVersion = responses.map(row => currentVersion(str(row, 'work_id'))).findLast(v => v !== undefined);
-      return { request: { text: str(request, 'text'), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
+      return { request: { text: str(request, 'text'), attachments: all('SELECT COALESCE(relative_path, name) AS name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
         replies: responses.map(row => ({ by: str(row, 'name'), text: str(row, 'text') })),
         deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n') } : null };
     });
@@ -1515,7 +1518,7 @@ export function openStore(options: StoreOptions): Store {
   const memoriesOf = (botId: string) =>
     all('SELECT id, text FROM memories WHERE bot_id = ? ORDER BY seq', botId).map(row => ({ id: str(row, 'id'), text: str(row, 'text') }));
   const requestAttachments = (messageId: string) =>
-    all('SELECT name, text FROM attachments WHERE message_id = ? ORDER BY seq', messageId).map(row => ({ name: str(row, 'name'), text: str(row, 'text') }));
+    all('SELECT * FROM attachments WHERE message_id = ? ORDER BY seq', messageId).map(row => AttachmentSchema.parse({ name: str(row, 'name'), ...(strOrNull(row, 'relative_path') ? {relativePath: str(row, 'relative_path')} : {}), ...(strOrNull(row, 'mime_type') ? {kind: 'image', mimeType: str(row, 'mime_type'), base64: str(row, 'base64')} : {text: str(row, 'text')}) }));
 
   /** The same work answers again, only to report the receipt of its approved action. No new request, no new work. */
   function claimReport(report: ReportClaim): Claim {
@@ -1879,9 +1882,9 @@ export function openStore(options: StoreOptions): Store {
       deletion: deletionCounts(str(row, 'id')),
     }));
     const attachmentsByMessage = new Map<string, MessageView['attachments']>();
-    for (const row of all('SELECT message_id, name, length(text) AS chars FROM attachments ORDER BY seq')) {
+    for (const row of all('SELECT seq, message_id, name, relative_path, mime_type, length(text) AS chars FROM attachments ORDER BY seq')) {
       const list = attachmentsByMessage.get(str(row, 'message_id')) ?? [];
-      list.push({ name: str(row, 'name'), chars: int(row, 'chars') });
+      list.push({ id: String(int(row, 'seq')), name: str(row, 'name'), chars: int(row, 'chars'), ...(strOrNull(row, 'relative_path') ? {relativePath: str(row, 'relative_path')} : {}), ...(strOrNull(row, 'mime_type') ? {kind: 'image', mimeType: str(row, 'mime_type')} : {}) });
       attachmentsByMessage.set(str(row, 'message_id'), list);
     }
     const messages: MessageView[] = all(
@@ -2094,6 +2097,10 @@ export function openStore(options: StoreOptions): Store {
     leadCandidate(botId) {
       const bot = get('SELECT id, name, shape, color FROM bots WHERE id = ? AND deleted_at IS NULL', botId);
       return bot ? { botId: str(bot, 'id'), name: str(bot, 'name'), shape: str(bot, 'shape'), color: str(bot, 'color') } : null;
+    },
+    image(id) {
+      const row = get('SELECT mime_type, base64 FROM attachments WHERE seq = ? AND mime_type IS NOT NULL', id);
+      return row ? {mimeType: str(row, 'mime_type'), bytes: Buffer.from(str(row, 'base64'), 'base64')} : null;
     },
     botChoice(botId) {
       const bot = get('SELECT model, effort, speed FROM bots WHERE id = ? AND deleted_at IS NULL', botId);

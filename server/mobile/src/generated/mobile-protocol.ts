@@ -18,7 +18,7 @@ export const MobileSnapshotSchema = z.object({
   erasure: z.enum(['complete', 'incomplete']), purged: z.object({ botIds: z.array(id), workIds: z.array(id) }),
   bots: z.array(z.object({ id, name: id, title: id, shape: id, color: id, instructions: id, replyStyle: id, contextSize: id, choice,
     memories: z.array(z.object({ id, text: id, updatedAt: id })), memoryChars: z.number(), deletion: DeletionCountsSchema })),
-  messages: z.array(z.object({ id, threadBotId: id, botId: id, role: z.enum(['user', 'assistant']), text: id, workId: id, createdAt: id, mentions: z.array(MentionSpanSchema), attachments: z.array(z.object({ name: id, chars: z.number() })),
+  messages: z.array(z.object({ id, threadBotId: id, botId: id, role: z.enum(['user', 'assistant']), text: id, workId: id, createdAt: id, mentions: z.array(MentionSpanSchema), attachments: z.array(z.object({ id: z.string().optional(), name: id, chars: z.number(), kind: z.literal('image').optional(), mimeType: z.string().optional(), relativePath: z.string().optional() })),
     handoff: z.object({ goal: id, coordinated: z.boolean(), why: id }).nullable().optional() })),
   works: z.array(z.object({ id, threadBotId: id, botId: id, taskId: id.nullable(), requestMessageId: id, state: z.enum(WORK_STATES), title: id, createdAt: id, updatedAt: id,
     attempt: z.object({ n: z.number(), state: id, stage: id.nullable(), error: id.nullable(), used: choice.nullable() }).nullable(),

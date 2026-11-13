@@ -58,3 +58,13 @@ Les six parcours sont disponibles dans React : envoi et invitations par identit�
 Les réponses IA réelles, les appareils physiques et les accès externes restent hors de la recette automatique. Les commandes incertaines des panneaux restent reprenables tant que leur panneau est ouvert. Le composeur conserve aussi son envoi après rechargement. Une validation ne publie pas un résultat sur Internet.
 
 Les apports retenus et les exclusions sont décrits dans [Apports et reste à vérifier](docs/apports-et-reste.md). Le journal de cette reprise est dans [Décisions](docs/decisions.tsv).
+
+### Photos, fichiers et dossiers dans le chat
+
+Le composeur accepte les images PNG, JPEG et WebP et les fichiers texte UTF-8. Vous pouvez choisir un dossier, déposer des fichiers ou coller une image. Le dossier fournit seulement les fichiers choisis et leurs noms relatifs. Il ne donne aucun accès au dossier sur le PC.
+
+Un message peut contenir seulement des pièces jointes. Le lot accepte au plus 32 fichiers, 4 Mio par image, 8 Mio d'images au total, 15 000 caractères par texte et 120 000 caractères de texte au total. Le serveur refuse un lot invalide en entier. Les fichiers PDF, DOCX et les photos HEIC ne sont pas lus. Convertissez une photo en PNG, JPEG ou WebP, ou fournissez le texte du document.
+
+Les images sélectionnées sont transmises au modèle Codex choisi, sans changement automatique de modèle. Le modèle doit déclarer le support des images dans son catalogue. Les anciens échanges gardent les noms des pièces jointes mais ne retransmettent pas leurs octets. Pour faire examiner une ancienne image dans un autre tour, joignez-la de nouveau.
+
+Les gros brouillons et les envois incertains utilisent IndexedDB. L'application attend leur lecture avant d'afficher le composeur et attend l'écriture de la commande figée avant de l'envoyer. En cas de stockage indisponible, l'envoi est arrêté. Une reprise utilise le même identifiant et les mêmes octets. Les aperçus enregistrés demandent la session locale ou l'authentification de l'appareil jumelé. La suppression du personnage efface aussi ses pièces jointes.

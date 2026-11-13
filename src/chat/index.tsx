@@ -1,3 +1,5 @@
+import { AttachmentSchema, type Attachment } from "../../server/src/protocol";
+import { flushAttachments } from "./durable";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CommandSchema,
@@ -178,7 +180,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
     if (!saved) {
       const raw = current.current;
       const trimmed = trimForSend(raw.text, raw.mentions ?? []);
-      if (!trimmed.text) return;
+      if (!trimmed.text && !raw.files.length) return;
       const command = CommandSchema.safeParse({
         type: canUseServices && useServices ? "message.send" : "message.say",
         requestId: uid(),
@@ -206,6 +208,11 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
     setBusy(true);
     setError("");
     try {
+      if (!(await flushAttachments())) {
+        setStorageError(true);
+        setError("Envoi arrêté : le stockage durable est indisponible.");
+        return;
+      }
       const outcome = await port.run.app(saved.command);
       if (outcome.kind === "accepted") {
         if (captureRef.current && drafts.acknowledge(captureRef.current)) {
@@ -274,12 +281,12 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
   }
   const loadingFiles = useRef(false);
   const [readingFiles, setReadingFiles] = useState(false);
-  async function addFiles(files: FileList | null) {
+  async function addFiles(files: FileList | File[] | null) {
     if (!files || loadingFiles.current) return;
     loadingFiles.current = true;
     setReadingFiles(true);
     setError("");
-    const additions = [];
+    const additions: Attachment[] = [];
     try {
       if (current.current.files.length + files.length > LIMITS.attachments)
         throw Error(`Maximum ${LIMITS.attachments} fichiers.`);
@@ -291,13 +298,41 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           /[\x00-\x1f/\\]/.test(name)
         )
           throw Error("Nom de fichier invalide.");
+        const relativePath = file.webkitRelativePath || undefined;
+        if (/^image\/(png|jpeg|webp)$/.test(file.type)) {
+          if (file.size > LIMITS.imageBytes)
+            throw Error(`${relativePath ?? name} dépasse 4 Mio.`);
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(",")[1]);
+            reader.onerror = () =>
+              reject(Error(`Lecture impossible : ${name}`));
+            reader.readAsDataURL(file);
+          });
+          const bitmap = await createImageBitmap(file).catch(() => {
+            throw Error(`${name} : image corrompue ou illisible.`);
+          });
+          bitmap.close();
+          additions.push(
+            AttachmentSchema.parse({
+              kind: "image",
+              name,
+              mimeType: file.type,
+              base64,
+              ...(relativePath ? { relativePath } : {}),
+            }),
+          );
+          continue;
+        }
         if (
           !file.type.startsWith("text/") &&
           !/\.(txt|md|markdown|csv|json|html?|css|js|ts|tsx|jsx|xml|ya?ml|log)$/i.test(
             name,
           )
         )
-          throw Error("Choisissez un fichier texte.");
+          throw Error(
+            `${relativePath ?? name} : format non pris en charge. Choisissez PNG, JPEG, WebP ou texte UTF-8. PDF, DOCX et HEIC ne sont pas lus.`,
+          );
         if (file.size > LIMITS.attachmentChars * 4)
           throw Error(`${name} dépasse la taille autorisée.`);
         const value = new TextDecoder("utf-8", { fatal: true }).decode(
@@ -307,12 +342,27 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           throw Error(
             `${name} est trop long ou contient des données non textuelles.`,
           );
-        additions.push({ name, text: value });
+        additions.push(
+          AttachmentSchema.parse({
+            name,
+            text: value,
+            ...(relativePath ? { relativePath } : {}),
+          }),
+        );
       }
-      change({
-        ...current.current,
-        files: [...current.current.files, ...additions],
+      const combined = [...current.current.files, ...additions];
+      const checked = CommandSchema.safeParse({
+        type: "message.say",
+        requestId: uid(),
+        botId,
+        text: current.current.text.trim(),
+        attachments: combined,
       });
+      if (!checked.success)
+        throw Error(
+          checked.error.issues.map((issue) => issue.message).join(" ; "),
+        );
+      change({ ...current.current, files: combined });
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -326,7 +376,18 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
   }
   if (!bot)
     return (
-      <section className="ez-chat-empty">
+      <section
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          if (e.dataTransfer.files.length) {
+            e.preventDefault();
+            void addFiles(e.dataTransfer.files);
+          }
+        }}
+        className="ez-chat-empty"
+      >
         <p>Aucun personnage dans ce fil.</p>
         <button onClick={() => port.go({ page: "characters" })}>
           Choisir un personnage
@@ -407,7 +468,15 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
                 <ul className="ez-chat-files">
                   {m.attachments.map((f, i) => (
                     <li key={i}>
-                      {f.name} · {f.chars} caractères
+                      {f.kind === "image" && (
+                        <img
+                          className="ez-attachment-preview"
+                          src={`/api/attachments/${f.id}`}
+                          alt={f.name}
+                        />
+                      )}
+                      {f.relativePath ?? f.name} ·{" "}
+                      {f.kind === "image" ? "Image" : `${f.chars} caractères`}
                     </li>
                   ))}
                 </ul>
@@ -484,7 +553,14 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
         <ul className="ez-chat-files">
           {content.files.map((file, i) => (
             <li key={i}>
-              {file.name}
+              {"kind" in file && (
+                <img
+                  className="ez-attachment-preview"
+                  src={`data:${file.mimeType};base64,${file.base64}`}
+                  alt={file.name}
+                />
+              )}
+              {file.relativePath ?? file.name}
               <button
                 type="button"
                 aria-label={`Retirer ${file.name}`}
@@ -519,6 +595,15 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           </button>
           <textarea
             ref={textarea}
+            onPaste={(e) => {
+              const images = Array.from(e.clipboardData.files).filter((file) =>
+                file.type.startsWith("image/"),
+              );
+              if (images.length) {
+                e.preventDefault();
+                void addFiles(images);
+              }
+            }}
             aria-label="Message"
             placeholder={`Écrire à ${bot.name}…`}
             maxLength={LIMITS.messageChars}
@@ -548,7 +633,9 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             type="submit"
             aria-label="Envoyer le message"
             disabled={
-              busy || readingFiles || (!content.text.trim() && !pending)
+              busy ||
+              readingFiles ||
+              (!content.text.trim() && !content.files.length && !pending)
             }
           >
             {busy ? "Envoi…" : pending ? "Réessayer" : "↑"}
@@ -606,12 +693,26 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
           </label>
         )}
         <label className="ez-chat-attachment">
-          Joindre des fichiers texte
+          Joindre photos et fichiers
           <input
-            aria-label="Joindre des fichiers texte"
+            aria-label="Joindre photos et fichiers"
             type="file"
             multiple
-            accept="text/*,.txt,.md,.json,.csv,.html,.css,.js,.ts,.xml,.yaml,.yml"
+            accept="image/png,image/jpeg,image/webp,text/*,.txt,.md,.json,.csv,.html,.css,.js,.ts,.xml,.yaml,.yml"
+            disabled={readingFiles}
+            onChange={(e) => {
+              void addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <label className="ez-chat-attachment">
+          Joindre un dossier
+          <input
+            aria-label="Joindre un dossier"
+            type="file"
+            multiple
+            {...{ webkitdirectory: "" }}
             disabled={readingFiles}
             onChange={(e) => {
               void addFiles(e.target.files);
