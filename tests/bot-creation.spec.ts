@@ -118,6 +118,16 @@ test("une création au résultat inconnu se réessaie sans créer de doublon", a
   const sheet = page.getByRole("dialog", { name: "Nouveau personnage" });
   await sheet.getByLabel("Nom", { exact: true }).fill(name);
   await sheet.getByRole("button", { name: "Créer et discuter" }).click();
+  await expect(
+    sheet.getByRole("button", { name: "Réessayer la même action" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  await page
+    .locator(".sidebar")
+    .getByRole("button", { name: "Nouveau personnage" })
+    .click();
+  await expect(sheet.getByLabel("Nom", { exact: true })).toHaveValue(name);
   await sheet.getByRole("button", { name: "Réessayer la même action" }).click();
   await expect(
     page.getByRole("heading", { name: `Salut, moi c’est ${name}.` }),
@@ -133,7 +143,7 @@ test("une création au résultat inconnu se réessaie sans créer de doublon", a
 test("le modèle choisi depuis l’en-tête du personnage reste enregistré", async ({
   page,
 }) => {
-  const base = "http://127.0.0.1:4398";
+  const base = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
   const configures = commands(page, "bot.configure");
   await page.goto(`${base}/`);
   await page
@@ -180,4 +190,69 @@ test("le modèle choisi depuis l’en-tête du personnage reste enregistré", as
     effort: "high",
     speed: "standard",
   });
+});
+
+test("un changement de personnage ne rejoue pas la configuration précédente", async ({
+  page,
+}) => {
+  const base = `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
+  await page.goto(`${base}/`);
+  await page.evaluate(async () => {
+    const csrf =
+      document.querySelector<HTMLMetaElement>('meta[name="mino-csrf"]')
+        ?.content ?? "";
+    for (const botId of ["pixel", "mino"]) {
+      const response = await fetch("/api/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-mino-csrf": csrf },
+        body: JSON.stringify({
+          type: "bot.configure",
+          requestId: crypto.randomUUID(),
+          botId,
+          model: null,
+          effort: null,
+          speed: "standard",
+        }),
+      });
+      if (!response.ok) throw Error("Réinitialisation du modèle impossible");
+    }
+  });
+  const configures = commands(page, "bot.configure");
+  let lost = false;
+  await page.route("**/api/commands", async (route) => {
+    const command = route.request().postDataJSON();
+    if (
+      !lost &&
+      command.type === "bot.configure" &&
+      command.botId === "pixel"
+    ) {
+      lost = true;
+      await route.fetch();
+      await route.abort("connectionreset");
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto(`${base}/`);
+  await page
+    .locator(".threads")
+    .getByRole("button", { name: /^Pixel/ })
+    .click();
+  await page.getByRole("button", { name: /^Modèle de Pixel :/ }).click();
+  await page
+    .getByRole("dialog", { name: "Modèle de Pixel" })
+    .getByRole("option", { name: /Fake Sol/ })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Réessayer la même action" }),
+  ).toBeVisible();
+  await page.locator(".threads").getByRole("button", { name: /^Mino/ }).click();
+  await page.getByRole("button", { name: /^Modèle de Mino :/ }).click();
+  await page
+    .getByRole("dialog", { name: "Modèle de Mino" })
+    .getByRole("option", { name: /Fake Sol/ })
+    .click();
+  await expect.poll(() => configures.length).toBe(2);
+  expect(configures.map((command) => command.botId)).toEqual(["pixel", "mino"]);
+  expect(configures[1].requestId).not.toBe(configures[0].requestId);
 });

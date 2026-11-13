@@ -144,8 +144,10 @@ export function createHttpServer(options: HttpOptions): Server {
   async function command(req: IncomingMessage, res: ServerResponse): Promise<void> {
     requireLocalPost(req);
     const input = await readJson(req, LIMITS.commandBodyBytes);
-    if (input !== null && typeof input === 'object' && 'type' in input && input.type === 'bot.configure') {
-      const refusal = await configureRefusal(input);
+    const parsedChoice = CommandSchema.safeParse(input);
+    if (parsedChoice.success && (parsedChoice.data.type === 'bot.configure' || (parsedChoice.data.type === 'bot.create' && parsedChoice.data.model != null))) {
+      const choice = parsedChoice.data.type === 'bot.configure' ? parsedChoice.data : { model: parsedChoice.data.model ?? null, effort: null, speed: 'standard' };
+      const refusal = await configureRefusal(choice);
       if (refusal) {
         sendJson(res, REFUSAL_STATUS[refusal.code] ?? 409, { ...refusal, view: appView() });
         return;

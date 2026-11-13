@@ -1,6 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu } from "lucide-react";
-import type { BotView, CatalogModel } from "../../server/src/protocol";
+import type {
+  BotChoice,
+  BotView,
+  CatalogModel,
+} from "../../server/src/protocol";
 import type { Port } from "../port";
 import { uid } from "../api";
 import { useAction } from "./action";
@@ -22,21 +26,88 @@ export function modelLabel(port: Port, bot: BotView): string {
   return model?.displayName ?? bot.choice.model ?? "Modèle par défaut";
 }
 
-/** The model a bot answers with, chosen where the bot is: saved at once through bot.configure. */
 export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
+  const action = useAction(port);
+  return (
+    <ModelChoicePicker
+      port={port}
+      name={bot.name}
+      choice={bot.choice}
+      busy={action.busy}
+      feedback={action.feedback}
+      configure={(model, effort, speed, done) => {
+        void action.perform(
+          {
+            type: "bot.configure",
+            requestId: uid(),
+            botId: bot.id,
+            model: model?.id ?? null,
+            effort,
+            speed,
+          },
+          done,
+        );
+      }}
+    />
+  );
+}
+
+export function DraftModelPicker({
+  port,
+  model,
+  onChange,
+}: {
+  port: Port;
+  model: BotChoice["model"];
+  onChange: (model: BotChoice["model"]) => void;
+}) {
+  return (
+    <ModelChoicePicker
+      port={port}
+      name="ce personnage"
+      choice={{ model, effort: null, speed: "standard" }}
+      draft
+      configure={(selected, _effort, _speed, done) => {
+        onChange(selected?.id ?? null);
+        done?.();
+      }}
+    />
+  );
+}
+
+function ModelChoicePicker({
+  port,
+  name,
+  choice,
+  configure,
+  draft = false,
+  busy = false,
+  feedback,
+}: {
+  port: Port;
+  name: string;
+  choice: BotChoice;
+  configure: (
+    model: CatalogModel | null,
+    effort: string | null,
+    speed: string,
+    done?: () => void,
+  ) => void;
+  draft?: boolean;
+  busy?: boolean;
+  feedback?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(""),
     [active, setActive] = useState(0);
   const trigger = useRef<HTMLButtonElement>(null),
     panel = useRef<HTMLDivElement>(null);
   const id = useId();
-  const action = useAction(port);
   const engine = port.view.engine;
   const models = engine.state === "ready" ? engine.models : [];
   const current =
-    models.find((m) =>
-      bot.choice.model ? m.id === bot.choice.model : m.isDefault,
-    ) ?? null;
+    models.find((m) => (choice.model ? m.id === choice.model : m.isDefault)) ??
+    null;
   const shown = models.filter((m) =>
     m.displayName.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );
@@ -62,26 +133,8 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [open]);
-  function configure(
-    model: CatalogModel | null,
-    effort: string | null,
-    speed: string,
-    done?: () => void,
-  ) {
-    void action.perform(
-      {
-        type: "bot.configure",
-        requestId: uid(),
-        botId: bot.id,
-        model: model?.id ?? null,
-        effort,
-        speed,
-      },
-      done,
-    );
-  }
   function choose(model: CatalogModel) {
-    if (model.id === current?.id && bot.choice.model !== null) close(true);
+    if (model.id === current?.id && choice.model !== null) close(true);
     else configure(model, null, "standard", () => close(true));
   }
   const label =
@@ -89,7 +142,7 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
       ? "Chargement des modèles…"
       : engine.state === "unavailable"
         ? "Modèles indisponibles"
-        : (current?.displayName ?? bot.choice.model ?? "Modèle par défaut");
+        : (current?.displayName ?? choice.model ?? "Modèle par défaut");
   return (
     <div className="model-picker">
       <button
@@ -98,18 +151,21 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
         className="model-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Modèle de ${bot.name} : ${label}`}
+        aria-label={`Modèle de ${name} : ${label}`}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
         <Cpu size={14} aria-hidden="true" />
-        <span>{action.busy ? "Enregistrement…" : label}</span>
+        <span>
+          {draft ? "Modèle : " : ""}
+          {busy ? "Enregistrement…" : label}
+        </span>
         <ChevronDown size={13} aria-hidden="true" />
       </button>
       {open && (
         <div
           ref={panel}
           role="dialog"
-          aria-label={`Modèle de ${bot.name}`}
+          aria-label={`Modèle de ${name}`}
           className="model-panel"
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -119,6 +175,17 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
             }
           }}
         >
+          {draft && (
+            <button
+              type="button"
+              className="link"
+              onClick={() =>
+                configure(null, null, "standard", () => close(true))
+              }
+            >
+              Modèle par défaut
+            </button>
+          )}
           {engine.state !== "ready" ? (
             <p className="model-note" role="status">
               {engine.state === "starting"
@@ -176,11 +243,11 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
                   <li className="model-note">Aucun modèle trouvé.</li>
                 )}
               </ul>
-              {current && (
+              {current && !draft && (
                 <div className="model-tuning">
                   <Choices
                     legend="Réflexion"
-                    value={bot.choice.effort ?? ""}
+                    value={choice.effort ?? ""}
                     options={[
                       [
                         "",
@@ -191,13 +258,13 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
                       ),
                     ]}
                     onChange={(effort) =>
-                      configure(current, effort || null, bot.choice.speed)
+                      configure(current, effort || null, choice.speed)
                     }
                   />
                   {current.speeds.some((s) => s.id !== "standard") && (
                     <Choices
                       legend="Vitesse"
-                      value={bot.choice.speed}
+                      value={choice.speed}
                       options={[
                         ["standard", "Standard"],
                         ...current.speeds
@@ -205,7 +272,7 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
                           .map((s) => [s.id, s.name] as const),
                       ]}
                       onChange={(speed) =>
-                        configure(current, bot.choice.effort, speed)
+                        configure(current, choice.effort, speed)
                       }
                     />
                   )}
@@ -213,7 +280,7 @@ export function ModelPicker({ port, bot }: { port: Port; bot: BotView }) {
               )}
             </>
           )}
-          {action.feedback}
+          {feedback}
         </div>
       )}
     </div>

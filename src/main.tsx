@@ -65,6 +65,7 @@ function App() {
     [sidebar, setSidebar] = useState(false),
     [dialog, setDialog] = useState<"computer" | "settings" | null>(null),
     [botSheet, setBotSheet] = useState<BotSheetTarget | null>(null),
+    [creation, setCreation] = useState(0),
     [greeted, setGreeted] = useState(0),
     [route, setRoute] = useState<Route>({ page: "chat", botId: "" });
   const [selectionPending, setSelectionPending] =
@@ -404,7 +405,11 @@ function App() {
             {port && selectedBot && route.page === "chat" ? (
               <>
                 <BotSwitcher port={port} bot={selectedBot} />
-                <ModelPicker port={port} bot={selectedBot} />
+                <ModelPicker
+                  key={`${port.view.spaceId}:${selectedBot.id}`}
+                  port={port}
+                  bot={selectedBot}
+                />
               </>
             ) : (
               <strong>
@@ -636,9 +641,23 @@ function App() {
           )}
         </Sheet>
       )}
-      {port && botSheet && (
+      {port && (
         <BotSheet
-          key={botSheet.mode === "edit" ? botSheet.botId : "new"}
+          key={`${port.view.spaceId}:create:${creation}`}
+          port={port}
+          target={{ mode: "create" }}
+          open={botSheet?.mode === "create"}
+          onClose={() => setBotSheet(null)}
+          onCreated={(botId) => {
+            go({ page: "chat", botId });
+            setGreeted((n) => n + 1);
+            setCreation((n) => n + 1);
+          }}
+        />
+      )}
+      {port && botSheet?.mode === "edit" && (
+        <BotSheet
+          key={`${port.view.spaceId}:${botSheet.botId}`}
           port={port}
           target={botSheet}
           onClose={() => setBotSheet(null)}

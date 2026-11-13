@@ -683,3 +683,20 @@ test('v1 migration preserves real links, HMAC replay and immutable history, and 
   const guest = claim(reopened); assert.equal(guest.botId, 'pixel');
   reopened.close();
 });
+
+test('creation stores its chosen model atomically and replays after reopening', () => {
+  const first = open();
+  const command = { type: 'bot.create', requestId: rid(), name: 'Modèle durable', title: '', shape: 'sprout', color: '#8de343', model: 'fake-sol', instructions: 'Une phrase.' };
+  const created = ok(first.store.dispatch(command));
+  first.store.close();
+  const second = open(first.path);
+  try {
+    const replay = second.store.dispatch(command);
+    assert.equal(replay.ok && replay.replayed, true);
+    assert.equal(second.store.view().bots.filter(b => b.name === command.name).length, 1);
+    const bot = second.store.view().bots.find(b => created.kind === 'bot' && b.id === created.botId);
+    assert.deepEqual(bot?.choice, { model: 'fake-sol', effort: null, speed: 'standard' });
+    assert.equal(bot?.instructions, 'Une phrase.');
+    assert.equal(second.store.dispatch({ ...command, model: null }).ok, false);
+  } finally { second.store.close(); }
+});

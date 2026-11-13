@@ -1110,8 +1110,8 @@ export function openStore(options: StoreOptions): Store {
         const botId = newId('b');
         run(
           `INSERT INTO bots(id, position, name, title, shape, color, default_shape, default_color, model, effort, speed, instructions, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
-          botId, position, command.name, command.title, command.shape, command.color, command.shape, defaultColor, STANDARD_SPEED, command.instructions ?? '', now(),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+          botId, position, command.name, command.title, command.shape, command.color, command.shape, defaultColor, command.model ?? null, STANDARD_SPEED, command.instructions ?? '', now(),
         );
         return { kind: 'bot', botId };
       }
