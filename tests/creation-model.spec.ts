@@ -2,9 +2,12 @@ import { mkdirSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import type { AppView } from "../server/src/protocol";
 
-const TOOLS = process.env.MINO_CREATION_TOOLS_URL ?? "http://127.0.0.1:4398";
+const TOOLS =
+  process.env.MINO_CREATION_TOOLS_URL ??
+  `http://127.0.0.1:${process.env.MINO_QA_TOOLS_PORT ?? "4398"}`;
 const OFFLINE =
-  process.env.MINO_CREATION_OFFLINE_URL ?? "http://127.0.0.1:4399";
+  process.env.MINO_CREATION_OFFLINE_URL ??
+  `http://127.0.0.1:${process.env.MINO_QA_PORT ?? "4399"}`;
 
 test("le modèle choisi avant création est envoyé une seule fois et reste après recharge", async ({
   page,
