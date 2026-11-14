@@ -464,6 +464,9 @@ export function EventsPage({
   );
   return (
     <div className="content-page ez-events">
+      <button className="outline" onClick={() => port.go({ page: "routines" })}>
+        Routines : une demande à heure fixe
+      </button>
       <div className="eyebrow">ÉVÉNEMENTS DE SERVICE SUR CET ORDINATEUR</div>
       <h1>Une demande, quand un service l’annonce.</h1>
       <div className="notice" role="status">

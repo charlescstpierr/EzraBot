@@ -40,7 +40,8 @@ test("un abonnement se crée inactif, refuse avant activation, crée une seule d
 }) => {
   mkdirSync(EVIDENCE, { recursive: true });
   await page.goto(QA);
-  await page.getByRole("button", { name: "Événements" }).click();
+  await page.getByRole("button", { name: "Routines" }).click();
+  await page.getByRole("button", { name: /^Événements de service/ }).click();
   await expect(
     page.getByRole("heading", {
       name: "Une demande, quand un service l’annonce.",

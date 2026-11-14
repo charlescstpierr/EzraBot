@@ -16,7 +16,6 @@ import {
   Sparkles,
   Users,
   CalendarClock,
-  Webhook,
 } from "lucide-react";
 import type { CommandOf } from "../server/src/protocol";
 import type { PcView } from "../server/src/tools-protocol";
@@ -311,7 +310,6 @@ function App() {
     { id: "carnet", label: "Carnet", Icon: BookOpen },
     { id: "characters", label: "Personnages", Icon: Users },
     { id: "routines", label: "Routines", Icon: CalendarClock },
-    { id: "events", label: "Événements", Icon: Webhook },
   ];
   function openHome() {
     const bot = view?.bots.find((b) => b.id === "mino");
@@ -349,14 +347,18 @@ function App() {
           {nav.map(({ id, label, Icon }) => (
             <button
               key={id}
-              className={route.page === id ? "nav-item selected" : "nav-item"}
+              className={
+                route.page === id ||
+                (id === "routines" && route.page === "events")
+                  ? "nav-item selected"
+                  : "nav-item"
+              }
               onClick={() => {
                 if (id === "chat") openHome();
                 else if (id === "missions") go({ page: "missions" });
                 else if (id === "results") go({ page: "results" });
                 else if (id === "projects") go({ page: "projects" });
                 else if (id === "routines") go({ page: "routines" });
-                else if (id === "events") go({ page: "events" });
                 else if (id === "characters")
                   go({
                     page: "characters",

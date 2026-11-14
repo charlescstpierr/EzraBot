@@ -45,7 +45,7 @@ Ces chiffres sont des règles produit, pas des capacités mesurées.
 
 ## L’abonnement
 
-Sur le PC, page « Événements ». Le personnage, le compte, le déclencheur et le transport ne changent jamais. Un abonnement créé est inactif. L’activation exige la réception configurée et un compte dont le dernier état connu est `ACTIVE`.
+Sur le PC, page « Événements de service », ouverte depuis la page Routines ou depuis une demande d’événement dans le fil. Le personnage, le compte, le déclencheur et le transport ne changent jamais. Un abonnement créé est inactif. L’activation exige la réception configurée et un compte dont le dernier état connu est `ACTIVE`.
 
 On règle la consigne, les champs copiés et la limite par jour (1 à 50, 20 au départ). Chaque modification, pause, reprise ou révocation fait avancer la révision. Un deuxième onglet resté sur l’ancienne révision est refusé.
 
