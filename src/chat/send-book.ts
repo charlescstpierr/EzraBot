@@ -360,15 +360,17 @@ export function openSendBook(options: {
     /** The gone marker blocks a late response or stale tab from restoring a deleted bot. */
     purge(botIds: readonly string[]): void {
       if (!botIds.length) return;
-      for (const bot of botIds) {
-        gone.add(bot);
-        try {
-          if (storage) storage.setItem(goneKey(bot), "1");
-          else status = "unavailable";
-        } catch {
-          status = "storage-error";
-        }
+      if (!storage) {
+        status = "unavailable";
+        return;
       }
+      try {
+        for (const bot of botIds) storage.setItem(goneKey(bot), "1");
+      } catch {
+        status = "storage-error";
+        return;
+      }
+      for (const bot of botIds) gone.add(bot);
       for (const row of own.values())
         if (botIds.includes(row.command.botId))
           own.delete(row.command.requestId);
