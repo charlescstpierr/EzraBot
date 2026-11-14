@@ -46,6 +46,8 @@ type Options = {
   provider?: FakeProvider;
   /** The store's clock. */
   now?: () => string;
+  /** The event transport the store receives. */
+  events?: { transport: string };
 };
 
 /** The real store, worker, desk and HTTP server, in front of a fake Honcho and the fake App Server. */
@@ -65,6 +67,7 @@ export async function startMemory(options: Options) {
   const store = openStore({
     path, mascots, serviceTools: options.provider !== undefined, ...(options.now ? { now: options.now } : {}), policy: options.honcho ? withMemoryCapabilities(declared) : declared,
     ...(options.honcho ? { memory: { workspacePrefix: PREFIX } } : {}),
+    ...(options.events ? { events: options.events } : {}),
   });
   const engineOptions = { command: process.execPath, workDir: dir, clientVersion: 'test', turnTimeoutMs: 5000, requestTimeoutMs: 2000, interruptGraceMs: 300 };
   const chat = createCodexEngine({ ...engineOptions, args: [fixture, options.scenario ?? 'reply'], ...(options.provider ? { dynamicTools: true as const } : {}) });

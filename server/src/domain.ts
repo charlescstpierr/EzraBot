@@ -108,6 +108,7 @@ export const ENGINE_ERRORS = {
   interrupted: 'Mino s’est arrêté pendant cet appel. Relancez-le quand vous voulez.',
   admission_refused: 'Mino n’a pas admis cet appel. Rien n’est parti.',
   memory_changed: 'La mémoire de cette conversation a changé pendant cet appel : une source a été corrigée, exclue ou oubliée. Mino n’a rien publié. Relancez la demande.',
+  source_moved: 'L’abonnement de cet événement a été mis en pause, révoqué ou modifié, ou sa réception n’est plus configurée. Mino n’a rien lancé ni publié.',
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;

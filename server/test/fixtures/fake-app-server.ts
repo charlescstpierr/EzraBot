@@ -107,7 +107,9 @@ function toolArguments(tool: string, request: string, input: string): Record<str
 
 const EARLY_ID = 'outil-précoce';
 const TOOL_SCENARIOS = new Set(['tool-call', 'tool-call-number-id', 'tool-call-early', 'tool-call-twice', 'tool-call-then-fail', 'tool-call-hang',
-  'tool-call-owned-namespace', 'tool-call-no-namespace', 'tool-item-foreign-namespace', 'tool-item-no-namespace', 'tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool', 'tool-item-foreign', 'tool-then-approval']);
+  'tool-call-owned-namespace', 'tool-call-no-namespace', 'tool-item-foreign-namespace', 'tool-item-no-namespace', 'tool-call-wrong-turn', 'tool-call-wrong-thread', 'tool-call-namespace', 'tool-call-unknown-tool', 'tool-item-foreign', 'tool-then-approval',
+  /** Calls a service tool even though Mino registered none on this thread. */
+  'tool-call-unoffered']);
 
 /**
  * A turn that calls one registered tool, waits for Mino's real answer, and only then writes its reply.
@@ -116,7 +118,7 @@ const TOOL_SCENARIOS = new Set(['tool-call', 'tool-call-number-id', 'tool-call-e
 async function toolTurn(threadId: string, turnId: string, input: string, early: Promise<Record<string, unknown>> | null) {
   const registered = threadTools.get(threadId) ?? [];
   const request = input.split('\n').at(-1) ?? '';
-  const tool = scenario === 'tool-call-unknown-tool' ? 'COMPOSIO_MULTI_EXECUTE_TOOL' : registered[0] ?? 'AUCUN_OUTIL';
+  const tool = scenario === 'tool-call-unknown-tool' ? 'COMPOSIO_MULTI_EXECUTE_TOOL' : scenario === 'tool-call-unoffered' ? 'GITHUB_CREATE_AN_ISSUE' : registered[0] ?? 'AUCUN_OUTIL';
   const params = {
     threadId: scenario === 'tool-call-wrong-thread' ? 'thread-elsewhere' : threadId,
     turnId: scenario === 'tool-call-wrong-turn' ? 'turn-elsewhere' : turnId,
@@ -181,7 +183,7 @@ function startTurn(params: Record<string, unknown>) {
   activeTurn = { threadId, turnId };
   if (oneRead) turnLines = [];
   const first = Array.isArray(params.input) && isRecord(params.input[0]) ? String(params.input[0].text) : '';
-  const withTools = TOOL_SCENARIOS.has(scenario) && (threadTools.get(threadId)?.length ?? 0) > 0;
+  const withTools = TOOL_SCENARIOS.has(scenario) && ((threadTools.get(threadId)?.length ?? 0) > 0 || scenario === 'tool-call-unoffered');
   // Sent before this function returns, so it reaches Mino before the answer to turn/start.
   const early = scenario === 'tool-call-early' && withTools
     ? ask(EARLY_ID, 'item/tool/call', { threadId, turnId, callId: 'call-1', namespace: 'ezrabot_services', tool: threadTools.get(threadId)?.[0], arguments: toolArguments(threadTools.get(threadId)?.[0] ?? '', first.split('\n').at(-1) ?? '', first) })
