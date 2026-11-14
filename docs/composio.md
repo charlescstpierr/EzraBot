@@ -25,11 +25,12 @@ Aucune clé n’a été fournie pendant ce travail. Voir les sections 4 et 8.
 | `server/src/tools-protocol.ts` | Contrat réservé au PC : commandes, vues et réponses. Il n’est pas copié vers le client mobile. |
 | `server/src/tool-ledger.ts` | Grand livre SQLite : comptes, liens, droits, propositions, reçus. Il utilise la base du store. Il ne fait aucun appel réseau. |
 | `server/src/source.ts` | Version de document figée avec une demande : relecture, empreinte du contenu, comparaison avec la dernière version. |
+| `server/src/connection.ts` | Demande de connexion proposée par un personnage : une ligne par tour, le service nommé et le lien lancé depuis la carte. Aucun état de compte, aucun appel réseau. |
 | `server/src/composio.ts` | Seul fichier qui importe `@composio/core`. Il rend des données simples et des catégories d’erreur. |
 | `server/src/tool-desk.ts` | Guichet : il lit le fournisseur, puis il demande la décision au grand livre. Il porte les routes `/api/tools/*`. |
 | `server/src/child-env.ts` | Retire les variables `COMPOSIO_*` de l’environnement des processus Codex. |
 | `server/src/engine.ts` | Le moteur du chat accepte les appels `item/tool/call` de ses propres outils. Tout le reste est refusé comme avant. |
-| `server/src/context.ts` | Règles du tour avec outils, et règles du tour de compte rendu. |
+| `server/src/context.ts` | Règles du tour avec outils, règles du tour de compte rendu, et champ `connection` de la réponse quand une clé est configurée. |
 
 Le paquet `@composio/core` est fixé à la version exacte `0.29.0`. `ajv` est fixé à `8.20.0`.
 
@@ -39,7 +40,7 @@ Le paquet `@composio/core` est fixé à la version exacte `0.29.0`. `ajv` est fi
 |---|---|
 | Préférences, section « Services connectés » | Relier un compte d’un service du catalogue. Vérifier sa connexion. |
 | Page d’un personnage, section « Services connectés » | Choisir un compte et les outils que ce personnage peut proposer. Retirer un droit. |
-| Fil de conversation | Lire la carte exacte de l’action. Approuver ou refuser. Lire le reçu. Relancer un compte rendu en échec. |
+| Fil de conversation | Lire la carte exacte de l’action. Approuver ou refuser. Lire le reçu. Relancer un compte rendu en échec. Relier un compte depuis la carte de connexion qu’un personnage propose. Voir la section 5. |
 | Composeur | Le choix « Utiliser les services connectés » apparaît seulement si le personnage a des droits. |
 | Page d’un document | Préparer une action depuis la version que vous lisez. Voir la section 3. |
 
@@ -47,7 +48,8 @@ Le paquet `@composio/core` est fixé à la version exacte `0.29.0`. `ajv` est fi
 
 - Le moteur des documents et le moteur des missions n’ont aucun outil Composio.
 - MCP, la recherche web et les outils natifs de Codex restent désactivés.
-- Le client mobile ne voit pas les services. Il ne peut ni donner un droit, ni approuver, ni relancer.
+- Le client mobile ne voit pas les services. Il ne peut ni donner un droit, ni approuver, ni relancer, ni relier un compte. Il lit seulement le texte du personnage, qui renvoie au PC.
+- Le personnage ne reçoit aucun outil de connexion. Il nomme un service dans sa réponse, rien de plus.
 - Sans clé, EzraBot fonctionne comme avant.
 
 ## 3. Comment une action se déroule
@@ -143,6 +145,31 @@ Les autres méthodes (clé d’API, par exemple) sont listées comme indisponibl
 L’adresse de connexion reste transitoire dans la page qui l’a demandée. Elle ne va pas au stockage du navigateur ni à la vue durable. Un rechargement permet de vérifier le lien existant, mais ne permet pas de rouvrir son ancienne adresse.
 Aucun droit n’est donné par la connexion. Les parcours Composio sont testés avec un fournisseur simulé, sans clé réelle. La validation du transport avec le vrai Codex ne prouve pas une connexion réelle à Composio.
 
+### Relier un compte depuis le fil
+
+Quand votre demande exige un service que le personnage ne peut pas utiliser, il peut proposer une **carte de connexion** sous sa réponse.
+
+1. Lisez la carte. Elle nomme le service proposé. Rien n’a encore été demandé au fournisseur.
+2. Choisissez **Connecter**. La fenêtre du fournisseur s’ouvre, comme dans les préférences. Si le navigateur la bloque, utilisez **Ouvrir la page de connexion**.
+3. Revenez dans EzraBot. La carte relit le compte chez le fournisseur pendant deux minutes au maximum. **Vérifier maintenant** relit tout de suite.
+4. Quand la carte affiche « Compte connecté », choisissez **Voir les droits** pour ouvrir la page du personnage. Donnez-y les droits voulus, comme aux étapes 6 à 8.
+
+Après un rechargement ou un redémarrage, la carte retrouve son état. Elle ne contrôle rien toute seule : **Vérifier la connexion** reprend le lien existant, **Relancer la connexion** en crée un nouveau. Une erreur du fournisseur laisse la carte telle quelle.
+
+Le nom du service vient du personnage. EzraBot le compare seulement au catalogue de ce serveur, au moment du clic. Un service absent du catalogue, non connectable, ou présent avec plusieurs configurations n’est pas relié depuis la carte ; la carte l’indique.
+
+### Demande de connexion, compte connecté, droit attribué
+
+Ces trois choses sont distinctes. Aucune n’entraîne la suivante.
+
+| Chose | Qui la crée | Ce qu’elle permet |
+|---|---|---|
+| Demande de connexion | Le personnage, dans sa réponse. | Rien. C’est une proposition affichée dans le fil. |
+| Compte connecté | Vous, dans la fenêtre du fournisseur. EzraBot le constate seulement en relisant le fournisseur. | Rien pour le personnage. Le compte devient disponible dans les pages des personnages. |
+| Droit attribué | Vous, dans la page du personnage. | Le personnage peut proposer cette action. Chaque action attend encore votre confirmation. |
+
+Un personnage sans droit reste sans droit après la connexion. Une action refusée reste refusée. Aucun tour du personnage ne part quand un compte devient connecté.
+
 ## 6. Le choix du composeur
 
 Quand un personnage a des droits, le composeur affiche « Utiliser les services connectés ». Il est coché au départ.
@@ -164,8 +191,11 @@ Tous ces tests utilisent des doublures. Tous les comptes, actions, adresses et r
 | `server/test/engine.test.ts` | Vrai moteur, faux Codex | Aller-retour `item/tool/call`, identifiant texte ou nombre, appel précoce, mauvais tour, mauvais fil, espace de noms, outil inconnu, demande native refusée. |
 | `server/test/tools-flow.test.ts` | Vrai store, vrai worker, vrai HTTP, vrai moteur, faux Codex, faux fournisseur | Toute la chaîne : 0 envoi avant l’approbation, 1 envoi après. Origine et jeton. Schéma périmé. Révocation. Arrêt pendant l’envoi. Compte rendu en échec. |
 | `server/test/source-flow.test.ts` | Les mêmes pièces, plus le vrai moteur de documents | Version source figée : 0 envoi avant l’approbation, 1 après. Ancienne version choisie exprès. Nouvelle version ou droit retiré après la préparation, puis après l’approbation : 0 envoi. Texte modifié ou source disparue hors d’EzraBot : 0 envoi. Budget épuisé. Arrêt et délai dépassé sans second envoi. Refus du serveur sans rien créer. |
+| `server/test/connection.test.ts` | Vrai store SQLite | Une demande par tour sous la bonne réponse, sans lien, compte ni droit. Nom de service invalide ou interne ignoré. Rien sans clé, ni en compte rendu, ni en document. État suivi sur le lien seulement. Gardes de la base. Suppression. Migration. |
+| `server/test/connection-flow.test.ts` | Vrai store, vrai worker, vrai HTTP, vrai moteur, faux Codex, faux fournisseur | 0 appel au fournisseur avant le clic. Connecté seulement après relecture. Aucun droit après connexion. Deux onglets : un seul lancement. Clic périmé refusé. Panne, service inconnu ou ambigu : demande intacte. Reprise après redémarrage. Adresse absente de la base, de la vue et des journaux. Origine et jeton. |
 | `server/test/devices.test.ts` | Vrai serveur des téléphones | Un téléphone associé reçoit 422 pour chaque commande `tools.*`. Sa vue n’a pas de champ `tools`. |
 | `tests/composio-parcours.spec.ts` | Navigateur, serveur de recette 4398 | Parcours React complet, résultat inconnu, relance du compte rendu, reprise après rechargement, absence de clé (port 4399). |
+| `tests/connexion-fil-parcours.spec.ts` | Navigateur, serveur de recette 4398 | Carte sous la réponse sans appel au fournisseur. Double clic : une fenêtre, un lancement. État connecté après le retour. Droits toujours vides. Fenêtre bloquée, attente après rechargement sans contrôle automatique, échec puis relance, largeur 390. Service hors catalogue. Compte déjà connecté. Droits déjà donnés. |
 | `tests/source-parcours.spec.ts` | Navigateur, serveur de recette 4398 | Depuis le lecteur : état sans droit, saisie non enregistrée, ancienne version, bandeau du composeur, carte avec sa version source, approbation, carte périmée après une nouvelle version. |
 
 Commandes :
@@ -177,7 +207,7 @@ node server/mobile/scripts/sync-contract.mjs --check
 npm run test:ui
 ```
 
-La recette finale passe : typage, 338 tests serveur, quatre contrats mobiles identiques et 67 tests navigateur.
+La recette finale passe : typage, 352 tests serveur, quatre contrats mobiles identiques et 70 tests navigateur.
 
 ### Transport avec le vrai modèle
 
@@ -200,6 +230,8 @@ Ces points demandent une clé réelle et un compte autorisé. Ils n’ont pas é
 
 - Une connexion OAuth réelle et un compte `ACTIVE` chez Composio.
 - Une exécution réelle d’outil.
+- Le champ `connection` rempli par le vrai modèle. Les tests utilisent un faux Codex. Le schéma reprend la forme du champ `handoff` déjà envoyé au vrai moteur, mais aucun tour réel n’a été lancé avec lui. Le choix du nom de service par le modèle n’est donc pas observé.
+- Une connexion OAuth réelle lancée depuis la carte du fil.
 - La chaîne complète entre le vrai modèle et un vrai outil Composio. La sonde ci-dessus vérifie seulement le transport vers un outil local neutre.
 - La présence d’une version dans le catalogue brut réel. Si Composio n’en rend pas, aucun outil ne peut être donné. Il faudrait alors une décision écrite du propriétaire.
 - L’acceptation par Composio d’une adresse de retour locale `http://127.0.0.1`. Le bouton **Vérifier la connexion** fonctionne sans ce retour.
@@ -233,6 +265,10 @@ Pour vérifier la chaîne complète, le propriétaire :
 - **Une approbation enregistrée juste avant un arrêt est envoyée une fois au redémarrage.** Les vérifications sont refaites à ce moment.
 - **Fournisseur injoignable après l’approbation :** l’action est annulée avant l’envoi. Il n’y a pas de nouvel essai automatique.
 - **OAuth 2 seulement** pour relier un compte depuis EzraBot.
+- **Un service par réponse.** Un personnage propose au plus une connexion par tour.
+- **Plusieurs configurations d’un même service :** la carte du fil ne choisit pas. Reliez ce compte depuis les préférences.
+- **Compte supprimé chez le fournisseur après la connexion :** la vérification d’un lien ne change rien quand le fournisseur ne connaît plus le compte. La carte et les préférences peuvent donc encore afficher « connecté ». Une approbation relit le compte et périme alors la proposition.
+- **Lancement interrompu :** si EzraBot s’arrête entre la demande au fournisseur et l’enregistrement du lien, le fournisseur garde une demande sans suite. L’adresse n’a jamais été remise au navigateur, donc aucun compte ne peut en naître. La carte revient à son état et vous relancez.
 - **Pas de suppression de compte** depuis EzraBot. Retirez les droits, puis supprimez le compte chez Composio.
 - **Le nom du compte** est celui que vous donnez. EzraBot ne lit pas l’adresse du compte chez le service.
 - **Les schémas d’outil viennent du fournisseur.** Un schéma illisible ou trop grand rend l’outil indisponible.
@@ -246,6 +282,8 @@ Pour vérifier la chaîne complète, le propriétaire :
 - Le résumé d’un résultat est limité à 16 Kio. Les champs dont le nom ressemble à un secret sont retirés.
 - L’identité du propriétaire chez Composio est un UUID privé, créé dans la base. Il n’est jamais affiché.
 - Les journaux du guichet contiennent une action, un succès et une catégorie. Rien d’autre.
+- Une demande de connexion garde le nom du service et le lien lancé. L’adresse de connexion existe seulement dans la réponse HTTP du lancement et dans la page qui l’a reçue. Elle n’est jamais écrite dans un message, le contexte du modèle, la base ou un journal.
+- Le modèle ne reçoit ni catalogue, ni compte, ni lien, ni état de connexion.
 - Les routes `/api/tools/*` demandent le jeton de session du PC. Les écritures demandent aussi l’origine exacte. Seul le retour de connexion `/api/tools/callback` est ouvert ; il ne fait que relire le compte chez le fournisseur.
 
 
