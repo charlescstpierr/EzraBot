@@ -46,7 +46,7 @@ La date est sautée quand une demande précédente de la routine :
 - a une action de service proposée, approuvée sans envoi, ou dont le reçu est en cours ;
 - a ouvert une mission encore active.
 
-La routine attend votre vérification quand un effet précédent est incertain : un appel du modèle parti sans fin enregistrée, une action de service sans réponse fiable, ou une mission arrêtée sans résultat confirmé. Pour reprendre, confirmez cet effet précis sur le PC. La reprise ne relance rien, ne change pas l’ancien travail, sa réservation ni son approbation. Elle autorise seulement les dates futures. Un nouvel effet incertain demande une nouvelle confirmation.
+La routine attend votre vérification quand un effet précédent est incertain : un appel du modèle parti sans fin enregistrée, une action de service sans réponse fiable, ou une mission arrêtée sans résultat confirmé. Pour reprendre, confirmez cet effet précis sur le PC. La reprise ne relance rien, ne change pas l’ancien travail, sa réservation ni son approbation. Elle autorise seulement les dates futures. Un nouvel effet incertain demande une nouvelle confirmation, même si la même mission ou une de ses étapes est interrompue une seconde fois.
 
 Un échec certain et terminé, par exemple un budget du jour épuisé, ne bloque pas. Le jour suivant crée une nouvelle demande. L’ancienne n’est jamais remise en file.
 
@@ -58,8 +58,9 @@ Un échec certain et terminé, par exemple un budget du jour épuisé, ne bloque
 
 ## Pause, suppression et personnage supprimé
 
+- Une routine en attente de vérification garde cette attente après une demande de pause.
 - La pause arrête les prochaines demandes. Elle n’arrête pas un appel déjà parti : utilisez les commandes du travail.
-- Supprimer une routine efface ses textes et ses décisions. Les demandes déjà envoyées restent dans le fil.
+- Supprimer une routine efface ses textes, ses décisions et les empreintes de ses commandes. Les demandes déjà envoyées restent dans le fil.
 - Supprimer un personnage efface ses routines avec son fil. La confirmation affiche leur nombre.
 
 ## Téléphone

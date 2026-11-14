@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { DEFAULT_POLICY } from '../src/admission.js';
@@ -422,18 +425,18 @@ test('a mission opened from a routine reply holds the next date while it runs, a
     await worker.idle();
     const reply = s.store.view().messages.find(m => m.role === 'assistant');
     assert(reply);
-    missions.push({ missionId: 'msn_1', originMessageId: reply.id, status: 'running' });
+    missions.push({ missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'running' });
     s.set('2026-11-17T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
     const open = routineOf(s.store, routineId).last;
     assert.deepEqual(open && open.outcome === 'skipped' && [open.reason, open.blocker], ['previous_open', 'mission:msn_1']);
-    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, status: 'interrupted' };
+    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'interrupted' };
     s.set('2026-11-18T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
-    assert.equal(routineOf(s.store, routineId).heldOn?.key, 'mission:msn_1');
-    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, status: 'accepted' };
+    assert.match(routineOf(s.store, routineId).heldOn?.key ?? '', /^mission:msn_1:/);
+    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'accepted' };
     ok(s.store.dispatch({ type: 'routine.pause', requestId: rid(), routineId }));
-    ok(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId }));
+    ok(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId, confirmBlocker: routineOf(s.store, routineId).heldOn?.key }));
     s.set('2026-11-19T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 1, 'an accepted mission no longer holds the routine');
   } finally {
@@ -615,5 +618,164 @@ test('a routine request is never searched in Honcho nor exported; the shared his
   } finally {
     await app.stop();
     await honcho.close();
+  }
+});
+
+test('a second interrupted attempt of the same mission needs a new confirmation', async () => {
+  const mission: MissionOrigin = { missionId: 'msn_repeat', originMessageId: '', status: 'interrupted', interruptions: ['attempt-1'] };
+  const s = space({ missions: () => [mission] });
+  const h = heldEngine();
+  const worker = createWorker({ store: s.store, engines: { chat: h.engine, doc: h.engine } });
+  try {
+    const id = create(s.store);
+    activate(s.store, id);
+    s.set('2026-11-16T13:30:00Z');
+    s.store.tickRoutines('2026-11-16T12:00:00Z');
+    worker.kick();
+    while (!h.running()) await new Promise((resolve) => setTimeout(resolve, 5));
+    h.finish(answered('Une mission attend.'));
+    await worker.idle();
+    mission.originMessageId = s.store.view().messages.find((m) => m.role === 'assistant')?.id ?? '';
+    assert(mission.originMessageId);
+    s.set('2026-11-17T13:30:00Z');
+    assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
+    const first = routineOf(s.store, id).heldOn?.key;
+    assert(first);
+    ok(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId: id, confirmBlocker: first }));
+    mission.status = 'running';
+    s.set('2026-11-18T13:30:00Z');
+    assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
+    mission.status = 'interrupted';
+    mission.interruptions = ['attempt-1', 'attempt-2'];
+    s.set('2026-11-19T13:30:00Z');
+    assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0, 'the second interruption admits no request');
+    const second = routineOf(s.store, id).heldOn?.key;
+    assert(second);
+    assert.notEqual(second, first);
+    assert.equal(
+      refused(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId: id, confirmBlocker: first })).code,
+      'stale_base',
+    );
+    ok(s.store.dispatch({ type: 'routine.pause', requestId: rid(), routineId: id }));
+    assert.equal(
+      refused(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId: id })).code,
+      'stale_base',
+      'pause cannot bypass the confirmation',
+    );
+    ok(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId: id, confirmBlocker: second }));
+    assert.deepEqual(mission.interruptions, ['attempt-1', 'attempt-2']);
+  } finally {
+    await worker.close();
+    s.store.close();
+  }
+});
+
+test('deleting a routine also erases its private command fingerprints', () => {
+  const s = space();
+  const id = create(s.store);
+  const other = create(s.store, { text: 'Texte témoin conservé.' });
+  ok(
+    s.store.dispatch({
+      type: 'routine.update',
+      requestId: rid(),
+      routineId: id,
+      expectedRevision: 1,
+      ...SCHEDULE,
+      text: 'Une déclaration privée devinable.',
+    }),
+  );
+  ok(s.store.dispatch({ type: 'routine.delete', requestId: rid(), routineId: id }));
+  s.store.close();
+  const db = new DatabaseSync(s.path);
+  try {
+    const erased = db
+      .prepare(
+        "SELECT fingerprint FROM commands WHERE type IN ('routine.create','routine.update') AND json_extract(result,'$.routineId') = ?",
+      )
+      .all(id);
+    assert.equal(erased.length, 2);
+    assert(
+      erased.every((row) => row.fingerprint === ''),
+      'no private text verifier survives deletion',
+    );
+    const kept = db
+      .prepare("SELECT fingerprint FROM commands WHERE type = 'routine.create' AND json_extract(result,'$.routineId') = ?")
+      .get(other);
+    assert(kept?.fingerprint);
+  } finally {
+    db.close();
+  }
+});
+
+test('the compiled server restarts with an answered routine held on an uncertain call', async () => {
+  const s = space();
+  const h = heldEngine();
+  const worker = createWorker({ store: s.store, engines: { chat: h.engine, doc: h.engine } });
+  const id = create(s.store);
+  activate(s.store, id);
+  try {
+    s.set('2026-11-16T13:30:00Z');
+    s.store.tickRoutines('2026-11-16T12:00:00Z');
+    worker.kick();
+    while (!h.running()) await new Promise((resolve) => setTimeout(resolve, 5));
+    h.finish(answered('Première réponse.'));
+    await worker.idle();
+    s.set('2026-11-17T13:30:00Z');
+    s.store.tickRoutines('2026-11-16T12:00:00Z');
+    const claim = s.store.claimNext('chat');
+    assert(claim);
+    assert(s.store.depart(claim).ok);
+    s.store.recoverInterrupted();
+    s.set('2026-11-18T13:30:00Z');
+    s.store.tickRoutines('2026-11-16T12:00:00Z');
+    assert.equal(routineOf(s.store, id).state, 'held');
+  } finally {
+    await worker.close();
+    s.store.close();
+  }
+  const port = await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') return reject(Error('Port absent'));
+      server.close(() => resolve(address.port));
+    });
+  });
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../src/main.js', import.meta.url))], {
+    env: { PATH: process.env.PATH, MINO_PORT: String(port), MINO_DATA_DIR: dirname(s.path), MINO_CODEX_BIN: '/bin/false' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('Server startup timed out: ' + output)), 10000);
+      child.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(Error('Server exited ' + code + ': ' + output));
+      });
+      child.stderr.on('data', (data) => {
+        output += String(data);
+      });
+      child.stdout.on('data', (data) => {
+        output += String(data);
+        if (output.includes('"event":"ready"')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    const response = await fetch(`http://127.0.0.1:${port}/api/view`);
+    assert.equal(response.status, 200);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const done = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      child.kill('SIGTERM');
+      await done;
+    }
   }
 });

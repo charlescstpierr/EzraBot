@@ -1,3 +1,4 @@
+import { missionOrigins } from "../server/dist/src/routines.js";
 // Isolated browser QA: synthetic SQLite data, deliberately unavailable engine, no provider calls.
 // With MINO_QA_TOOLS=1 the chat lane runs the real engine against the fake App Server process,
 // and connected services use the fake provider: every account, action and result is synthetic.
@@ -43,20 +44,7 @@ const startedAt = now();
 const store = openStore({
   path: join(data, "mino.sqlite"),
   now,
-  missions: () =>
-    missions
-      .view()
-      .missions.flatMap((m) =>
-        m.originMessageId === null
-          ? []
-          : [
-              {
-                missionId: m.id,
-                originMessageId: m.originMessageId,
-                status: m.status,
-              },
-            ],
-      ),
+  missions: () => missionOrigins(missions),
   mascots: loadMascots(join(root, "assets/mascots.json")),
   serviceTools: withTools,
   ...(honcho

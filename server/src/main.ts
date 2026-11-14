@@ -14,6 +14,7 @@ import { createAgentEngine } from './agent-engine.js';
 import { createAgentRoutes } from './agent-http.js';
 import { createAgentWorker } from './agent-worker.js';
 import { MissionsLockedError, openMissions } from './missions.js';
+import { missionOrigins } from './routines.js';
 import { buildMissionChatContext } from './mission-context.js';
 import { HonchoConfigError, takeHonchoConfig, takeProviderKey } from './child-env.js';
 import { withMemoryCapabilities } from './memory-ledger.js';
@@ -65,7 +66,7 @@ const policy = (() => {
 function open(): Store {
   try {
     return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions),
-      missions: () => missions.view().missions.flatMap(m => m.originMessageId === null ? [] : [{ missionId: m.id, originMessageId: m.originMessageId, status: m.status }]),
+      missions: () => missionOrigins(missions),
       serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
@@ -74,10 +75,6 @@ function open(): Store {
 }
 const store = open();
 log({ event: 'budgets', usage: store.admission.usage() });
-if (store.view().erasure === 'incomplete') log({ event: 'erasure', state: 'incomplete' });
-const recovered = store.recoverInterrupted();
-if (recovered) log({ event: 'recovery', interruptedAttempts: recovered });
-
 const engineOptions = { command: process.env.MINO_CODEX_BIN ?? 'codex', workDir, clientVersion: VERSION };
 const missions = (() => {
   try {
@@ -89,6 +86,10 @@ const missions = (() => {
 })();
 const interruptedMissions = missions.recoverInterrupted();
 if (interruptedMissions) log({ event: 'recovery', interruptedMissionAttempts: interruptedMissions });
+if (store.view().erasure === 'incomplete') log({ event: 'erasure', state: 'incomplete' });
+const recovered = store.recoverInterrupted();
+if (recovered) log({ event: 'recovery', interruptedAttempts: recovered });
+
 const agentEngine = createAgentEngine({ command: engineOptions.command, tmpDir: join(dataDir, 'agent-tmp'), clientVersion: VERSION });
 const agentWorker = createAgentWorker({ missions, engine: agentEngine, log, onFatal: () => fail('Le registre des missions a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
 const agents = createAgentRoutes({ missions, worker: agentWorker, engine: agentEngine,

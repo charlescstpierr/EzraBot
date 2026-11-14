@@ -106,6 +106,7 @@ function RoutineForm({
   routine?: RoutineView;
   onDone: (routineId: string) => void;
 }) {
+  const [baseRevision] = useState(routine?.revision ?? 0);
   const [draft, setDraft] = useState<Draft>(() =>
     routine
       ? {
@@ -143,7 +144,7 @@ function RoutineForm({
                 type: "routine.update",
                 requestId: uid(),
                 routineId: routine.id,
-                expectedRevision: routine.revision,
+                expectedRevision: baseRevision,
                 ...fields,
               }
             : { type: "routine.create", requestId: uid(), botId, ...fields },
@@ -153,6 +154,12 @@ function RoutineForm({
         );
       }}
     >
+      {routine && (
+        <p>
+          Cette modification porte sur la révision {baseRevision}. Pour changer
+          de personnage, créez une autre routine.
+        </p>
+      )}
       <fieldset disabled={action.disabled}>
         <label>
           Personnage

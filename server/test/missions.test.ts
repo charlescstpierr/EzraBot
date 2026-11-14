@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { createAgentEngine, type AgentEngineOptions } from '../src/agent-engine.js';
 import { createAgentRoutes } from '../src/agent-http.js';
 import { createAgentWorker } from '../src/agent-worker.js';
+import { missionOrigins } from '../src/routines.js';
 import { openMissions, titleOf } from '../src/missions.js';
 import { checkProjectPath, parseCheckCommand } from '../src/project-guard.js';
 import { admissionIn } from './fixtures/admission.js';
@@ -659,5 +660,55 @@ for (const route of ['commands', 'catalog']) test(`device revocation during pend
   } finally {
     server.closeAllConnections(); await new Promise<void>(r => server.close(() => r()));
     await h.close(); h.box.cleanup();
+  }
+});
+
+test('routine mission facts distinguish successive interrupted attempts of one mission', () => {
+  const box = sandbox();
+  const options = {
+    path: join(box.dataDir, 'routines.sqlite'),
+    minoRoot: box.minoRoot,
+    dataDir: box.dataDir,
+    home: box.home,
+    admission: admissionIn(box.dataDir),
+  };
+  let registry = openMissions(options);
+  try {
+    const project = registry.dispatch({ type: 'project.add', requestId: 'routine-project', path: box.project });
+    assert(project.ok);
+    const mission = registry.dispatch(
+      {
+        type: 'mission.create',
+        requestId: 'routine-mission',
+        projectId: project.id,
+        goal: 'Preuve synthétique',
+        model: null,
+        effort: null,
+        origin: { messageId: 'routine-reply' },
+      },
+      { bot: () => null, origin: () => ({ text: 'Demande synthétique' }) },
+    );
+    assert(mission.ok);
+    assert(registry.claimNext());
+    registry.close();
+    registry = openMissions(options);
+    assert.equal(registry.recoverInterrupted(), 1);
+    const first = missionOrigins(registry).find((m) => m.missionId === mission.id);
+    assert(first);
+    assert.equal(first.status, 'interrupted');
+    assert.equal(first.interruptions.length, 1);
+    assert(registry.dispatch({ type: 'mission.resume', requestId: 'routine-resume', missionId: mission.id }).ok);
+    assert(registry.claimNext());
+    registry.close();
+    registry = openMissions(options);
+    assert.equal(registry.recoverInterrupted(), 1);
+    const second = missionOrigins(registry).find((m) => m.missionId === mission.id);
+    assert(second);
+    assert.equal(second.status, 'interrupted');
+    assert.equal(second.interruptions.length, 2);
+    assert.notDeepEqual(second.interruptions, first.interruptions);
+  } finally {
+    registry.close();
+    box.cleanup();
   }
 });

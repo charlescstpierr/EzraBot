@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { Missions } from './missions.js';
 import type { MissionStatus } from './agent-protocol.js';
 import {
   ROUTINE_LIMITS,
@@ -110,7 +112,29 @@ type Fields = Omit<CommandOf<'routine.create'>, 'type' | 'requestId' | 'botId'>;
 type Revision = Schedule & { n: number; text: string; cap: number };
 
 const OPEN_MISSIONS: readonly MissionStatus[] = ['queued', 'running', 'stopping', 'review', 'outdated', 'waiting'];
-export type MissionOrigin = { missionId: string; originMessageId: string; status: MissionStatus };
+export type MissionOrigin = { missionId: string; originMessageId: string; status: MissionStatus; interruptions: readonly string[] };
+
+export function missionOrigins(registry: Pick<Missions, 'view' | 'detail'>): MissionOrigin[] {
+  return registry.view().missions.flatMap(m => {
+    if (m.originMessageId === null) return [];
+    const pending = [m.id];
+    const seen = new Set<string>();
+    const interruptions = new Set<string>();
+    let uncertain = false;
+    while (pending.length) {
+      const id = pending.pop();
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      const detail = registry.detail(id);
+      if (!detail) continue;
+      for (const attempt of detail.attempts) if (attempt.state === 'interrupted') interruptions.add(attempt.id);
+      uncertain ||= detail.status === 'interrupted' || detail.attempts.at(-1)?.state === 'interrupted';
+      pending.push(...detail.children.map(child => child.id));
+    }
+    const status = uncertain && OPEN_MISSIONS.includes(m.status) ? 'interrupted' : m.status;
+    return [{ missionId: m.id, originMessageId: m.originMessageId, status, interruptions: [...interruptions].sort() }];
+  });
+}
 
 export type RoutineDeps = {
   /** Creates the request and its work through the store's one admission path, inside the caller's transaction. */
@@ -212,7 +236,7 @@ export function createRoutines(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'tra
         const row = routineRow(command.routineId);
         const state = stateOf(row);
         if (state !== 'active' && state !== 'held') deps.refuse('invalid_transition', state === 'paused' ? 'Cette routine est déjà en pause.' : 'Seule une routine active peut être mise en pause.');
-        run(`UPDATE routines SET state = 'paused', held_on = NULL, updated_at = ? WHERE id = ?`, at, command.routineId);
+        run(`UPDATE routines SET state = CASE WHEN state = 'held' THEN 'held' ELSE 'paused' END, updated_at = ? WHERE id = ?`, at, command.routineId);
         return result(command.routineId);
       }
       case 'routine.resume': {
@@ -230,6 +254,7 @@ export function createRoutines(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'tra
       }
       case 'routine.delete': {
         const row = routineRow(command.routineId);
+        run("UPDATE commands SET fingerprint = '' WHERE type LIKE 'routine.%' AND json_extract(result, '$.routineId') = ?", command.routineId);
         for (const [table] of ROUTINE_PURGE_ORDER) run(`DELETE FROM ${table} WHERE ${table === 'routines' ? 'id' : 'routine_id'} = ?`, command.routineId);
         return { kind: 'routine', routineId: command.routineId, revision: int(row, 'revision'), state: stateOf(row) };
       }
@@ -265,7 +290,7 @@ export function createRoutines(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'tra
       .map(row => [str(row, 'id'), str(row, 'work_id')] as const));
     const missions = replies.size ? deps.missions().filter(mission => replies.has(mission.originMessageId)) : [];
     for (const mission of missions.filter(m => m.status === 'interrupted')) {
-      found.push({ key: `mission:${mission.missionId}`, state: 'uncertain', kind: 'mission', workId: replies.get(mission.originMessageId) ?? null, label: 'Une mission ouverte depuis une réponse s’est arrêtée sans résultat confirmé.' });
+      found.push({ key: `mission:${mission.missionId}:${createHash('sha256').update(JSON.stringify(mission.interruptions)).digest('hex')}`, state: 'uncertain', kind: 'mission', workId: replies.get(mission.originMessageId) ?? null, label: 'Une mission ouverte depuis une réponse s’est arrêtée sans résultat confirmé.' });
     }
     const acknowledged = new Set(all('SELECT blocker FROM routine_acks WHERE routine_id = ?', routineId).map(row => str(row, 'blocker')));
     const uncertain = found.filter(blocker => !acknowledged.has(blocker.key));

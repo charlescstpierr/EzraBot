@@ -125,3 +125,91 @@ test("une routine se crée inactive, montre ses créneaux, s’active, envoie un
   await expect(card).toBeVisible();
   await shot(page, "08-telephone-largeur");
 });
+
+test("une modification périmée ne remplace pas celle d’un autre onglet", async ({
+  page,
+  context,
+}) => {
+  const initial = "Routine de conflit " + Date.now();
+  const fresh = initial + " enregistrée par B";
+  const stale = initial + " brouillon A";
+  await page.goto(QA);
+  await page.getByRole("button", { name: "Routines", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Nouvelle routine", exact: true })
+    .click();
+  const create = page.getByRole("form", { name: "Nouvelle routine" });
+  await create.getByLabel("Personnage").selectOption("nova");
+  await create.getByLabel("Texte envoyé dans le fil").fill(initial);
+  await create
+    .getByLabel("Dernier jour")
+    .fill(new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10));
+  await create
+    .getByRole("button", { name: "Enregistrer sans activer", exact: true })
+    .click();
+  const id = (await view(page)).routines.find((r) => r.text === initial)?.id;
+  expect(id).toBeTruthy();
+  await page
+    .getByRole("article")
+    .filter({ hasText: initial })
+    .getByRole("button", { name: "Modifier", exact: true })
+    .click();
+  const first = page.getByRole("form", { name: "Modifier la routine" });
+  await first.getByLabel("Texte envoyé dans le fil").fill(stale);
+  const secondPage = await context.newPage();
+  try {
+    await secondPage.goto(QA);
+    await secondPage
+      .getByRole("button", { name: "Routines", exact: true })
+      .click();
+    await secondPage
+      .getByRole("article")
+      .filter({ hasText: initial })
+      .getByRole("button", { name: "Modifier", exact: true })
+      .click();
+    const second = secondPage.getByRole("form", {
+      name: "Modifier la routine",
+    });
+    await second.getByLabel("Texte envoyé dans le fil").fill(fresh);
+    await second
+      .getByRole("button", { name: "Enregistrer la modification", exact: true })
+      .click();
+    await expect
+      .poll(
+        async () =>
+          (await view(page)).routines.find((r) => r.id === id)?.revision,
+      )
+      .toBe(2);
+    await expect(
+      page.getByRole("article").filter({ hasText: fresh }),
+    ).toContainText("révision 2");
+    await expect(first.getByLabel("Texte envoyé dans le fil")).toHaveValue(
+      stale,
+    );
+    const response = page.waitForResponse(
+      (r) =>
+        r.request().method() === "POST" && r.url().endsWith("/api/commands"),
+    );
+    await first
+      .getByRole("button", { name: "Enregistrer la modification", exact: true })
+      .click();
+    const sent = await response;
+    await page.screenshot({
+      path: "test-results/routines-conflit.png",
+      fullPage: true,
+    });
+    expect(sent.status()).toBe(409);
+    expect((await sent.json()).code).toBe("stale_base");
+    expect((await view(page)).routines.find((r) => r.id === id)?.text).toBe(
+      fresh,
+    );
+    expect((await view(page)).routines.find((r) => r.id === id)?.revision).toBe(
+      2,
+    );
+    await expect(first.getByLabel("Texte envoyé dans le fil")).toHaveValue(
+      stale,
+    );
+  } finally {
+    await secondPage.close();
+  }
+});
