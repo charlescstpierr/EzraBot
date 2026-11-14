@@ -13,8 +13,10 @@ import { createMemoryDesk, type MemoryDesk, type MemoryEvent } from '../../src/m
 import { withMemoryCapabilities } from '../../src/memory-ledger.js';
 import { MemoryCommandSchema, type ScopeView } from '../../src/memory-protocol.js';
 import { openStore } from '../../src/store.js';
+import { createActionDesk } from '../../src/tool-desk.js';
 import type { PcView } from '../../src/tools-protocol.js';
 import { createWorker } from '../../src/worker.js';
+import type { FakeProvider } from './fake-composio.js';
 import type { FakeHoncho } from './fake-honcho.js';
 
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -40,6 +42,8 @@ type Options = {
   scenario?: string;
   path?: string;
   timeoutMs?: number;
+  /** Connected services with this fake provider: the chat engine offers the granted actions and the action desk sends them. */
+  provider?: FakeProvider;
 };
 
 /** The real store, worker, desk and HTTP server, in front of a fake Honcho and the fake App Server. */
@@ -57,22 +61,23 @@ export async function startMemory(options: Options) {
   const budget = options.budget === undefined ? 500 : options.budget;
   const declared = { ...DEFAULT_POLICY, budgets: { ...DEFAULT_POLICY.budgets, ...(budget === null ? {} : { honcho: { callsPerDay: budget } }) } };
   const store = openStore({
-    path, mascots, policy: options.honcho ? withMemoryCapabilities(declared) : declared,
+    path, mascots, serviceTools: options.provider !== undefined, policy: options.honcho ? withMemoryCapabilities(declared) : declared,
     ...(options.honcho ? { memory: { workspacePrefix: PREFIX } } : {}),
   });
   const engineOptions = { command: process.execPath, workDir: dir, clientVersion: 'test', turnTimeoutMs: 5000, requestTimeoutMs: 2000, interruptGraceMs: 300 };
-  const chat = createCodexEngine({ ...engineOptions, args: [fixture, options.scenario ?? 'reply'] });
+  const chat = createCodexEngine({ ...engineOptions, args: [fixture, options.scenario ?? 'reply'], ...(options.provider ? { dynamicTools: true as const } : {}) });
   const doc = createCodexEngine({ ...engineOptions, args: [fixture, 'deliverable'] });
   const logs: MemoryEvent[] = [];
   const desk: MemoryDesk | null = options.honcho ? createMemoryDesk({
     store, config: { baseUrl: options.honcho.url, apiKey: options.honcho.key, workspacePrefix: PREFIX, timeoutMs: options.timeoutMs ?? 2000 },
     allowLoopbackHttpForTests: true, log: entry => logs.push(entry), closeGraceMs: 50,
   }) : null;
-  const worker = createWorker({ store, engines: { chat, doc }, ...(desk ? { memory: desk } : {}) });
+  const port = await freePort();
+  const actions = options.provider ? createActionDesk({ store, provider: options.provider, port, wake: () => worker.kick(), closeGraceMs: 50 }) : null;
+  const worker = createWorker({ store, engines: { chat, doc }, ...(desk ? { memory: desk } : {}), ...(actions ? { tools: actions } : {}) });
   // As the server does once it listens: what a restart left waiting is looked at again.
   desk?.kick();
-  const port = await freePort();
-  const server: Server = createHttpServer({ store, worker, engine: chat, port, root, csrfToken: CSRF, longPollMs: 50 });
+  const server: Server = createHttpServer({ store, worker, engine: chat, port, root, csrfToken: CSRF, longPollMs: 50, ...(actions ? { actions } : {}) });
   await new Promise<void>(r => server.listen(port, '127.0.0.1', r));
   const base = `http://127.0.0.1:${port}`;
   const post = (route: string, body: unknown) => fetch(`${base}${route}`, {
@@ -134,13 +139,13 @@ export async function startMemory(options: Options) {
   const stop = async () => {
     server.closeAllConnections();
     await new Promise<void>(r => server.close(() => r()));
-    await Promise.all([worker.close(), desk?.close()]);
+    await Promise.all([worker.close(), desk?.close(), actions?.close()]);
     await Promise.all([chat.close(), doc.close()]);
     store.recoverInterrupted();
     store.close();
   };
   return {
-    base, dir, path, store, desk, worker, chat, logs, post, view, until, scopeOf, memory, accepted, enable, say, ask, synced, quiet, stop,
+    base, dir, path, store, desk, actions, worker, chat, logs, post, view, until, scopeOf, memory, accepted, enable, say, ask, synced, quiet, stop,
     /** The exact text of the last turn the fake App Server received. */
     turn(): { base: string; input: string } {
       const recorded = JSON.parse(readFileSync(probe, 'utf8')) as { thread: { baseInstructions: string }; turn: { input: { text: string }[] } };
