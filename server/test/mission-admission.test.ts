@@ -39,8 +39,8 @@ function sandbox() {
 type Box = ReturnType<typeof sandbox>;
 
 /** Both registries of one data folder, as `main.ts` opens them: the chat store first, the missions on its admission. */
-function registries(box: Box, policy: AdmissionPolicy = DEFAULT_POLICY) {
-  const store = openStore({ path: box.chatDb, mascots, policy });
+function registries(box: Box, policy: AdmissionPolicy = DEFAULT_POLICY, now?: () => string) {
+  const store = openStore({ path: box.chatDb, mascots, policy, ...(now ? { now } : {}) });
   store.recoverInterrupted();
   const missions = openMissions({ path: box.missionsDb, minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home, admission: store.admission });
   missions.recoverInterrupted();
@@ -114,6 +114,33 @@ test('a mission turn and a chat call share one ceiling: the mission uses the las
     assert.equal(store.dispatch({ type: 'message.send', requestId: rid(), botId: 'nova', text: 'Bonjour', attachments: [] }).ok, true);
     assert.equal(store.claimNext('chat'), null);
     assert.match(store.view().works[0]?.attempt?.error ?? '', /Plafond d’appels du jour atteint pour « codex » : 1 sur 1/);
+  } finally {
+    await real.close();
+    close();
+    rmSync(box.base, { recursive: true, force: true });
+  }
+});
+
+test('a mission reservation from yesterday cannot leave outside today\'s ceiling', async () => {
+  const box = sandbox();
+  let clock = '2026-11-14T23:59:59.000Z';
+  const { store, missions, close } = registries(box, CODEX_ONLY(1), () => clock);
+  const real = realWorker(box, missions);
+  try {
+    const first = created(missions, box);
+    real.worker.kick();
+    clock = '2026-11-15T00:00:01.000Z';
+    await real.ended(first);
+    assert.equal(real.received('turn/start'), 0, 'a permit from yesterday must not start a turn today');
+    assert.equal(codexCalls(store), 0);
+    const second = created(missions, box);
+    real.worker.kick();
+    await real.ended(second);
+    assert.equal(real.received('turn/start'), 1);
+    const third = created(missions, box);
+    real.worker.kick();
+    await real.ended(third);
+    assert.equal(real.received('turn/start'), 1, 'only one mission actually leaves in the new UTC day');
   } finally {
     await real.close();
     close();

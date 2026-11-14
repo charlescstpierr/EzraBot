@@ -136,6 +136,65 @@ test('with a zero ceiling a message is kept, its work fails with the reason, and
   assert.deepEqual(reservations(path), []);
 });
 
+for (const lane of ['chat', 'doc'] as const) {
+  test(`a ${lane} reservation from yesterday cannot leave outside today's ceiling`, async () => {
+    const dir = tempDir();
+    let clock = '2026-11-14T23:59:59.000Z';
+    const store = openStore({ path: join(dir, 'mino.sqlite'), mascots, policy: CODEX_ONLY(1), now: () => clock });
+    const real = realEngines(dir);
+    const worker = createWorker({
+      store, engines: real.engines,
+      log: entry => { if (entry.event === 'job.claimed') clock = '2026-11-15T00:00:01.000Z'; },
+    });
+    try {
+      if (lane === 'chat') say(store, 'Réservé avant minuit');
+      else write(store, 'Réservé avant minuit');
+      worker.kick();
+      await worker.idle();
+      assert.equal(real.received('turn/start'), 0, 'a permit from yesterday must not start a turn today');
+      assert.equal(codexUsage(store).calls, 0);
+      say(store, 'Premier appel du jour', 'atlas');
+      worker.kick();
+      await worker.idle();
+      assert.equal(real.received('turn/start'), 1);
+      say(store, 'Au-delà du plafond', 'pixel');
+      worker.kick();
+      await worker.idle();
+      assert.equal(real.received('turn/start'), 1, 'only one call actually leaves in the new UTC day');
+    } finally {
+      await worker.close();
+      await real.close();
+      store.close();
+    }
+  });
+}
+
+test('a reservation from yesterday requires fresh admission for every capability', () => {
+  const policy: AdmissionPolicy = { ...DEFAULT_POLICY, budgets: { codex: { callsPerDay: 1 }, composio: { callsPerDay: 1 } } };
+  for (const [capability, target] of [
+    ['codex.chat', { kind: 'chat', id: 'expired' }],
+    ['codex.document', { kind: 'document', id: 'expired', revision: '1' }],
+    ['codex.mission', { kind: 'mission', id: 'expired', revision: '1' }],
+    ['composio.action', { kind: 'service', id: 'expired', revision: '1' }],
+  ] as const) {
+    let clock = '2026-11-14T23:59:59.000Z';
+    const store = openStore({ path: join(tempDir(), 'mino.sqlite'), mascots, policy, now: () => clock });
+    try {
+      const input = request(target.id, { capability, target });
+      assert.equal(store.admission.reserve(input).ok, true);
+      clock = '2026-11-15T00:00:01.000Z';
+      const expired = store.admission.depart(capability, target);
+      assert.equal(expired.ok, false, capability);
+      assert.match(expired.ok ? '' : expired.reason, /jour UTC/);
+      assert.equal(store.admission.reserve(input).ok, true, 'fresh admission checks the new day');
+      assert.equal(store.admission.depart(capability, target).ok, true);
+      assert.equal(store.admission.reserve({ ...input, target: { ...target, id: 'extra' } }).ok, false);
+    } finally {
+      store.close();
+    }
+  }
+});
+
 test('a capability the server never declared, or without a budget, admits no call', () => {
   const policy: AdmissionPolicy = { ...DEFAULT_POLICY, capabilities: { ...DEFAULT_POLICY.capabilities, 'honcho.recall': { budget: 'honcho', cost: { kind: 'unavailable', reason: 'non annoncé' } } } };
   const store = openStore({ path: join(tempDir(), 'mino.sqlite'), mascots, policy });

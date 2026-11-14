@@ -207,10 +207,15 @@ export function createAdmission(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'tr
       const row = live(capability, target);
       if (!row) return { ok: false, reason: 'Cet appel n’a aucune réservation. Mino ne l’a pas lancé.' };
       if (stateOf(row) !== 'reserved') return { ok: false, reason: 'Le permis de cet appel a déjà servi. Mino ne l’a pas relancé.' };
+      const departedAt = now();
+      if (str(row, 'day') !== dayOf(departedAt)) {
+        close(str(row, 'id'), 'reserved', 'released');
+        return { ok: false, reason: 'Le jour UTC a changé depuis la réservation. Mino n’a pas lancé l’appel. Relancez le travail pour réserver dans le budget du jour.' };
+      }
       if (strOrNull(row, 'target_revision') !== revisionOf(target)) {
         return { ok: false, reason: 'L’objectif a changé entre la réservation et le départ. Mino n’a pas lancé l’appel sur l’ancienne version.' };
       }
-      run(`UPDATE reservations SET state = 'started', started_at = ? WHERE id = ? AND state = 'reserved'`, now(), str(row, 'id'));
+      run(`UPDATE reservations SET state = 'started', started_at = ? WHERE id = ? AND state = 'reserved'`, departedAt, str(row, 'id'));
       return { ok: true };
     });
   }

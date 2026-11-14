@@ -55,6 +55,8 @@ Deux autres fins existent :
 
 Le permis est refusé si le travail est annulé, si un arrêt est demandé, ou si l'objectif a changé depuis la réservation. Un permis utilisé ne se redonne pas. La base refuse tout retour en arrière.
 
+Une réservation ne sert que le jour UTC où elle est prise. Si le jour change avant le départ, le permis non utilisé est libéré et l'appel est refusé. Une reprise explicite réserve dans le budget du nouveau jour.
+
 Quand le plafond est atteint, l'appel ne part pas. Le travail ou la tentative échoue avec la raison. Relancez-le quand le plafond le permet.
 
 ## Après un arrêt brutal
