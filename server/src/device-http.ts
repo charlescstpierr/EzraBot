@@ -179,6 +179,9 @@ export function createDeviceHandler(options: Options) {
       if (command.type === 'routine.create' || command.type === 'routine.update' || command.type === 'routine.activate' || command.type === 'routine.delete') {
         throw new DeviceError(403, 'command_refused', 'Une routine se crée, se modifie, s’active et se supprime sur l’ordinateur. Le téléphone peut la mettre en pause ou la reprendre.');
       }
+      if (command.type.startsWith('subscription.') && command.type !== 'subscription.pause') {
+        throw new DeviceError(403, 'command_refused', 'Un abonnement à des événements se crée, se modifie, s’active, reprend et se révoque sur l’ordinateur. Le téléphone peut seulement le mettre en pause.');
+      }
       if (command.type === 'routine.resume' && command.confirmBlocker !== undefined) {
         throw new DeviceError(403, 'command_refused', 'Un effet incertain se vérifie sur l’ordinateur avant de reprendre cette routine.');
       }

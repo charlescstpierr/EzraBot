@@ -9,6 +9,7 @@ Un travail est créé par une seule fonction du store, `admitWork`. Elle enregis
 - Le message d'une personne arrive par `store.dispatch`. Son occurrence est le `requestId` de la commande.
 - Une origine automatique arrive par `store.admit`. Son occurrence est fournie par l'appelant.
 - Une routine admet sa demande dans la transaction qui inscrit sa décision. Son occurrence est l'identifiant de la routine et la date locale du créneau. Voir [routines.md](routines.md).
+- Un événement admet sa demande dans la transaction qui inscrit son reçu. Son occurrence est l'identifiant de l'abonnement et le `webhook-id` brut. `store.admit` refuse l'origine `event`. Voir [evenements.md](evenements.md).
 
 La même occurrence, pour le même personnage, crée un seul travail. La redemander avec le même contenu retourne le premier travail. La redemander avec un autre contenu est refusé.
 
@@ -79,6 +80,6 @@ Rien ne repart seul. Une reprise demande une action de la personne et crée une 
 - Les lectures Composio (catalogue, compte, outils) ne sont pas comptées. Seul l'envoi d'une action l'est.
 - Si `mino.sqlite` et `missions.sqlite` sont restaurées depuis une copie prise au même instant, une réservation peut être libérée alors que son appel est parti après la copie. Le serveur ne détecte pas ce cas.
 - Aucun écran n'affiche les compteurs. Une action Composio annulée par le plafond s'affiche « une vérification a échoué ».
-- Aucun événement, aucune voix et aucun bilan n'appelle encore `store.admit`. Le fil affiche « Routine » sur une demande de routine.
+- Aucune voix et aucun bilan n'appelle encore `store.admit`. Le fil affiche « Routine » ou « Événement » sur une demande automatique.
 - Aucune capacité livrée n'a de prix. Les coûts connus et estimés sont vérifiés avec des capacités de test.
 - Le moteur du chat n'a ni shell, ni outil de fichier, ni réseau. Le moteur des missions peut lire des fichiers hors du dossier du projet : ses lectures ne sont pas confinées.

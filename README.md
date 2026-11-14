@@ -34,6 +34,10 @@ Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de
 
 Une routine envoie un texte fixe à un personnage, à une heure de votre fuseau, sur les jours choisis, jusqu’à une date de fin et un plafond. Elle reste inactive jusqu’à son activation et demande un PC allumé. Voir [docs/routines.md](docs/routines.md).
 
+## Événements de service
+
+Un abonnement relie un déclencheur Composio à un personnage. Un événement signé crée au plus une demande, sans droit, outil ni approbation. La réception est éteinte sans `MINO_EVENTS_TRANSPORT`, `MINO_EVENTS_PORT` et `COMPOSIO_WEBHOOK_SECRET`. Voir [docs/evenements.md](docs/evenements.md).
+
 ## Services connectés (Composio)
 
 Un personnage peut proposer une action sur un service relié. Vous confirmez chaque action exacte sur le PC, puis le serveur l’envoie une seule fois. Quand un service manque, le personnage peut proposer une carte de connexion dans le fil ; relier un compte ne lui donne aucun droit. La clé se donne au serveur avec `COMPOSIO_API_KEY`. Sans clé, cette fonction est désactivée et le reste ne change pas. Voir [docs/composio.md](docs/composio.md) pour la configuration, les preuves simulées et ce qui n’est pas vérifié avec le vrai service.

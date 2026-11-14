@@ -5,6 +5,7 @@ import { missionOrigins } from "../server/dist/src/routines.js";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createServer } from "node:http";
 import { createHttpServer } from "../server/dist/src/http.js";
 import { openStore } from "../server/dist/src/store.js";
 import { loadMascots } from "../server/dist/src/domain.js";
@@ -18,10 +19,15 @@ import { startFakeHoncho } from "../server/dist/test/fixtures/fake-honcho.js";
 import { DEFAULT_POLICY } from "../server/dist/src/admission.js";
 import { withMemoryCapabilities } from "../server/dist/src/memory-ledger.js";
 import { createMemoryDesk } from "../server/dist/src/memory-desk.js";
+import { createEventIngress } from "../server/dist/src/event-ingress.js";
 const root = resolve("server"),
   data = mkdtempSync(join(tmpdir(), "mimobot-react-qa-"));
 const port = Number(process.env.MINO_QA_PORT ?? 4399);
 const withTools = process.env.MINO_QA_TOOLS === "1";
+// Synthetic service events: a fake transport, secret and account, never a provider. The signed listener shares
+// this QA port only because the QA ports are fixed; the real server gives it its own port.
+const withEvents = process.env.MINO_QA_EVENTS === "1";
+const EVENTS = { transport: "qa-projet", secret: "whsec_qa_synthetique_0001" };
 const honcho =
   process.env.MINO_QA_HONCHO === "1" ? await startFakeHoncho() : null;
 if (honcho)
@@ -47,6 +53,7 @@ const store = openStore({
   missions: () => missionOrigins(missions),
   mascots: loadMascots(join(root, "assets/mascots.json")),
   serviceTools: withTools,
+  ...(withEvents ? { events: { transport: EVENTS.transport } } : {}),
   ...(honcho
     ? {
         memory: { workspacePrefix: "ezra-qa" },
@@ -123,7 +130,7 @@ const agents = createAgentRoutes({
     catalog: async () => ({ ok: false, message: "Désactivé" }),
   },
 });
-const server = createHttpServer({
+const pc = createHttpServer({
   store,
   worker,
   engine: chat,
@@ -133,6 +140,35 @@ const server = createHttpServer({
   agents,
   actions: desk,
 });
+if (withEvents) {
+  store.tools.observeAccount({
+    id: "ca_qa_github",
+    toolkit: "github",
+    alias: "Compte GitHub synthétique",
+    status: "ACTIVE",
+  });
+  writeFileSync(join(tmpdir(), `mino-qa-owner-${port}`), store.tools.ownerId);
+}
+const ingress = withEvents
+  ? createEventIngress({
+      config: {
+        transport: EVENTS.transport,
+        secrets: [Buffer.from(EVENTS.secret)],
+        port,
+        bind: "127.0.0.1",
+      },
+      ownerId: store.tools.ownerId,
+      receive: (delivery) => store.receiveEvent(delivery),
+      wake: () => worker.kick(),
+    })
+  : null;
+const server = ingress
+  ? createServer((req, res) =>
+      (req.url ?? "").startsWith("/events/")
+        ? ingress.emit("request", req, res)
+        : pc.emit("request", req, res),
+    )
+  : pc;
 const routineClock = setInterval(() => {
   if (store.tickRoutines(startedAt) > 0) worker.kick();
 }, 1000);

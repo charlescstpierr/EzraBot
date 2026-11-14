@@ -50,6 +50,7 @@ export const DeletionCountsSchema = z.strictObject({
   keptMentions: z.number().int().nonnegative(),
   tasks: z.number().int().nonnegative(),
   routines: z.number().int().nonnegative(),
+  subscriptions: z.number().int().nonnegative(),
 });
 export type DeletionCounts = z.infer<typeof DeletionCountsSchema>;
 
@@ -92,6 +93,44 @@ const routineSchedule = {
   cap: z.number().int().min(1).max(ROUTINE_LIMITS.cap),
 };
 const revision = z.number().int().positive();
+
+export const SUBSCRIPTION_STATES = ['inactive', 'active', 'paused', 'revoked'] as const;
+export type SubscriptionState = (typeof SUBSCRIPTION_STATES)[number];
+/** Why a received event created no work. Kept with its receipt: the same event later gets the same answer. */
+export const EVENT_REFUSALS = ['inactive', 'paused', 'revoked', 'bot_deleted', 'trigger_mismatch', 'account_mismatch', 'account_inactive', 'per_day', 'backlog', 'admission_refused'] as const;
+export type EventRefusal = (typeof EVENT_REFUSALS)[number];
+/**
+ * Product rules of service events, chosen and shown to the person. None is a measured capacity, and none raises a
+ * budget: every admitted request still goes through the shared ceilings.
+ */
+export const EVENT_LIMITS = {
+  bodyBytes: 64 * 1024,
+  /** Distance allowed between the signed timestamp and this server's clock, the provider SDK's default. */
+  skewSeconds: 300,
+  /** Headers and body of one delivery must arrive within this time. */
+  deadlineMs: 10_000,
+  /** Registered subscriptions per transport, revoked ones included. */
+  subscriptions: 20,
+  /** Event identities kept per transport. They are never evicted: a provider retry has no documented end. */
+  receipts: 10_000,
+  /** Pending, running or waiting-for-review works of one subscription. */
+  openWorks: 3,
+  perDay: { min: 1, max: 50, initial: 20 },
+  instructionChars: 1000,
+  fields: 8,
+  fieldChars: 500,
+  fieldsTotalChars: 4000,
+} as const;
+const providerId = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
+/**
+ * What a subscription asks and which top-level fields of an event it may copy into the request.
+ * Field names only, no paths: nested values are never imported.
+ */
+const subscriptionScope = {
+  text: text(EVENT_LIMITS.instructionChars),
+  fields: z.array(z.string().regex(/^[A-Za-z0-9_]{1,40}$/)).max(EVENT_LIMITS.fields).refine(names => new Set(names).size === names.length),
+  perDay: z.number().int().min(EVENT_LIMITS.perDay.min).max(EVENT_LIMITS.perDay.max),
+};
 
 export const CommandSchema = z.discriminatedUnion('type', [
   z.strictObject({
@@ -223,6 +262,17 @@ export const CommandSchema = z.discriminatedUnion('type', [
   /** From `held`, `confirmBlocker` must name the uncertain effect the routine waits on. */
   z.strictObject({ type: z.literal('routine.resume'), requestId, routineId: id, confirmBlocker: z.string().min(1).max(200).optional() }),
   z.strictObject({ type: z.literal('routine.delete'), requestId, routineId: id }),
+  /**
+   * A new subscription is inactive. Its bot, account, trigger and transport never change; a different one is a new
+   * subscription on a trigger configured for it. `expectedRevision` is the revision shown when the editor opened.
+   */
+  z.strictObject({ type: z.literal('subscription.create'), requestId, botId: id, accountId: providerId, triggerId: providerId, triggerSlug: z.string().regex(/^[A-Z0-9_]{1,120}$/), ...subscriptionScope }),
+  z.strictObject({ type: z.literal('subscription.update'), requestId, subscriptionId: id, expectedRevision: revision, ...subscriptionScope }),
+  z.strictObject({ type: z.literal('subscription.activate'), requestId, subscriptionId: id, expectedRevision: revision }),
+  z.strictObject({ type: z.literal('subscription.pause'), requestId, subscriptionId: id }),
+  z.strictObject({ type: z.literal('subscription.resume'), requestId, subscriptionId: id, expectedRevision: revision }),
+  /** Terminal. The trigger stays bound to this subscription, so the same authority cannot come back under another bot. */
+  z.strictObject({ type: z.literal('subscription.revoke'), requestId, subscriptionId: id }),
 ]);
 
 export type Command = z.infer<typeof CommandSchema>;
@@ -276,6 +326,7 @@ export const CommandResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('botDeleted'), botId: z.string(), nextBotId: z.string().nullable(), erased: z.boolean() }),
   z.strictObject({ kind: z.literal('purge'), erased: z.boolean() }),
   z.strictObject({ kind: z.literal('routine'), routineId: z.string(), revision: z.number(), state: z.enum(ROUTINE_STATES) }),
+  z.strictObject({ kind: z.literal('subscription'), subscriptionId: z.string(), revision: z.number(), state: z.enum(SUBSCRIPTION_STATES) }),
 ]);
 export type CommandResult = z.infer<typeof CommandResultSchema>;
 
@@ -484,7 +535,7 @@ export type MessageView = {
   /** Mino's proposal on its own reply, in its own thread. */
   handoff: Handoff | null;
   /** Set on a request the person did not type. It names what asked, never who approved. */
-  trigger: { kind: 'routine'; routineId: string; date: string } | { kind: 'event' | 'voice' | 'checkin' } | null;
+  trigger: { kind: 'routine'; routineId: string; date: string } | { kind: 'event'; subscriptionId: string } | { kind: 'voice' | 'checkin' } | null;
 };
 
 /** Derived from durable facts, never stored. */
@@ -658,6 +709,60 @@ export type RoutineView = {
   updatedAt: string;
 };
 
+/** What one received event became. `retired`: its body digest was erased, so a later copy can no longer be compared. */
+export type EventReceiptView = {
+  webhookId: string;
+  receivedAt: string;
+  revision: number;
+  outcome: 'admitted' | 'refused';
+  reason: EventRefusal | null;
+  /** Null for a refusal, and once the bot that answered was erased. */
+  workId: string | null;
+  /** Copies of this event id that came back with another body. None of them was admitted. */
+  conflicts: number;
+  retired: boolean;
+};
+
+/**
+ * A local subscription to one provider trigger. It grants no right and approves nothing: an admitted event is a
+ * request of the bot, answered without service tools. `account` is the last state this server observed, never a live
+ * reading of the provider.
+ */
+export type SubscriptionView = {
+  id: string;
+  botId: string;
+  transport: string;
+  triggerId: string;
+  triggerSlug: string;
+  accountId: string;
+  account: { alias: string; toolkit: string; status: string; checkedAt: string } | null;
+  revision: number;
+  state: SubscriptionState;
+  text: string;
+  fields: string[];
+  perDay: number;
+  /** Decisions of the current UTC day. */
+  today: { admitted: number; refused: number };
+  /** Works of this subscription still pending, running or waiting for review. */
+  open: number;
+  last: EventReceiptView | null;
+  recent: EventReceiptView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EventsView = {
+  /** `off`: this server has no complete event configuration and listens to nothing. */
+  reception: { state: 'off' } | { state: 'configured'; transport: string };
+  /** Event identities kept for the configured transport, out of `EVENT_LIMITS.receipts`. */
+  receipts: number;
+  /** Authenticated events for a trigger no subscription names. Nothing was kept but this count. */
+  ignored: { n: number; lastAt: string | null };
+  /** New event ids refused because the identity registry was full. The provider was told to retry. */
+  unavailable: { n: number; lastAt: string | null };
+  subscriptions: SubscriptionView[];
+};
+
 export type StoreView = {
   rev: number;
   /** Random per database: browser markers from another database on the same origin never apply here. */
@@ -676,6 +781,7 @@ export type StoreView = {
   tasks: TaskView[];
   carnet: PublicationView[];
   routines: RoutineView[];
+  events: EventsView;
 };
 
 export type CatalogModel = {

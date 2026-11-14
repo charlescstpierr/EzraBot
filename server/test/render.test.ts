@@ -59,7 +59,7 @@ const message = (patch: Partial<MessageView> & Pick<MessageView, 'id' | 'text'>)
 });
 
 function viewWith(messages: MessageView[], works: WorkView[] = []): AppView {
-  return { rev: 1, spaceId: 's', activeBotId: 'mino', bots: [], retiredBotIds: [], purged: { botIds: [], workIds: [] }, erasure: 'complete', messages, works, tasks: [], carnet: [], routines: [], engine: { state: 'starting' } };
+  return { rev: 1, spaceId: 's', activeBotId: 'mino', bots: [], retiredBotIds: [], purged: { botIds: [], workIds: [] }, erasure: 'complete', messages, works, tasks: [], carnet: [], routines: [], events: { reception: { state: 'off' }, receipts: 0, ignored: { n: 0, lastAt: null }, unavailable: { n: 0, lastAt: null }, subscriptions: [] }, engine: { state: 'starting' } };
 }
 
 test('search ignores accents and case, needs every term, and points back to the right bot and message', () => {

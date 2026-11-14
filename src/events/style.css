@@ -1,0 +1,137 @@
+.ez-events h1 {
+  font-size: 29px;
+  letter-spacing: -1px;
+  font-weight: 550;
+  margin: 14px 0 18px;
+}
+.ez-event-rules {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #5f6857;
+  max-width: 760px;
+  margin: 0 0 24px;
+  padding-left: 18px;
+}
+.ez-event-note {
+  font-size: 12px;
+  color: #6f7a63;
+  margin: 14px 0;
+}
+.ez-event {
+  border: 1px solid #dfe7d5;
+  border-radius: 14px;
+  padding: 20px;
+  margin-top: 20px;
+  background: #fafcf7;
+  max-width: 820px;
+}
+.ez-event.focused {
+  border-color: #8a967d;
+}
+.ez-event header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ez-event header small {
+  color: #6f7a63;
+  font-size: 11px;
+}
+.ez-event-state {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  border: 1px solid #dfe4d7;
+  background: white;
+}
+.ez-event-state.active {
+  background: #e9f6dc;
+  border-color: #b8dc94;
+}
+.ez-event-text {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin: 12px 0 6px;
+}
+.ez-event section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 12px 0 4px;
+}
+.ez-event section ol {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0;
+  padding-left: 20px;
+}
+.ez-event .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ez-event-form {
+  margin: 18px 0;
+  max-width: 820px;
+}
+.ez-event-form > fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.ez-event-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.ez-event-form input,
+.ez-event-form select,
+.ez-event-form textarea {
+  border: 1px solid #dfe4d7;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 400;
+  background: white;
+}
+.ez-event-form textarea {
+  min-height: 90px;
+}
+.ez-event-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .ez-events.content-page {
+    padding: 28px 16px;
+  }
+}
+.ez-event-source {
+  font-size: 12px;
+  color: #5f6857;
+  margin: 6px 0;
+}
+.ez-event-source code {
+  font-size: 11px;
+}
+.ez-event-state.paused {
+  background: #fff8e4;
+  border-color: #eee0be;
+}
+.ez-event-state.revoked {
+  background: #f3f1ee;
+  color: #7a6f63;
+}
+.ez-event section li.refused {
+  color: #8a4a1f;
+}
+.ez-event-form input:disabled,
+.ez-event-form select:disabled {
+  background: #f3f5ef;
+  color: #7a8270;
+}
