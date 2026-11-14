@@ -744,6 +744,7 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
         sync: syncOf(strOrNull(row, 'export_state')), createdAt: str(row, 'created_at'),
       })),
       messages,
+      authorizedMessageIds: sources.filter(row => str(row, 'kind') === 'message').map(row => str(row, 'message_id')),
       excludedMessageIds: all(`SELECT message_id FROM memory_sources WHERE scope_id = ? AND kind = 'message' AND state = 'excluded' ORDER BY rowid`, scopeId).map(row => str(row, 'message_id')),
       resumable: stuck || (state === 'active' && sources.some(row => ['uncertain', 'failed'].includes(strOrNull(row, 'export_state') ?? ''))),
     };

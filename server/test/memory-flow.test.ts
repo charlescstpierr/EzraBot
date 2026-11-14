@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { DEFAULT_POLICY } from '../src/admission.js';
 import { HonchoConfigError, childEnv, takeHonchoConfig } from '../src/child-env.js';
+import type { PcView } from '../src/tools-protocol.js';
 import { startFakeHoncho } from './fixtures/fake-honcho.js';
 import { BOT, PREFIX, startMemory } from './fixtures/memory-app.js';
 
@@ -477,6 +478,62 @@ test('a forget suspends at once, an acknowledgement reopens nothing, and a reset
     assert.doesNotMatch(app.turn().input, /avant l’oubli|en vol/);
     assert.equal(honcho.requests.filter(r => r.method === 'POST' && r.path.startsWith(`/v3/workspaces/${oldSpace}/`) && honcho.requests.indexOf(r) > honcho.requests.findIndex(d => d.method === 'DELETE')).length, 0,
       'nothing is written to the old workspace after its withdrawal was asked');
+  } finally {
+    await app.stop();
+    await honcho.close();
+  }
+});
+
+test('the view names the requests an exclusion accepts: one written while the project prepares or after a reset, never one from before the consent, forgotten, written during the forget or already excluded', async () => {
+  const honcho = await startFakeHoncho();
+  const idOf = (view: PcView, text: string): string => {
+    const found = view.messages.find(m => m.role === 'user' && m.text === text);
+    assert(found, text);
+    return found.id;
+  };
+  const preparing = await startMemory({ honcho, budget: 0 });
+  try {
+    await preparing.accepted(ENABLE);
+    await preparing.ask('Demande écrite pendant la préparation.');
+    const view = await preparing.view();
+    const early = idOf(view, 'Demande écrite pendant la préparation.');
+    assert.deepEqual([preparing.scopeOf(view).state, preparing.scopeOf(view).authorizedMessageIds], ['preparing', [early]]);
+    await preparing.accepted({ type: 'memory.exclude', target: { kind: 'message', messageId: early } });
+    const after = preparing.scopeOf(await preparing.view());
+    assert.deepEqual([after.authorizedMessageIds, after.excludedMessageIds], [[], [early]]);
+  } finally {
+    await preparing.stop();
+  }
+
+  const app = await startMemory({ honcho });
+  try {
+    await app.ask('Demande d’avant le consentement.');
+    await app.enable();
+    await app.ask('Demande exclue avant l’oubli.');
+    await app.ask('Demande oubliée ensuite.');
+    await app.synced();
+    const excluded = idOf(await app.view(), 'Demande exclue avant l’oubli.');
+    const forgotten = idOf(await app.view(), 'Demande oubliée ensuite.');
+    await app.accepted({ type: 'memory.exclude', target: { kind: 'message', messageId: excluded } });
+    assert.deepEqual(app.scopeOf(await app.view()).authorizedMessageIds, [forgotten], 'neither the request from before the consent nor the excluded one');
+
+    await app.accepted({ type: 'memory.forget', confirmLabel: LABEL });
+    await app.ask('Demande écrite pendant l’oubli.');
+    await app.until(v => app.scopeOf(v).state === 'withdrawal_unverified', 'the withdrawal requests ended');
+    assert.deepEqual(app.scopeOf(await app.view()).authorizedMessageIds, []);
+    await app.accepted({ type: 'memory.reset', confirmLabel: LABEL, acknowledged: true });
+    await app.until(v => app.scopeOf(v).state === 'active', 'the new workspace is confirmed');
+    await app.ask('Demande du nouvel espace.');
+    const view = await app.view();
+    const fresh = idOf(view, 'Demande du nouvel espace.');
+    assert.deepEqual([app.scopeOf(view).authorizedMessageIds, app.scopeOf(view).excludedMessageIds], [[fresh], [excluded]],
+      'after the reset only the new request can be excluded, and the earlier exclusion keeps its mark');
+    for (const text of ['Demande d’avant le consentement.', 'Demande oubliée ensuite.', 'Demande écrite pendant l’oubli.']) {
+      const refused = await app.memory({ type: 'memory.exclude', target: { kind: 'message', messageId: idOf(view, text) } });
+      assert.deepEqual([refused.status, refused.body.code], [404, 'not_found'], text);
+    }
+    await app.accepted({ type: 'memory.exclude', target: { kind: 'message', messageId: fresh } });
+    assert.equal(JSON.stringify(view.memory).includes(PREFIX), false, 'the view carries no remote workspace name');
   } finally {
     await app.stop();
     await honcho.close();

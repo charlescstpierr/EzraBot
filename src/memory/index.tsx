@@ -761,7 +761,7 @@ function Exclusion({
     );
   if (
     (scope.state !== "preparing" && scope.state !== "active") ||
-    message.createdAt < scope.consentedAt
+    !scope.authorizedMessageIds.includes(message.id)
   )
     return null;
   return (

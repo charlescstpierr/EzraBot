@@ -80,7 +80,7 @@ Le permis est pris dans le même tour d'exécution que le `fetch`. Le guichet ne
 Ces trois commandes avancent la génération du projet.
 
 - **Correction.** Une nouvelle version est créée. L'ancienne perd son texte local. Les autres déclarations restent utilisables.
-- **Exclusion.** La source n'est plus rappelée ni relue. Sa copie reste chez Honcho jusqu'à un oubli : Honcho n'offre pas de retrait par message.
+- **Exclusion.** La source n'est plus rappelée ni relue. Sa copie reste chez Honcho jusqu'à un oubli : Honcho n'offre pas de retrait par message. La conversation propose « Exclure de la mémoire » seulement sous une demande qui est encore une source du projet. Après un nouvel espace vide, une demande oubliée ou écrite pendant l'oubli ne le propose plus.
 - **Oubli.** Le projet est fermé dans la même transaction, avant toute réponse de Honcho. Toutes ses sources sont retirées. Le serveur demande le retrait des deux sessions, puis de l'espace.
 
 Un retrait est transitif. Un appel dont le texte contenait une source retirée est marqué. Un appel qui a reçu la réponse d'un appel marqué l'est aussi. Les réponses et les livrables de ces appels quittent tous les contextes suivants. Vos messages restent affichés dans la conversation.

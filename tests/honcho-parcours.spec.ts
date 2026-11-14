@@ -355,3 +355,56 @@ test("panne, oubli et nouvel espace vide : sans Honcho la réponse part sans mé
   ]);
   await project.screenshot({ path: `${EVIDENCE}/07-nouvel-espace.png` });
 });
+
+test("nouvel espace vide : une demande oubliée ou écrite pendant l’oubli n’offre plus d’exclusion, une nouvelle demande l’offre, et l’exclusion d’avant garde sa marque", async ({
+  page,
+  request,
+}) => {
+  const LABEL = "Herbier de Mélisse";
+  const botId = await newCharacter(request, "Mélisse");
+  await enable(request, botId, LABEL);
+  await openThread(page, "Mélisse");
+  const asked = (text: string) =>
+    page.locator(".ez-chat-user").filter({ hasText: text });
+  const offer = (text: string) =>
+    asked(text).getByRole("button", { name: "Exclure de la mémoire" });
+  const state = async () => (await scopeOf(request, botId))?.state;
+
+  await ask(page, "Demande exclue avant l’oubli.");
+  await ask(page, "Demande oubliée ensuite.");
+  await offer("Demande exclue avant l’oubli.").click();
+  await asked("Demande exclue avant l’oubli.")
+    .getByRole("button", { name: "Confirmer l’exclusion" })
+    .click();
+  await expect(asked("Demande exclue avant l’oubli.")).toContainText(
+    "Demande exclue de la mémoire Honcho.",
+  );
+  await expect(offer("Demande oubliée ensuite.")).toHaveCount(1);
+
+  await command(request, "memory/commands", {
+    type: "memory.forget",
+    botId,
+    confirmLabel: LABEL,
+  });
+  await ask(page, "Demande écrite pendant l’oubli.");
+  await expect.poll(state).toBe("withdrawal_unverified");
+  await command(request, "memory/commands", {
+    type: "memory.reset",
+    botId,
+    confirmLabel: LABEL,
+    acknowledged: true,
+  });
+  await expect.poll(state).toBe("active");
+  await ask(page, "Demande du nouvel espace.");
+
+  await expect(offer("Demande du nouvel espace.")).toHaveCount(1);
+  await expect(offer("Demande oubliée ensuite.")).toHaveCount(0);
+  await expect(offer("Demande écrite pendant l’oubli.")).toHaveCount(0);
+  await expect(asked("Demande exclue avant l’oubli.")).toContainText(
+    "Demande exclue de la mémoire Honcho.",
+  );
+  await page
+    .locator(".ez-chat-thread, main")
+    .first()
+    .screenshot({ path: `${EVIDENCE}/08-exclusion-apres-nouvel-espace.png` });
+});

@@ -66,6 +66,8 @@ export const ScopeViewSchema = z.strictObject({
   })),
   /** Requests of the person in this thread since the consent. */
   messages: z.strictObject({ pending: count, verified: count, uncertain: count, failed: count }),
+  /** Requests of the person that are sources of this project now, by local message id: the only ones an exclusion accepts. */
+  authorizedMessageIds: z.array(z.string()),
   excludedMessageIds: z.array(z.string()),
   /** Something is uncertain or failed and `memory.resume` can look at it again. */
   resumable: z.boolean(),
