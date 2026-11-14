@@ -61,6 +61,38 @@ function deferred() {
   });
   return { promise, resolve };
 }
+type Op = "length" | "key" | "getItem" | "setItem" | "removeItem";
+/** Another tab's view of the same storage. `before` runs ahead of every operation and may throw or interleave. */
+function relay(
+  storage: KeyValueStorage,
+  before: (op: Op, key?: string) => void,
+): KeyValueStorage {
+  return {
+    get length() {
+      before("length");
+      return storage.length;
+    },
+    key(i) {
+      before("key");
+      return storage.key(i);
+    },
+    getItem(k) {
+      before("getItem", k);
+      return storage.getItem(k);
+    },
+    setItem(k, v) {
+      before("setItem", k);
+      storage.setItem(k, v);
+    },
+    removeItem(k) {
+      before("removeItem", k);
+      storage.removeItem(k);
+    },
+  };
+}
+const refusal: AppOutcome = { kind: "rejected", status: 503, message: "occupé" };
+const holding = (items: Map<string, string>, text: string) =>
+  [...items.values()].filter((value) => value.includes(text));
 
 test("deux écrivains gardent deux demandes du même bot après rechargement", async () => {
   const { storage } = browser();
@@ -651,5 +683,373 @@ test("une collecte concurrente ne retire pas la nouvelle reprise d’un ancien r
   expect(sent).toBe(2);
   expect(during).toMatchObject([
     { command: a.command, fact: { kind: "queued" } },
+  ]);
+});
+
+const acceptedA = {
+  kind: "accepted",
+  receipt: { kind: "message", messageId: "message-a", workId: "work-a" },
+};
+
+test("une collecte d’acceptation garde son reçu face à une reprise qu’elle n’a pas vue", async () => {
+  const { storage } = browser();
+  const a = input();
+  const retry = deferred();
+  let sent = 0;
+  const writer = page(storage, async () =>
+    ++sent === 1 ? accepted("a") : retry.promise,
+  );
+  await writer.run(a);
+  let pending: Promise<unknown> | undefined;
+  const reader = relay(storage, (op, key) => {
+    if (
+      !pending &&
+      op === "getItem" &&
+      key &&
+      storage.getItem(key)?.includes('"kind":"accepted"')
+    )
+      pending = writer.run(a);
+  });
+  page(reader, undefined, { capacity: 1, ttlMs: 0 }).collect([
+    a.command.requestId,
+  ]);
+  const during = page(storage).snapshot();
+  retry.resolve(refusal);
+  await pending;
+  expect(sent).toBe(2);
+  expect(during).toMatchObject([{ command: a.command, fact: acceptedA }]);
+  expect(page(storage).snapshot()).toMatchObject([
+    { command: a.command, fact: acceptedA },
+  ]);
+});
+
+test("une reprise injectée avant chaque opération de la collecte garde l’identité et le reçu", async () => {
+  const cases = [
+    {
+      name: "refus",
+      first: refusal,
+      late: unknown,
+      proof: false,
+      during: { kind: "queued" },
+      after: { kind: "unknown" },
+    },
+    {
+      name: "acceptation",
+      first: accepted("a"),
+      late: refusal,
+      proof: true,
+      during: acceptedA,
+      after: acceptedA,
+    },
+  ];
+  for (const c of cases)
+    for (const samePage of [false, true]) {
+      const attempt = async (step: number) => {
+        const { storage } = browser();
+        const a = input();
+        const retry = deferred();
+        let sent = 0;
+        const send = async () => (++sent === 1 ? c.first : retry.promise);
+        let ops = 0;
+        let armed = false;
+        let pending: Promise<unknown> | undefined;
+        const tab = relay(storage, () => {
+          if (armed && ++ops === step && !pending)
+            pending = (samePage ? collector : writer).run(a);
+        });
+        const writer = page(storage, send);
+        const collector = page(tab, samePage ? send : undefined, {
+          capacity: 1,
+          ttlMs: 0,
+        });
+        await (samePage ? collector : writer).run(a);
+        armed = true;
+        collector.collect(c.proof ? [a.command.requestId] : []);
+        armed = false;
+        const during = page(storage).snapshot();
+        retry.resolve(c.late);
+        await pending;
+        return { a, ops, sent, pending, during, after: page(storage).snapshot() };
+      };
+      const { ops: total } = await attempt(0);
+      expect(total).toBeGreaterThan(3);
+      for (let step = 1; step <= total; step++) {
+        const r = await attempt(step);
+        const label = `${c.name}, ${samePage ? "même onglet" : "autre onglet"}, étape ${step}/${total}`;
+        expect(r.pending, label).toBeDefined();
+        expect(r.sent, label).toBe(2);
+        expect(r.during, label).toMatchObject([
+          { command: r.a.command, fact: c.during },
+        ]);
+        expect(r.after, label).toMatchObject([
+          { command: r.a.command, fact: c.after },
+        ]);
+      }
+    }
+});
+
+test("une purge entre le gel et le POST retire le texte sans envoyer", async () => {
+  const { storage, state } = browser();
+  const a = input("Texte privé gelé");
+  let sent = 0;
+  let purged = false;
+  const tab = relay(storage, (op) => {
+    if (op === "setItem" && !purged) {
+      purged = true;
+      page(storage).purge(["nova"]);
+    }
+  });
+  const attempt = await page(tab, async () => {
+    sent++;
+    return accepted("a");
+  }).run(a);
+  expect(attempt).toEqual({ kind: "blocked", reason: "purged" });
+  expect(sent).toBe(0);
+  expect(holding(state.items, a.command.text)).toEqual([]);
+  expect(page(storage).snapshot()).toEqual([]);
+});
+
+test("limite : un arrêt entre le gel et sa compensation laisse le texte caché jusqu’au balayage suivant", async () => {
+  const { storage, state } = browser();
+  const a = input("Texte privé gelé");
+  let sent = 0;
+  let purged = false;
+  const tab = relay(storage, (op) => {
+    if (op === "setItem" && !purged) {
+      purged = true;
+      page(storage).purge(["nova"]);
+    }
+    if (op === "removeItem") throw Error("arrêt avant compensation");
+  });
+  const attempt = await page(tab, async () => {
+    sent++;
+    return accepted("a");
+  }).run(a);
+  expect(attempt.kind).toBe("blocked");
+  expect(sent).toBe(0);
+  expect(holding(state.items, a.command.text)).toHaveLength(1);
+  expect(page(storage).snapshot()).toEqual([]);
+  expect(holding(state.items, a.command.text)).toHaveLength(1);
+  page(storage).collect([]);
+  expect(holding(state.items, a.command.text)).toEqual([]);
+});
+
+test("une réponse tardive lue avant la barrière ne réécrit jamais le texte purgé", async () => {
+  const { storage, state } = browser();
+  const a = input("Texte privé gelé");
+  const result = deferred();
+  let stale = false;
+  let staleReads = 0;
+  const tab: KeyValueStorage = {
+    get length() {
+      return storage.length;
+    },
+    key: (i) => storage.key(i),
+    getItem(k) {
+      if (stale && k.includes("|gone|")) {
+        if (!staleReads++) page(storage).purge(["nova"]);
+        return null;
+      }
+      return storage.getItem(k);
+    },
+    setItem: (k, v) => storage.setItem(k, v),
+    removeItem: (k) => storage.removeItem(k),
+  };
+  const pending = page(tab, () => result.promise).run(a);
+  stale = true;
+  result.resolve(accepted("a"));
+  await pending;
+  stale = false;
+  expect(staleReads).toBeGreaterThan(0);
+  expect(holding(state.items, a.command.text)).toEqual([]);
+  expect(page(storage).snapshot("nova")).toEqual([]);
+  page(storage).collect([]);
+  expect([...state.items.keys()].every((k) => k.includes("|gone|"))).toBe(
+    true,
+  );
+});
+
+test("une lecture ou une énumération en échec bloque l’envoi et la collecte", async () => {
+  for (const fault of ["length", "key", "getItem"] as const) {
+    const { storage, state } = browser();
+    await page(storage, async () => refusal).run(input("Refus ancien"));
+    const saved = [...state.items];
+    let sent = 0;
+    const book = page(
+      relay(storage, (op) => {
+        if (op === fault) throw Error("lecture");
+      }),
+      async () => {
+        sent++;
+        return accepted("b");
+      },
+      { capacity: 1, ttlMs: 0 },
+    );
+    expect(await book.run(input("Nouvelle")), fault).toEqual({
+      kind: "blocked",
+      reason: "storage-error",
+    });
+    book.collect([]);
+    expect(sent, fault).toBe(0);
+    expect(book.status(), fault).toBe("storage-error");
+    expect([...state.items], fault).toEqual(saved);
+  }
+});
+
+test("le cache d’un onglet ne ranime pas un envoi collecté par un autre onglet", async () => {
+  const { storage } = browser();
+  const options = { now: () => 0, capacity: 1, ttlMs: 0 };
+  const a = input("Refus"),
+    b = input("Acceptée"),
+    c = input("Nouvelle");
+  const tab = page(
+    storage,
+    async (command) =>
+      command.requestId === a.command.requestId
+        ? refusal
+        : accepted(command.requestId),
+    options,
+  );
+  await tab.run(a);
+  page(storage, undefined, options).collect([]);
+  expect(tab.snapshot()).toEqual([]);
+  await tab.run(b);
+  page(storage, undefined, options).collect([b.command.requestId]);
+  expect(tab.snapshot()).toEqual([]);
+  expect((await tab.run(c)).kind).toBe("settled");
+});
+
+test("limite : une acceptation et une incertitude du même envoi restent protégées et peuvent saturer", async () => {
+  const { storage } = browser();
+  const options = { now: () => 0, capacity: 1, ttlMs: 0 };
+  const a = input();
+  await page(storage, async () => unknown, options).run(a);
+  await page(storage, async () => accepted("a"), options).run(a);
+  let sent = 0;
+  const reader = page(
+    storage,
+    async () => {
+      sent++;
+      return accepted("b");
+    },
+    options,
+  );
+  reader.collect([a.command.requestId]);
+  expect(reader.snapshot()).toMatchObject([
+    { command: a.command, fact: acceptedA },
+  ]);
+  expect(await reader.run(input("Nouvelle"))).toEqual({
+    kind: "blocked",
+    reason: "saturated",
+  });
+  expect(sent).toBe(0);
+});
+
+test("deux commandes divergentes du même requestId restent en conflit, chacune avec son reçu", async () => {
+  const { storage } = browser();
+  const a = input("Texte A");
+  const b = {
+    ...a,
+    command: { ...a.command, text: "Texte B" },
+    raw: { text: "Texte B", files: [] },
+  };
+  let second: Promise<unknown> | undefined;
+  const tab = relay(storage, (op) => {
+    if (op === "setItem" && !second)
+      second = page(storage, async () => accepted("b")).run(b);
+  });
+  await page(tab, async () => accepted("a")).run(a);
+  await second;
+  const rows = page(storage).snapshot();
+  expect(rows).toHaveLength(2);
+  expect(rows.find((r) => r.command.text === "Texte A")).toMatchObject({
+    conflict: true,
+    fact: { receipt: { workId: "work-a" } },
+  });
+  expect(rows.find((r) => r.command.text === "Texte B")).toMatchObject({
+    conflict: true,
+    fact: { receipt: { workId: "work-b" } },
+  });
+  for (const gesture of [a, b])
+    expect(await page(storage).run(gesture)).toEqual({
+      kind: "blocked",
+      reason: "conflict",
+    });
+  page(storage, undefined, { capacity: 1, ttlMs: 0 }).collect([
+    a.command.requestId,
+  ]);
+  expect(page(storage).snapshot()).toEqual(rows);
+});
+
+test("chaque clé privée est écrite une seule fois, malgré les reprises et la collecte", async () => {
+  const { storage } = browser();
+  const written: string[] = [];
+  const tab = relay(storage, (op, key) => {
+    if (op === "setItem" && key) written.push(key);
+  });
+  const a = input();
+  const options = { now: () => 0, ttlMs: 0, capacity: 1 };
+  for (const outcome of [refusal, accepted("a"), refusal])
+    await page(tab, async () => outcome, options).run(a);
+  const book = page(tab, async () => refusal, options);
+  book.collect([a.command.requestId]);
+  expect(book.snapshot()).toEqual([]);
+  await book.run(a);
+  expect(book.snapshot()).toMatchObject([{ fact: acceptedA }]);
+  book.collect([a.command.requestId]);
+  expect(book.snapshot()).toEqual([]);
+  expect(written.length).toBeGreaterThan(0);
+  expect(new Set(written).size).toBe(written.length);
+});
+
+test("une réentrance synchrone du même onglet partage le départ en cours", async () => {
+  for (const via of ["storage", "send"] as const) {
+    const { storage } = browser();
+    const a = input();
+    const sent: Sendable[] = [];
+    let nested: Promise<unknown> | undefined;
+    let entered = false;
+    let book: ReturnType<typeof page> | undefined;
+    const reenter = (from: typeof via) => {
+      if (via !== from || !book || entered) return;
+      entered = true;
+      nested = book.run(a);
+    };
+    const tab = relay(storage, () => reenter("storage"));
+    book = page(tab, async (c) => {
+      sent.push(c);
+      reenter("send");
+      return accepted("a");
+    });
+    const first = book.run(a);
+    expect(nested, via).toBeDefined();
+    expect(await nested, via).toEqual(await first);
+    expect(sent, via).toEqual([a.command]);
+  }
+});
+
+test("après rechargement, un reçu retiré absorbe le refus d’une reprise explicite", async () => {
+  const { storage } = browser();
+  const options = { now: () => 0, capacity: 1, ttlMs: 0 };
+  const a = input();
+  await page(storage, async () => accepted("a"), options).run(a);
+  page(storage, undefined, options).collect([a.command.requestId]);
+  expect(page(storage).snapshot()).toEqual([]);
+  let sent = 0;
+  const replay = await page(
+    storage,
+    async () => {
+      sent++;
+      return refusal;
+    },
+    options,
+  ).run(a);
+  expect(sent).toBe(1);
+  expect(replay).toMatchObject({
+    kind: "settled",
+    entry: { command: a.command, fact: acceptedA },
+  });
+  expect(page(storage).snapshot()).toMatchObject([
+    { command: a.command, fact: acceptedA },
   ]);
 });
