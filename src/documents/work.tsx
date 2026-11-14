@@ -51,7 +51,10 @@ export function NonTaskWorkControls({
       </CommandButton>
     );
   if (work.next.kind !== "retry")
-    return work.next.kind === "new_request" || work.next.kind === "none" ? (
+    return work.next.kind === "new_request" ||
+      (work.next.kind === "none" &&
+        work.state !== "review" &&
+        work.state !== "done") ? (
       <p className="ez-doc-muted">{work.next.reason}</p>
     ) : null;
   return (
@@ -100,7 +103,9 @@ export function WorkContinuity({ port, work }: { port: Port; work: WorkView }) {
         {fact.kind === "none"
           ? "Aucun résultat confirmé."
           : fact.kind === "execution"
-            ? `Action enregistrée · ${fact.state}${fact.state === "unknown" ? ". Résultat inconnu. Action non renvoyée." : ""}`
+            ? fact.state === "unknown"
+              ? "Résultat inconnu. Action non renvoyée."
+              : `Action enregistrée · ${fact.state}`
             : fact.kind === "version"
               ? `Version ${fact.n} enregistrée.`
               : "Réponse enregistrée."}
@@ -143,11 +148,11 @@ export function WorkContinuity({ port, work }: { port: Port; work: WorkView }) {
             })
           }
         >
-          Voir le reçu sur le PC
+          Voir le reçu
         </button>
       )}
       {work.next.kind === "new_request" && (
-        <p>{work.next.reason} Le compte rendu se gère sur le PC.</p>
+        <p>Le compte rendu se gère dans la carte de l’action.</p>
       )}
       {work.attempt?.plan &&
         "history" in work.attempt.plan &&

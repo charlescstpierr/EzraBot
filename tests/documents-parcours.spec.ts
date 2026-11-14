@@ -223,7 +223,11 @@ async function openLab(page: Page, serviceTools = false) {
           },
         },
       ],
-      define: { "process.env.NODE_ENV": '"production"', __DEV__: "false" },
+      define: {
+        "process.env.NODE_ENV": '"production"',
+        __DEV__: "false",
+        global: "globalThis",
+      },
       logLevel: "silent",
     });
     await page.route(`${origin}/__continuity-mobile**`, (route) =>
@@ -1116,3 +1120,98 @@ base(
     }
   },
 );
+
+test("continuité29 une validation possible ne porte pas un refus de relance", async ({
+  page,
+  lab,
+}, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = lab.dispatch({
+    type: "message.send",
+    botId: "mino",
+    text: "Document synthétique à valider",
+    attachments: [],
+  });
+  if (sent.kind !== "message") throw Error("Travail absent");
+  (await lab.chat.next()).finish({
+    kind: "succeeded",
+    reply: {
+      reply: "Prêt à relire",
+      deliverable: { title: "Validation synthétique", body: "Document prêt." },
+    },
+    used: USED,
+    threadId: "qa-validation",
+    turnId: "qa-validation",
+  });
+  await expect.poll(() => lab.work(sent.workId).state).toBe("review");
+  await lab.open(`?workId=${sent.workId}`);
+  await expect(
+    page.getByRole("button", { name: "Valider le document", exact: true }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: info.outputPath("validation-possible-pc.png"),
+    fullPage: true,
+  });
+  await expect(
+    page.getByText(/Ce travail ne peut pas changer d’état de cette façon/),
+  ).toHaveCount(0);
+  if (process.env.CONTINUITY_MOBILE) {
+    await page.goto(`${lab.origin}/__continuity-mobile?workId=${sent.workId}`);
+    await expect(
+      page.getByRole("button", { name: "Valider le résultat", exact: true }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: info.outputPath("validation-possible-mobile.png"),
+      fullPage: true,
+    });
+    await expect(
+      page.getByText(/Ce travail ne peut pas changer d’état de cette façon/),
+    ).toHaveCount(0);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("continuité29 le téléphone indique les commandes documentaires présentes", async ({
+  page,
+  lab,
+}, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = lab.dispatch({
+    type: "message.send",
+    botId: "mino",
+    text: "Tâche synthétique à poursuivre",
+    attachments: [],
+    document: { reviewerBotId: null },
+  });
+  if (sent.kind !== "message" || !sent.taskId) throw Error("Tâche absente");
+  (await lab.doc.next()).finish(lab.failure("turn_failed"));
+  await expect
+    .poll(
+      () =>
+        lab.store.view().tasks.find((task) => task.id === sent.taskId)
+          ?.canContinue,
+    )
+    .toBe(true);
+  await lab.open(`?workId=${sent.workId}`);
+  if (process.env.CONTINUITY_MOBILE) {
+    await page.goto(`${lab.origin}/__continuity-mobile?workId=${sent.workId}`);
+    await expect(
+      page.getByRole("button", { name: "Continuer", exact: true }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: info.outputPath("continuer-sur-mobile.png"),
+      fullPage: true,
+    });
+    await expect(page.getByText(/Gérer la suite sur le PC/)).toHaveCount(0);
+    await expect(page.getByText(/se reprend avec « Reprendre »/)).toHaveCount(
+      0,
+    );
+  }
+  lab.dispatch({ type: "task.continue", taskId: sent.taskId });
+  const call = await lab.doc.next();
+  expect(lab.work(sent.workId).attempt?.n).toBe(2);
+  call.finish(lab.failure("turn_failed"));
+  expect(errors).toEqual([]);
+});

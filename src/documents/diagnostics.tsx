@@ -46,7 +46,7 @@ function planFacts(plan: ContextPlan): Fact[] {
     [
       "Échanges",
       "history" in plan
-        ? `${count(plan.exchanges.full)} textes récents complets, ${count(plan.exchanges.brief)} extraits, ${count(plan.exchanges.omitted)} omis. Pièces historiques non renvoyées. ${count(plan.history.usedChars)} / ${count(plan.history.budgetChars)} points de code Unicode`
+        ? `${count(plan.exchanges.full)} textes récents complets, ${plural(plan.exchanges.brief, "extrait", "extraits")}, ${count(plan.exchanges.omitted)} omis. Pièces historiques non renvoyées. ${count(plan.history.usedChars)} / ${count(plan.history.budgetChars)} points de code Unicode`
         : `${count(plan.exchanges.full)} au palier ancien, ${count(plan.exchanges.brief)} abrégés, ${count(plan.exchanges.omitted)} omis. Intégralité non garantie`,
     ],
     [
