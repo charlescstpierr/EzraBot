@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { OUTPUT_SCHEMA } from '../src/context.js';
-import { loadMascots, type UsageObservation } from '../src/domain.js';
+import { loadMascots, type EngineOutcome, type UsageObservation } from '../src/domain.js';
 import { createCodexEngine, type Engine } from '../src/engine.js';
 import type { StoreView } from '../src/protocol.js';
 import { openStore, type Store } from '../src/store.js';
@@ -56,6 +56,30 @@ function app(scenario: string): { store: Store; stop: () => Promise<void>; send:
 
 const attempt = (view: StoreView, workId: string) => view.works.find(w => w.id === workId)?.attempt ?? null;
 
+/** One call as its caller sees it when `run` returns: the thread, the accepted turn and each usage, in the order they were reported. */
+async function callEvents(engine: Engine, cancelBeforeTurnStart = false): Promise<{ outcome: EngineOutcome; events: string[] }> {
+  const controller = new AbortController();
+  const ids = { thread: '', turn: '' };
+  const reported: (UsageObservation | 'thread' | 'turn')[] = [];
+  const unsubscribe = engine.onUsage(observation => reported.push(observation));
+  const outcome = await engine.run({
+    turn: { baseInstructions: 'x', input: 'y', outputSchema: OUTPUT_SCHEMA },
+    choice: { model: null, effort: null, speed: 'standard' }, signal: controller.signal, depart: () => ({ ok: true }), onStage: () => {},
+    onThread: id => {
+      ids.thread = id;
+      reported.push('thread');
+      if (cancelBeforeTurnStart) controller.abort();
+    },
+    onTurn: id => {
+      ids.turn = id;
+      reported.push('turn');
+    },
+  });
+  unsubscribe();
+  const own = (id: string, mine: string) => id === mine ? 'own' : id;
+  return { outcome, events: reported.map(r => typeof r === 'string' ? r : `usage ${own(r.threadId, ids.thread)} ${own(r.turnId, ids.turn)} ${r.usage.total.total}`) };
+}
+
 test('the engine reports parsed usage for its thread before it starts the turn, and drops malformed notifications', async () => {
   const engine = engineFor('usage-noise');
   const events: string[] = [];
@@ -83,26 +107,31 @@ test('the engine reports parsed usage for its thread before it starts the turn, 
 });
 
 test('usage sent after turn/completed still reaches the finished attempt, with no wait inside the call', async () => {
-  const mino = app('usage-after');
-  try {
-    const workId = mino.send('Bonjour');
-    const done = await eventually(() => {
+  for (const scenario of ['usage-after', 'one-read:usage-after']) {
+    const mino = app(scenario);
+    try {
+      const workId = mino.send('Bonjour');
+      const done = await eventually(() => {
+        const view = mino.store.view();
+        return view.works.find(w => w.id === workId && w.state === 'done') ? view : null;
+      }, `${scenario} reply recorded`);
+      assert.equal(attempt(done, workId)?.usage, null, `${scenario}: the reply is recorded before the late usage arrives`);
+      const usage = await eventually(() => attempt(mino.store.view(), workId)?.usage, `${scenario} late usage`);
+      assert.deepEqual([usage.total.input, usage.total.cachedInput, usage.total.output, usage.total.reasoningOutput, usage.total.total], [2000, 1000, 200, 100, 2200], scenario);
       const view = mino.store.view();
-      return view.works.find(w => w.id === workId && w.state === 'done') ? view : null;
-    }, 'reply recorded');
-    assert.equal(attempt(done, workId)?.usage, null, 'the reply is recorded before the late usage arrives');
-    const usage = await eventually(() => attempt(mino.store.view(), workId)?.usage, 'late usage');
-    assert.deepEqual([usage.total.input, usage.total.cachedInput, usage.total.output, usage.total.reasoningOutput, usage.total.total], [2000, 1000, 200, 100, 2200]);
-    const view = mino.store.view();
-    const stamp = view.messages.find(m => m.role === 'assistant')?.stamp;
-    assert.deepEqual([attempt(view, workId)?.state, attempt(view, workId)?.threadId], ['succeeded', stamp?.threadId]);
-  } finally {
-    await mino.stop();
+      const stamp = view.messages.find(m => m.role === 'assistant')?.stamp;
+      assert.deepEqual([attempt(view, workId)?.state, attempt(view, workId)?.threadId], ['succeeded', stamp?.threadId], scenario);
+    } finally {
+      await mino.stop();
+    }
   }
 });
 
 test('usage before completion and after a failure is kept, and a call without usage stays unreported', async () => {
-  for (const [scenario, state, total] of [['usage-before', 'done', 1320], ['usage-failed', 'failed', 550], ['no-usage', 'done', null]] as const) {
+  for (const [scenario, state, total] of [
+    ['usage-before', 'done', 1320], ['usage-failed', 'failed', 550], ['no-usage', 'done', null],
+    ['one-read:usage-before', 'done', 1320], ['one-read:usage-failed', 'failed', 550],
+  ] as const) {
     const mino = app(scenario);
     try {
       const workId = mino.send('Bonjour');
@@ -133,20 +162,57 @@ test('a cancelled call keeps the usage Codex reports after the interruption, and
   }
 });
 
+test('usage from another turn before turn/start replies cannot replace the real response identity or its counters, even when the whole turn arrives in one read', async () => {
+  for (const scenario of ['usage-before-wrong-turn', 'one-read:usage-before-wrong-turn']) {
+    const mino = app(scenario);
+    try {
+      const workId = mino.send('Bonjour');
+      const view = await eventually(() => {
+        const current = mino.store.view();
+        return current.works.find(w => w.id === workId && w.state === 'done') ? current : null;
+      }, `${scenario} real turn finished`);
+      const finished = attempt(view, workId);
+      assert.notEqual(finished?.turnId, 'turn-elsewhere', scenario);
+      assert.equal(finished?.usage?.total.total, 1320, scenario);
+      assert.equal(view.messages.find(m => m.role === 'assistant')?.stamp?.turnId, finished?.turnId, scenario);
+    } finally {
+      await mino.stop();
+    }
+  }
+});
 
-test('usage from another turn before turn/start replies cannot replace the real response identity or its counters', async () => {
-  const mino = app('usage-before-wrong-turn');
-  try {
-    const workId = mino.send('Bonjour');
-    const view = await eventually(() => {
-      const current = mino.store.view();
-      return current.works.find(w => w.id === workId && w.state === 'done') ? current : null;
-    }, 'real turn finished');
-    const finished = attempt(view, workId);
-    assert.notEqual(finished?.turnId, 'turn-elsewhere');
-    assert.equal(finished?.usage?.total.total, 1320);
-    assert.equal(view.messages.find(m => m.role === 'assistant')?.stamp?.turnId, finished?.turnId);
-  } finally {
-    await mino.stop();
+test('the accepted turn is reported before any usage received since turn/start was sent, which then follows in arrival order before the call returns', async () => {
+  const wrongTurnFirst = ['thread', 'turn', 'usage own turn-elsewhere 9900', 'usage own own 1100', 'usage own own 1320'];
+  for (const [scenario, cancelBeforeTurnStart, kind, expected] of [
+    ['usage-before-wrong-turn', false, 'succeeded', wrongTurnFirst],
+    ['one-read:usage-before-wrong-turn', false, 'succeeded', wrongTurnFirst],
+    ['one-read:usage-before-wrong-turn', true, 'cancelled', wrongTurnFirst],
+    ['one-read:usage-noise', false, 'succeeded', ['thread', 'turn', 'usage own own 3300', 'usage thread-elsewhere own 9900', 'usage own turn-elsewhere 9900']],
+  ] as const) {
+    const engine = engineFor(scenario);
+    try {
+      for (const round of ['first call', 'next call on the same engine']) {
+        const { outcome, events } = await callEvents(engine, cancelBeforeTurnStart);
+        assert.equal(outcome.kind, kind, `${scenario}, ${round}`);
+        assert.deepEqual(events, expected, `${scenario}, ${round}`);
+      }
+    } finally {
+      await engine.close();
+    }
+  }
+});
+
+test('usage received for a turn that is then refused, or cut off when the engine exits, still reaches listeners before the call returns', async () => {
+  for (const [scenario, code] of [['usage-then-refuse', 'rpc_refused'], ['usage-then-exit', 'engine_exited']] as const) {
+    const engine = engineFor(scenario);
+    try {
+      for (const round of ['first call', 'next call on the same engine']) {
+        const { outcome, events } = await callEvents(engine);
+        assert.equal(outcome.kind === 'failed' && outcome.code, code, `${scenario}, ${round}`);
+        assert.deepEqual(events, ['thread', 'usage own turn-unanswered 440'], `${scenario}, ${round}`);
+      }
+    } finally {
+      await engine.close();
+    }
   }
 });
