@@ -145,7 +145,7 @@ test('deleting a bot erases its thread, guests and memory, keeps its guest contr
   assert.deepEqual(after.carnet, shown.carnet.filter(p => p.threadBotId !== 'nova'));
   const strip = (w: StoreView['works'][number]) => ({
     ...w,
-    next: null,
+    next: w.botId === 'nova' ? null : w.next,
     ...(w.id === space.pendingWorkId ? { state: null, updatedAt: null } : {}),
     attempt: w.botId === 'nova' && w.attempt ? { ...w.attempt, plan: null } : w.attempt,
   });
