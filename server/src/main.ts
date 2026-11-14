@@ -162,6 +162,11 @@ function tickRoutines(): void {
   } catch {
     fail('Les routines ont échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.');
   }
+  try {
+    if (store.tickCheckins()) worker.kick();
+  } catch {
+    fail('Les bilans de Mino ont échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.');
+  }
 }
 let routineClock: NodeJS.Timeout | undefined;
 

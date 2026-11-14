@@ -5,7 +5,7 @@ import type { MissionChatContext } from './mission-context.js';
 import type { AutomaticOrigin } from './admission-protocol.js';
 
 /** Bump whenever the rendered text or the budgets change, so equal hashes always mean equal policies. */
-export const CONTEXT_POLICY_VERSION = 12;
+export const CONTEXT_POLICY_VERSION = 13;
 
 export const OUTPUT_SCHEMA = {
   type: 'object',
@@ -152,6 +152,11 @@ export type ContextSource = {
   receipt?: ReceiptContext;
   /** The server has connected services: this chat turn may propose to connect one. The proposal calls no service and grants nothing. */
   connections?: true;
+  /**
+   * A check-in: the request text lists fact kinds and opaque references only. Everything else in this source is ignored,
+   * so no history, memory, instruction, attachment, tool, connection or mission reaches the turn.
+   */
+  checkin?: { facts: number };
 };
 
 /** The recorded outcome of one approved action. Everything here comes from an external service and is untrusted. */
@@ -298,11 +303,36 @@ function taskLines(task: TaskSource): string[] {
   return lines;
 }
 
+const CHECKIN_BASE = [
+  'Tu es le bot principal de l’application locale Mino. Réponds en français, avec naturel et brièveté.',
+  NO_TOOL_RULE,
+  'Tu n’envoies, ne publies, ne planifies et ne relances rien. Tu ne proposes aucune mission, aucune connexion et aucune action.',
+  'Réponds uniquement par un JSON conforme au schéma. `reply` : un court message du fil qui signale les faits listés, en citant chaque référence entre crochets. `deliverable` doit être null.',
+  'Tu ne connais ni titre, ni demande, ni réponse, ni fichier, ni nom : seulement la sorte de chaque fait et son état vérifié. N’invente aucun détail, ne dis pas qu’un fait est lu ou non lu, et dis « résultat inconnu » quand l’état l’indique.',
+].join('\n');
+
+function composeCheckin(source: ContextSource, facts: number): ComposedContext {
+  const input = [triggerRule('checkin'), `Texte ${TRIGGERS.checkin.from} :`, source.request.text].join('\n');
+  const outputSchema = OPINION_SCHEMA;
+  const plan: ContextPlan = {
+    policyVersion: CONTEXT_POLICY_VERSION, contextSize: source.bot.contextSize, replyStyle: source.bot.replyStyle,
+    exchanges: { full: 0, brief: 0, omitted: 0 }, history: { budgetChars: 0, usedChars: 0, entries: [] }, clippedChars: 0,
+    deliverable: { kind: 'none' }, memory: { count: 0, chars: 0, overBudget: false }, attachments: { count: 0, chars: 0 },
+    instructionsChars: 0, baseChars: chars(CHECKIN_BASE), inputChars: chars(input),
+    utf8Bytes: Buffer.byteLength(CHECKIN_BASE, 'utf8') + Buffer.byteLength(input, 'utf8'), checkinFacts: facts,
+  };
+  const sha256 = createHash('sha256')
+    .update(canonicalJson({ policyVersion: CONTEXT_POLICY_VERSION, baseInstructions: CHECKIN_BASE, input, outputSchema }), 'utf8')
+    .digest('hex');
+  return { turn: { baseInstructions: CHECKIN_BASE, input, outputSchema }, plan, sha256, used: { historyMessageIds: [], replyAttemptIds: [] } };
+}
+
 /**
  * The only place that turns stored data into the text sent to Codex. Pure and deterministic.
  * The current request, its attachments and every local memory are always complete; past exchanges and recalled memory are bounded.
  */
 export function composeContext(source: ContextSource): ComposedContext {
+  if (source.checkin) return composeCheckin(source, source.checkin.facts);
   const { bot } = source;
   const budget = BUDGETS[bot.contextSize];
   const instructions = bot.instructions.trim();

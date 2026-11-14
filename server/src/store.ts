@@ -81,6 +81,7 @@ import { createMemoryLedger, type Candidate, type MemoryLedger, type RecallOutco
 import { MEMORY_MIGRATION, MEMORY_PURGE_ORDER } from './memory-schema.js';
 import { ROUTINE_MIGRATION, ROUTINE_PURGE_ORDER, createRoutines, type MissionOrigin } from './routines.js';
 import { EVENT_MIGRATION, createEvents, type ReceiveOutcome } from './events.js';
+import { CHECKIN_MIGRATION, createCheckins } from './checkins.js';
 import type { VerifiedDelivery } from './event-ingress.js';
 
 export type Claim = {
@@ -121,6 +122,8 @@ export type Store = {
    * `since`: when this server started. Returns how many requests were admitted.
    */
   tickRoutines(since: string): number;
+  /** Decides Mino's check-in when one is due, at most once per call. True when a check-in request was admitted. */
+  tickCheckins(): boolean;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
   /**
    * Creates the work an automatic origin asks for. The same occurrence with the same content returns the first work;
@@ -154,6 +157,11 @@ export type Store = {
    * Refused when the call was stopped or its goal changed since the claim, and when the permit was already used.
    */
   depart(claim: Claim): Departure;
+  /**
+   * Read in the same tick as the request that creates the call's thread. Never takes the permit.
+   * Refused only for a call that no longer holds, so no context leaves for a call that can no longer depart.
+   */
+  prepare(claim: Claim): Departure;
   /** Keeps the latest cumulative snapshot of the attempt bound to this thread and turn, whatever its state. */
   observeUsage(observation: UsageObservation): void;
   finishJob(claim: Claim, outcome: EngineOutcome): FinishResult;
@@ -647,6 +655,7 @@ CREATE TRIGGER works_admitted BEFORE INSERT ON works
   { sql: MEMORY_MIGRATION },
   { sql: ROUTINE_MIGRATION },
   { sql: EVENT_MIGRATION },
+  { sql: CHECKIN_MIGRATION },
 ];
 const SQLITE_COMPANIONS = ['', '-wal', '-shm', '-journal'] as const;
 export const managedBackupPaths = (path: string): string[] =>
@@ -903,15 +912,34 @@ export function openStore(options: StoreOptions): Store {
     },
     transport: options.events?.transport ?? null,
   });
+  const policy = options.policy ?? DEFAULT_POLICY;
+  const checkins = createCheckins(kit, {
+    admit: ({ text, windowKey }) => admitNested({ botId: MINO_ID, text, attachments: [], origin: { kind: 'checkin', windowKey } }),
+    refuse,
+    missions: () => options.missions?.() ?? [],
+    allowed: messageId => memory.requestAllowed(messageId),
+    retired: workId => memory.workRetired(workId),
+    budget() {
+      const declared = policy.capabilities['codex.chat'];
+      const ceiling = declared ? policy.budgets[declared.budget] : undefined;
+      if (!declared || !ceiling) return null;
+      return { budget: declared.budget, callsPerDay: ceiling.callsPerDay, used: admission.usage().find(entry => entry.budget === declared.budget)?.calls ?? 0 };
+    },
+    choice() {
+      const bot = get('SELECT model, effort, speed FROM bots WHERE id = ? AND deleted_at IS NULL', MINO_ID);
+      return bot ? { model: strOrNull(bot, 'model'), effort: strOrNull(bot, 'effort'), speed: str(bot, 'speed') } : null;
+    },
+  });
   const requestOf = (attemptId: string): string | null => {
     const row = get('SELECT w.request_message_id FROM attempts a JOIN works w ON w.id = a.work_id WHERE a.id = ?', attemptId);
     return row ? str(row, 'request_message_id') : null;
   };
-  /** Why this attempt may no longer leave or publish, from the memory ledger first, then from its event subscription. */
-  const holdOf = (attemptId: string): 'memory_changed' | 'source_moved' | null => {
+  /** Why this attempt may no longer leave or publish: its memory sources, its event subscription, then the check-ins it comes from. */
+  const holdOf = (attemptId: string): 'memory_changed' | 'source_moved' | 'checkin_moved' | null => {
     if (!memory.holds(attemptId).ok) return 'memory_changed';
     const request = requestOf(attemptId);
-    return request !== null && !events.holdsRequest(request).ok ? 'source_moved' : null;
+    if (request !== null && !events.holdsRequest(request).ok) return 'source_moved';
+    return checkins.holds(attemptId).ok ? null : 'checkin_moved';
   };
   const HONCHO_OWNS_MEMORY = 'Ce personnage utilise la mémoire Honcho. Ses déclarations se gèrent sur l’ordinateur, dans sa page. Rien n’a été enregistré.';
 
@@ -943,6 +971,7 @@ export function openStore(options: StoreOptions): Store {
     botPresent: get('SELECT id FROM bots WHERE id = ? AND deleted_at IS NULL', str(work, 'bot_id')) !== undefined,
     hasExecution: tools.hasLiveExecution(str(work, 'id')),
     state: workState(work),
+    checkin: checkins.isCheckin(str(work, 'request_message_id')),
   });
   function lastFactOf(workId: string): import('./protocol.js').WorkFact {
     const execution = get(`SELECT e.* FROM tool_executions e JOIN tool_proposals p ON p.id=e.proposal_id
@@ -1322,6 +1351,10 @@ export function openStore(options: StoreOptions): Store {
       case 'subscription.resume':
       case 'subscription.revoke':
         return events.apply(command);
+      case 'checkin.activate':
+      case 'checkin.pause':
+      case 'checkin.resume':
+        return checkins.apply(command);
       case 'memory.delete': {
         requireMemory(command.botId, command.memoryId);
         run('DELETE FROM memories WHERE id = ?', command.memoryId);
@@ -1409,6 +1442,7 @@ export function openStore(options: StoreOptions): Store {
     const parsed = AdmitSchema.safeParse(input);
     if (!parsed.success) return { ok: false, code: 'invalid_command', message: 'Cette demande automatique est incomplète ou invalide.' };
     if (parsed.data.origin.kind === 'event') return { ok: false, code: 'invalid_command', message: 'Un événement entre seulement par sa réception signée, avec son reçu. Rien n’a été créé.' };
+    if (parsed.data.origin.kind === 'checkin') return { ok: false, code: 'invalid_command', message: 'Un bilan entre seulement par la décision enregistrée de Mino. Rien n’a été créé.' };
     try {
       const admitted = transaction(() => admitWork({ ...parsed.data, attachments: [] }));
       if (!admitted.duplicate) changed();
@@ -1499,6 +1533,7 @@ export function openStore(options: StoreOptions): Store {
     memory.markPurge(botId, targetsOf('attempts'));
     routines.markPurge(botId);
     events.markPurge(botId, targetsOf('messages'));
+    checkins.markPurge(botId, { messages: targetsOf('messages'), works: targetsOf('works'), attempts: targetsOf('attempts') });
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
     run(`UPDATE commands SET fingerprint = '',
@@ -1699,7 +1734,7 @@ export function openStore(options: StoreOptions): Store {
         JOIN bots b ON b.id=w.bot_id JOIN attempts a ON a.work_id=w.id AND a.state='succeeded'
         JOIN messages reply ON reply.attempt_id=a.id
         WHERE w.request_message_id=? AND w.state IN ('review','done') ORDER BY w.rowid, a.n`, requestMessageId);
-      const responses = recorded.filter(row => !memory.workRetired(str(row, 'work_id')));
+      const responses = recorded.filter(row => !memory.workRetired(str(row, 'work_id')) && !checkins.withdrawnAttempt(str(row, 'attempt_id')));
       if (recorded.length && !responses.length) return [];
       const lastVersion = responses.map(row => currentVersion(str(row, 'work_id'))).findLast(v => v !== undefined);
       return [{
@@ -1742,15 +1777,16 @@ export function openStore(options: StoreOptions): Store {
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
   } | null, purpose: Claim['purpose'] = { kind: 'request' }): Claim {
-    const fromEvent = prepared.source.request.trigger === 'event';
-    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && !fromEvent && prepared.source.chosen?.holds !== false
-      ? tools.grantsFor(prepared.botId) : [];
+    const trigger = prepared.source.request.trigger;
+    // An event never gets a service right; a check-in gets nothing beyond its fact list.
+    const offered = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && trigger !== 'event' && trigger !== 'checkin';
+    const toolGrants = offered && prepared.source.chosen?.holds !== false ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
       exchanges: prepared.exchanges,
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
       ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
-      ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' && !fromEvent ? { connections: true as const } : {}),
+      ...(offered ? { connections: true as const } : {}),
     };
     const composed = composeContext(source);
     const bot = prepared.bot;
@@ -1766,14 +1802,16 @@ export function openStore(options: StoreOptions): Store {
       lane, frozen?.step ?? null, frozen?.taskRevision ?? null, frozen?.baseVersionId ?? null, frozen?.eventsThrough ?? null,
       frozen?.handoffId ?? null, frozen?.continued ? 1 : 0, purpose.kind === 'receipt' ? purpose.executionId : null,
     );
+    const replyAttemptIds = [...composed.used.replyAttemptIds, ...(prepared.builtOn ?? [])];
     memory.freeze(attemptId, {
       threadBotId: prepared.threadBotId,
       recalled: prepared.recalled?.sourceIds ?? [],
       recall: { state: source.recall?.state ?? 'none', category: prepared.recalled?.category ?? null, omitted: source.recall?.omitted ?? 0 },
       requestMessageId: prepared.requestMessageId,
       historyMessageIds: composed.used.historyMessageIds,
-      replyAttemptIds: [...composed.used.replyAttemptIds, ...(prepared.builtOn ?? [])],
+      replyAttemptIds,
     });
+    checkins.recordUses(attemptId, prepared.requestMessageId, { historyMessageIds: composed.used.historyMessageIds, replyAttemptIds });
     return { lane, workId: prepared.workId, attemptId, n, botId: prepared.botId, choice, turn: composed.turn, toolGrants, purpose };
   }
 
@@ -1815,7 +1853,7 @@ export function openStore(options: StoreOptions): Store {
     const plan = transaction((): RecallPlan => {
       if (get(`SELECT id FROM attempts WHERE state = 'running' AND lane = 'chat'`) || tools.nextReport()) return { kind: 'none' };
       const next = peekChat();
-      return next && str(next, 'origin_kind') !== 'event' ? memory.plan(candidateOf(next)) : { kind: 'none' };
+      return next && str(next, 'origin_kind') !== 'event' && str(next, 'origin_kind') !== 'checkin' ? memory.plan(candidateOf(next)) : { kind: 'none' };
     });
     if (plan.kind === 'unavailable') changed();
     return plan;
@@ -1828,6 +1866,7 @@ export function openStore(options: StoreOptions): Store {
     if (!next) return null;
     const workId = str(next, 'work_id');
     const botId = str(next, 'bot_id');
+    if (str(next, 'origin_kind') === 'checkin') return claimCheckin(next);
     const fromEvent = str(next, 'origin_kind') === 'event';
     const recalled = fromEvent ? null : memory.recall(candidateOf(next), recall);
     if (recalled === 'replan') return 'replan';
@@ -1857,6 +1896,23 @@ export function openStore(options: StoreOptions): Store {
       },
     }, null);
     setWorkState(requireWork(workId), 'running');
+    return claim;
+  }
+
+  /** A check-in turn: its fact list only, never the thread, a memory, the instructions or a right. */
+  function claimCheckin(next: Row): Claim {
+    const bot = requireBot(str(next, 'bot_id'));
+    const requestMessageId = str(next, 'message_id');
+    const claim = startAttempt('chat', {
+      workId: str(next, 'work_id'), botId: str(next, 'bot_id'), bot, memories: [],
+      threadBotId: str(next, 'thread_bot_id'), requestMessageId, exchanges: [],
+      source: {
+        bot: botSource(bot), memories: [],
+        request: { text: str(next, 'text'), trigger: 'checkin', attachments: [] },
+        checkin: { facts: checkins.factCount(requestMessageId) },
+      },
+    }, null);
+    setWorkState(requireWork(str(next, 'work_id')), 'running');
     return claim;
   }
 
@@ -1935,6 +1991,12 @@ export function openStore(options: StoreOptions): Store {
           setWorkState(pending, 'cancelled');
           refused = true;
         }
+        for (const pending of all(`SELECT w.* FROM works w JOIN origins o ON o.message_id = w.request_message_id WHERE w.state = 'pending' AND o.kind = 'checkin'`)) {
+          if (checkins.holdsRequest(str(pending, 'request_message_id')).ok) continue;
+          setWorkState(pending, 'cancelled');
+          checkins.resolve(str(pending, 'id'));
+          refused = true;
+        }
       }
       for (;;) {
         const candidate = lane === 'chat' ? claimChat(recall) : claimDoc();
@@ -1974,6 +2036,11 @@ export function openStore(options: StoreOptions): Store {
       }
       return admission.depart(CAPABILITY[claim.lane], targetOf(claim, row.revision === null ? null : int(row, 'revision')));
     });
+  }
+
+  function prepare(claim: Claim): Departure {
+    const moved = checkins.holds(claim.attemptId).ok ? null : 'checkin_moved';
+    return moved ? { ok: false, reason: ENGINE_ERRORS[moved] } : { ok: true };
   }
 
   function recordProgress(claim: Claim, text: AgentText): void {
@@ -2053,10 +2120,18 @@ export function openStore(options: StoreOptions): Store {
         );
         const threadBot = str(get('SELECT bot_id FROM messages WHERE id = ?', str(work, 'request_message_id')) ?? {}, 'bot_id');
         // Only Mino, in its own thread, may propose a mission; any other bot's proposal is dropped.
-        const fromEvent = str(originKind(str(work, 'request_message_id')), 'origin_kind') === 'event';
-        const handoff = reportOf === null && !fromEvent && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
+        const trigger = str(originKind(str(work, 'request_message_id')), 'origin_kind');
+        const fromEvent = trigger === 'event';
+        const checkin = trigger === 'checkin';
+        const handoff = reportOf === null && !fromEvent && !checkin && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
         run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at, handoff) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
           newId('m'), str(work, 'bot_id'), outcome.reply.reply, claim.attemptId, at, handoff ? JSON.stringify(handoff) : null);
+        if (checkin) {
+          // A check-in publishes its reply only, whatever else the engine returned, and consumes its facts in this transaction.
+          setWorkState(work, 'done');
+          checkins.resolve(claim.workId);
+          return { kind: 'recorded', state: 'done' };
+        }
         if (options.serviceTools && reportOf === null && !fromEvent && outcome.reply.connection) {
           connections.offer({ botId: str(work, 'bot_id'), workId: claim.workId, attemptId: claim.attemptId }, outcome.reply.connection.service);
         }
@@ -2075,12 +2150,14 @@ export function openStore(options: StoreOptions): Store {
           outcome.code, outcome.message, at, claim.attemptId);
         if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'failed') };
         setWorkState(work, 'failed');
+        checkins.resolve(claim.workId);
         return { kind: 'recorded', state: 'failed' };
       }
       case 'cancelled': {
         run(`UPDATE attempts SET state = 'cancelled', stage = NULL, finished_at = ? WHERE id = ?`, at, claim.attemptId);
         if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'suppressed') };
         setWorkState(work, 'cancelled');
+        checkins.resolve(claim.workId);
         return { kind: 'recorded', state: 'cancelled' };
       }
       default: {
@@ -2250,6 +2327,8 @@ export function openStore(options: StoreOptions): Store {
       list.push({ name: str(row, 'name'), chars: int(row, 'chars') });
       attachmentsByMessage.set(str(row, 'message_id'), list);
     }
+    const hiddenRequests = checkins.hiddenRequests();
+    const hiddenWorks = new Set(all('SELECT id, request_message_id FROM works').filter(row => hiddenRequests.has(str(row, 'request_message_id'))).map(row => str(row, 'id')));
     const messages: MessageView[] = all(
       `SELECT m.*, COALESCE(request.bot_id, m.bot_id) AS thread_bot_id, COALESCE(a.work_id, w.id) AS work_id, a.model, a.effort, a.speed, a.thread_id, a.turn_id, a.step,
          o.kind AS origin_kind, o.occurrence AS origin_occurrence
@@ -2277,7 +2356,7 @@ export function openStore(options: StoreOptions): Store {
         handoff: parseJsonColumn(row, 'handoff', HandoffSchema),
         trigger: triggerView(row),
       };
-    });
+    }).filter(message => !hiddenWorks.has(message.workId));
     const versionsByWork = new Map<string, VersionView[]>();
     const versionN = new Map<string, number>();
     for (const row of all('SELECT * FROM versions ORDER BY work_id, n')) versionN.set(str(row, 'id'), int(row, 'n'));
@@ -2363,7 +2442,7 @@ export function openStore(options: StoreOptions): Store {
       workIds: ledger.flatMap(row => z.array(z.string()).parse(JSON.parse(str(row, 'work_ids')))),
     };
     const erasure = erasurePending() ? 'incomplete' as const : 'complete' as const;
-    return { rev, spaceId, activeBotId, bots, retiredBotIds, purged, erasure, messages, works, tasks: taskViews(versionN), carnet, routines: routines.views(), events: events.view() };
+    return { rev, spaceId, activeBotId, bots, retiredBotIds, purged, erasure, messages, works, tasks: taskViews(versionN), carnet, routines: routines.views(), events: events.view(), checkin: checkins.view() };
   }
 
   function taskViews(versionN: ReadonlyMap<string, number>): TaskView[] {
@@ -2449,6 +2528,11 @@ export function openStore(options: StoreOptions): Store {
       if (ticked.changed) changed();
       return ticked.admitted;
     },
+    tickCheckins() {
+      const ticked = checkins.tick();
+      if (ticked.changed) changed();
+      return ticked.admitted;
+    },
     dispatch,
     admit,
     receiveEvent: delivery => events.receive(delivery),
@@ -2464,6 +2548,7 @@ export function openStore(options: StoreOptions): Store {
     bindThread,
     bindTurn,
     depart,
+    prepare,
     observeUsage,
     finishJob,
     recoverInterrupted,

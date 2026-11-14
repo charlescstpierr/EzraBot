@@ -1,6 +1,7 @@
 import type { WorkNext, WorkState } from './protocol.js';
 
-export function workNext(facts: { task: boolean; botPresent: boolean; hasExecution: boolean; state: WorkState }): WorkNext {
+export function workNext(facts: { task: boolean; botPresent: boolean; hasExecution: boolean; state: WorkState; checkin: boolean }): WorkNext {
+  if (facts.checkin) return { kind: 'none', reason: 'Un bilan ne se relance pas. Le suivant viendra à son heure s’il reste un fait nouveau.' };
   if (facts.task) return { kind: 'document', reason: 'Ce travail documentaire se reprend avec « Reprendre », qui compte dans sa limite d’appels.' };
   if (!facts.botPresent) return { kind: 'none', reason: 'Ce bot a été supprimé : ce travail ne peut pas être relancé.' };
   if (facts.hasExecution) return { kind: 'new_request', reason: 'Ce travail a déjà une action de service approuvée. Il ne se relance pas : faites une nouvelle demande.' };

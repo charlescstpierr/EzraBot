@@ -187,7 +187,7 @@ test('deleting a bot erases its thread, guests and memory, keeps its guest contr
     const key = String(db.prepare(`SELECT value FROM meta WHERE key = 'hmac_key'`).get()?.value);
     const byBotOnly = createHmac('sha256', key).update(JSON.stringify({ botId: 'nova', type: 'bot.delete' })).digest('hex');
     assert.equal(deletion?.fingerprint, byBotOnly, 'neither the typed name nor the counters are fingerprinted');
-    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 13);
+    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 14);
   } finally {
     db.close();
   }

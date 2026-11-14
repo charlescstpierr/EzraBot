@@ -132,6 +132,35 @@ const subscriptionScope = {
   perDay: z.number().int().min(EVENT_LIMITS.perDay.min).max(EVENT_LIMITS.perDay.max),
 };
 
+export const CHECKIN_STATES = ['off', 'active', 'paused'] as const;
+export type CheckinState = (typeof CHECKIN_STATES)[number];
+/**
+ * Product rules of Mino's check-ins, chosen and shown to the person. None is a measured capacity, and none raises a
+ * budget: every check-in call still goes through the shared ceilings of `codex.chat`.
+ */
+export const CHECKIN_LIMITS = {
+  /** No check-in while the person sent a message this recently, in any thread. */
+  quietMinutes: 15,
+  initialMinutes: 30,
+  maxMinutes: 480,
+  /** Each run of this many checks without a fact doubles the interval, up to `maxMinutes`. Only a publication resets it. */
+  silentPerDoubling: 3,
+  factsPerCheckin: 3,
+  /** Real model departures of check-ins over a rolling day, unknown and failed ones included. */
+  departuresPerDay: 2,
+  recent: 5,
+  tickSeconds: 30,
+} as const;
+/** What a check-in can report. Metadata only: the model never receives a title, a request, a reply or a file. */
+export const CHECKIN_FACT_KINDS = ['reply', 'version', 'stopped', 'publication', 'docproposal', 'action', 'call', 'execution', 'mission', 'review', 'automatic_done', 'automatic_stopped'] as const;
+export type CheckinFactKind = (typeof CHECKIN_FACT_KINDS)[number];
+export const CHECKIN_OUTCOMES = ['silent', 'quiet', 'deferred', 'admitted', 'refused'] as const;
+export type CheckinOutcome = (typeof CHECKIN_OUTCOMES)[number];
+/** What became of an admitted check-in. `held` waits for the person on the PC; `waived`: they gave up its facts without delivery. */
+export const CHECKIN_DELIVERIES = ['pending', 'published', 'released', 'held', 'waived'] as const;
+export type CheckinDelivery = (typeof CHECKIN_DELIVERIES)[number];
+const windowKey = z.string().regex(/^w[1-9]\d{0,9}$/);
+
 export const CommandSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('message.say'), requestId, botId: id, text: text(LIMITS.messageChars),
@@ -273,6 +302,11 @@ export const CommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('subscription.resume'), requestId, subscriptionId: id, expectedRevision: revision }),
   /** Terminal. The trigger stays bound to this subscription, so the same authority cannot come back under another bot. */
   z.strictObject({ type: z.literal('subscription.revoke'), requestId, subscriptionId: id }),
+  /** PC only. The first check comes one interval later, never at the click. */
+  z.strictObject({ type: z.literal('checkin.activate'), requestId, expectedRevision: revision }),
+  z.strictObject({ type: z.literal('checkin.pause'), requestId }),
+  /** PC only. A held check-in resumes only by naming its exact window: nothing is sent again. */
+  z.strictObject({ type: z.literal('checkin.resume'), requestId, expectedRevision: revision, confirmWindow: windowKey.optional() }),
 ]);
 
 export type Command = z.infer<typeof CommandSchema>;
@@ -327,6 +361,7 @@ export const CommandResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('purge'), erased: z.boolean() }),
   z.strictObject({ kind: z.literal('routine'), routineId: z.string(), revision: z.number(), state: z.enum(ROUTINE_STATES) }),
   z.strictObject({ kind: z.literal('subscription'), subscriptionId: z.string(), revision: z.number(), state: z.enum(SUBSCRIPTION_STATES) }),
+  z.strictObject({ kind: z.literal('checkin'), revision: z.number(), state: z.enum(CHECKIN_STATES), held: z.boolean() }),
 ]);
 export type CommandResult = z.infer<typeof CommandResultSchema>;
 
@@ -406,6 +441,7 @@ export const HistoryCoverageSchema = z.strictObject({
 export const ContextPlanSchema = z.union([
   LegacyContextPlanSchema,
   LegacyContextPlanSchema.extend({ policyVersion: z.literal(12), history: HistoryCoverageSchema }),
+  LegacyContextPlanSchema.extend({ policyVersion: z.literal(13), history: HistoryCoverageSchema, checkinFacts: count.optional() }),
 ]);
 export type ContextPlan = z.infer<typeof ContextPlanSchema>;
 
@@ -763,6 +799,56 @@ export type EventsView = {
   subscriptions: SubscriptionView[];
 };
 
+/**
+ * One fact a check-in reserved or reported. `workId` and `missionId` link only while the source is still there and
+ * allowed; a withdrawn fact shows neither.
+ */
+export type CheckinFactView = {
+  ref: string;
+  kind: CheckinFactKind;
+  state: 'reserved' | 'published' | 'released' | 'waived' | 'withdrawn';
+  workId: string | null;
+  missionId: string | null;
+};
+
+/** One durable decision of a due check. `delivery` is set only for an admitted one. */
+export type CheckinDecisionView = {
+  window: string;
+  decidedAt: string;
+  outcome: CheckinOutcome;
+  reason: string;
+  delivery: CheckinDelivery | null;
+  /** The check-in request and its work, until a deletion erases them. */
+  messageId: string | null;
+  workId: string | null;
+  /** A published check-in whose sources were withdrawn since: it is hidden from the thread and from later contexts. */
+  withdrawn: boolean;
+  facts: CheckinFactView[];
+};
+
+/**
+ * Mino's check-ins. Off until the person turns them on from the PC. `held`: a check-in was refused or left without a
+ * delivered reply; nothing is sent again until the person confirms this window on the PC.
+ */
+export type CheckinView = {
+  revision: number;
+  state: CheckinState;
+  held: { window: string; departed: boolean; reason: string } | null;
+  /** Null while off. A check before this instant never runs; a later one runs once, never once per missed interval. */
+  nextAt: string | null;
+  intervalMinutes: number;
+  silentStreak: number;
+  /** The person's last sent message plus the quiet window, when it is still ahead. */
+  quietUntil: string | null;
+  departures: { used: number; max: number };
+  /** The shared budget a check-in call counts against. Null: this server admits no `codex.chat` call. */
+  budget: { capability: 'codex.chat'; budget: string; callsPerDay: number } | null;
+  /** Mino's configured model choice, as the activation explains it. Null when Mino was deleted. */
+  model: BotChoice | null;
+  last: CheckinDecisionView | null;
+  recent: CheckinDecisionView[];
+};
+
 export type StoreView = {
   rev: number;
   /** Random per database: browser markers from another database on the same origin never apply here. */
@@ -782,6 +868,7 @@ export type StoreView = {
   carnet: PublicationView[];
   routines: RoutineView[];
   events: EventsView;
+  checkin: CheckinView;
 };
 
 export type CatalogModel = {

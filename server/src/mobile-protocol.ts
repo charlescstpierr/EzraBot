@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { WorkNextSchema, WorkFactSchema, CommandResultSchema, CommandSchema, DeletionCountsSchema, EVENT_REFUSALS, MentionSpanSchema, ROUTINE_STATES, SUBSCRIPTION_STATES, TASK_STATUSES, WORK_STATES } from './protocol.js';
+import { WorkNextSchema, WorkFactSchema, CommandResultSchema, CommandSchema, DeletionCountsSchema, CHECKIN_DELIVERIES, CHECKIN_OUTCOMES, CHECKIN_STATES, EVENT_REFUSALS, MentionSpanSchema, ROUTINE_STATES, SUBSCRIPTION_STATES, TASK_STATUSES, WORK_STATES } from './protocol.js';
 
 const id = z.string();
 const choice = z.object({ model: id.nullable(), effort: id.nullable(), speed: id });
@@ -44,6 +44,12 @@ export const MobileSnapshotSchema = z.object({
       account: z.object({ alias: id, status: id }).nullable(), today: z.object({ admitted: z.number(), refused: z.number() }),
       last: z.object({ receivedAt: id, outcome: z.enum(['admitted', 'refused']), reason: z.enum(EVENT_REFUSALS).nullable(), workId: id.nullable() }).nullable() })),
   }).optional(),
+  /** Read and pause only. Activation, resumption and the confirmation of a held check-in stay on the PC. */
+  checkin: z.object({
+    state: z.enum(CHECKIN_STATES), held: z.object({ window: id, departed: z.boolean() }).nullable(), nextAt: id.nullable(), intervalMinutes: z.number(),
+    quietUntil: id.nullable(), departures: z.object({ used: z.number(), max: z.number() }),
+    last: z.object({ window: id, decidedAt: id, outcome: z.enum(CHECKIN_OUTCOMES), delivery: z.enum(CHECKIN_DELIVERIES).nullable(), withdrawn: z.boolean() }).nullable(),
+  }).optional(),
   engine: z.discriminatedUnion('state', [z.object({ state: z.literal('starting') }), z.object({ state: z.literal('unavailable'), message: id }),
     z.object({ state: z.literal('ready'), account: z.literal('chatgpt'), models: z.array(z.object({ id, displayName: id, isDefault: z.boolean(), efforts: z.array(id), defaultEffort: id, speeds: z.array(z.object({ id, name: id, description: id })) })) })]),
 });
@@ -61,6 +67,12 @@ export type MobileSubscription = NonNullable<MobileSnapshot['events']>['subscrip
 /** The subscription buttons a phone may show: exactly the commands `/m/commands` accepts for this state. */
 export function phoneSubscriptionActions(subscription: Pick<MobileSubscription, 'state'>): 'pause'[] {
   return subscription.state === 'active' ? ['pause'] : [];
+}
+
+export type MobileCheckin = NonNullable<MobileSnapshot['checkin']>;
+/** The check-in buttons a phone may show: exactly the commands `/m/commands` accepts for this state. */
+export function phoneCheckinActions(checkin: Pick<MobileCheckin, 'state'>): 'pause'[] {
+  return checkin.state === 'active' ? ['pause'] : [];
 }
 
 export const MobileReplySchema = z.discriminatedUnion('ok', [

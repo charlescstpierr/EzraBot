@@ -14,7 +14,7 @@ import { createDeviceServer } from '../src/device-http.js';
 import { createHttpServer } from '../src/http.js';
 import { loadMascots } from '../src/domain.js';
 import type { Engine } from '../src/engine.js';
-import { MobileSnapshotSchema, MobileReplySchema, PairStatusSchema, phoneRoutineActions, phoneSubscriptionActions } from '../src/mobile-protocol.js';
+import { MobileSnapshotSchema, MobileReplySchema, PairStatusSchema, phoneCheckinActions, phoneRoutineActions, phoneSubscriptionActions } from '../src/mobile-protocol.js';
 import { openStore } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
 
@@ -289,5 +289,34 @@ test('a paired phone sees subscriptions without their instruction and may only p
     f.devices.revoke(f.credential.deviceId);
     assert.equal((await f.call('/m/commands', { type: 'subscription.pause', requestId: 'phone-sub-pause-2', subscriptionId }, f.auth)).status, 401);
     assert.equal(seen()?.state, 'active', 'a revoked phone paused nothing');
+  } finally { await f.close(); }
+});
+
+test('a paired phone reads Mino’s check-ins and may only pause them; activation, resumption and confirmation stay on the PC', async () => {
+  const f = await fixture();
+  try {
+    await f.pair();
+    const seen = async () => MobileSnapshotSchema.parse((await f.call('/m/view', undefined, f.auth)).body).checkin;
+    assert.equal((await seen())?.state, 'off');
+    assert.deepEqual(phoneCheckinActions({ state: 'off' }), []);
+    for (const command of [
+      { type: 'checkin.activate', requestId: 'phone-checkin-activate', expectedRevision: 1 },
+      { type: 'checkin.resume', requestId: 'phone-checkin-resume', expectedRevision: 1 },
+      { type: 'checkin.resume', requestId: 'phone-checkin-confirm', expectedRevision: 1, confirmWindow: 'w1' },
+    ]) {
+      const refused = await f.call('/m/commands', command, f.auth);
+      assert.deepEqual([refused.status, (refused.body as { code?: string }).code], [403, 'command_refused'], command.type);
+    }
+    assert.equal((await seen())?.state, 'off', 'nothing was activated from the phone');
+    assert(f.store.dispatch({ type: 'checkin.activate', requestId: 'pc-checkin-activate', expectedRevision: 1 }).ok);
+    assert.deepEqual(phoneCheckinActions({ state: 'active' }), ['pause']);
+    const extra = await f.call('/m/commands', { type: 'checkin.pause', requestId: 'phone-checkin-extra', expectedRevision: 2 }, f.auth);
+    assert.equal(extra.status, 422, 'an extra field is refused');
+    const paused = MobileReplySchema.parse((await f.call('/m/commands', { type: 'checkin.pause', requestId: 'phone-checkin-pause' }, f.auth)).body);
+    assert.equal(paused.ok && paused.view.checkin?.state, 'paused');
+    assert.deepEqual(phoneCheckinActions({ state: 'paused' }), []);
+    const resumed = await f.call('/m/commands', { type: 'checkin.resume', requestId: 'phone-checkin-resume-2', expectedRevision: 3 }, f.auth);
+    assert.deepEqual([resumed.status, (resumed.body as { code?: string }).code], [403, 'command_refused']);
+    assert.equal(f.store.view().checkin.state, 'paused');
   } finally { await f.close(); }
 });

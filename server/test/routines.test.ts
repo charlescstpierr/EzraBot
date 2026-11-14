@@ -424,16 +424,16 @@ test('a mission opened from a routine reply holds the next date while it runs, a
     await worker.idle();
     const reply = s.store.view().messages.find(m => m.role === 'assistant');
     assert(reply);
-    missions.push({ missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'running' });
+    missions.push({ missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'running', goalRev: 1, latestAttemptId: 'attempt-1', updatedAt: '2026-11-16T12:00:00.000Z' });
     s.set('2026-11-17T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
     const open = routineOf(s.store, routineId).last;
     assert.deepEqual(open && open.outcome === 'skipped' && [open.reason, open.blocker], ['previous_open', 'mission:msn_1']);
-    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'interrupted' };
+    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'interrupted', goalRev: 1, latestAttemptId: 'attempt-1', updatedAt: '2026-11-16T12:00:00.000Z' };
     s.set('2026-11-18T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
     assert.match(routineOf(s.store, routineId).heldOn?.key ?? '', /^mission:msn_1:/);
-    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'accepted' };
+    missions[0] = { missionId: 'msn_1', originMessageId: reply.id, interruptions: ['attempt-1'], status: 'accepted', goalRev: 1, latestAttemptId: 'attempt-1', updatedAt: '2026-11-16T12:00:00.000Z' };
     ok(s.store.dispatch({ type: 'routine.pause', requestId: rid(), routineId }));
     ok(s.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId, confirmBlocker: routineOf(s.store, routineId).heldOn?.key }));
     s.set('2026-11-19T13:30:00Z');
@@ -621,7 +621,7 @@ test('a routine request is never searched in Honcho nor exported; the shared his
 });
 
 test('a second interrupted attempt of the same mission needs a new confirmation', async () => {
-  const mission: MissionOrigin = { missionId: 'msn_repeat', originMessageId: '', status: 'interrupted', interruptions: ['attempt-1'] };
+  const mission: MissionOrigin = { missionId: 'msn_repeat', originMessageId: '', status: 'interrupted', interruptions: ['attempt-1'], goalRev: 1, latestAttemptId: 'attempt-1', updatedAt: '2026-11-16T12:00:00.000Z' };
   const s = space({ missions: () => [mission] });
   const h = heldEngine();
   const worker = createWorker({ store: s.store, engines: { chat: h.engine, doc: h.engine } });

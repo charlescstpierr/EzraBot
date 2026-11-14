@@ -67,6 +67,11 @@ export type RunInput = {
    * a refusal is the call's outcome and nothing is sent.
    */
   depart: () => Departure;
+  /**
+   * Asked in the same tick as the request that creates the thread, whose instructions are already part of the call.
+   * It reads, never takes the permit: a refusal is the call's outcome and nothing is sent. Absent: always ready.
+   */
+  prepare?: () => Departure;
   /** Agent text received so far for one item of this thread and turn. The completed item replaces what the fragments built. */
   onText?: (text: AgentText) => void;
 };
@@ -441,7 +446,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
     }
   }
 
-  async function runTurn({ turn, choice, signal, onStage, onThread, onTurn, onText, depart, tools: offered }: RunInput): Promise<EngineOutcome> {
+  async function runTurn({ turn, choice, signal, onStage, onThread, onTurn, onText, depart, prepare, tools: offered }: RunInput): Promise<EngineOutcome> {
     const tools = offered?.specs.length ? offered : null;
     if (tools && !options.dynamicTools) return engineFailure('rpc_refused', 'Ce moteur n’accepte aucun outil de service. Mino n’a pas lancé l’appel.');
     const toolNames = new Set(tools?.specs.map(spec => spec.name));
@@ -452,6 +457,8 @@ export function createCodexEngine(options: EngineOptions): Engine {
     if (!resolution.ok) return engineFailure('choice_unavailable', resolution.message);
     const used = resolution.choice;
     const conn = ready.connection;
+    const preparing = prepare?.() ?? { ok: true };
+    if (!preparing.ok) return engineFailure('admission_refused', preparing.reason);
     let threadId: string;
     try {
       const started = ThreadStartSchema.safeParse(await conn.request('thread/start', {
