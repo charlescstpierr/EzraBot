@@ -106,6 +106,7 @@ export const ENGINE_ERRORS = {
   connection_failed: 'Connexion au service impossible. Vérifiez votre accès à Internet.',
   turn_failed: 'Codex a signalé un échec sans réponse.',
   interrupted: 'Mino s’est arrêté pendant cet appel. Relancez-le quand vous voulez.',
+  admission_refused: 'Mino n’a pas admis cet appel. Rien n’est parti.',
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;

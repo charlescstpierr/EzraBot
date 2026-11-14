@@ -32,7 +32,7 @@ async function fixture() {
   const engine: Engine = {
     status: () => ({ state: 'ready', account: 'chatgpt', models: [{ id: 'test', displayName: 'Test', isDefault: true, efforts: ['low'], defaultEffort: 'low', speeds: [] }] }),
     catalog: async () => engine.status(), close: async () => {}, onUsage: () => () => {},
-    run: async input => { const id = randomUUID(); input.onThread('thread_' + id); input.onTurn('turn_' + id); return { kind: 'succeeded', reply: { reply: 'Réponse de contrôle', deliverable: { title: 'Plan Boréal', body: 'Budget 8 000 €' } }, used: { model: 'test', effort: 'low', speed: 'standard' }, threadId: 'thread_' + id, turnId: 'turn_' + id }; },
+    run: async input => { const id = randomUUID(); input.onThread('thread_' + id); input.onTurn('turn_' + id); const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason }; return { kind: 'succeeded', reply: { reply: 'Réponse de contrôle', deliverable: { title: 'Plan Boréal', body: 'Budget 8 000 €' } }, used: { model: 'test', effort: 'low', speed: 'standard' }, threadId: 'thread_' + id, turnId: 'turn_' + id }; },
   };
   const worker = createWorker({ store, engines: { chat: engine, doc: engine } });
   const devicePort = await port(); const localPort = await port();

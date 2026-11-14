@@ -35,10 +35,15 @@ function fakeEngine(): Engine & { aborted: string[]; emitUsage(observation: Usag
       usage.add(listener);
       return () => usage.delete(listener);
     },
-    run: ({ turn, signal, onStage, onThread, onTurn }: RunInput) => new Promise<EngineOutcome>(done => {
+    run: ({ turn, signal, onStage, onThread, onTurn, depart }: RunInput) => new Promise<EngineOutcome>(done => {
       onThread('t1');
       onTurn('u1');
       onStage('writing');
+      const departure = depart();
+      if (!departure.ok) {
+        done({ kind: 'failed', code: 'admission_refused', message: departure.reason });
+        return;
+      }
       const request = turn.input.split('\n').at(-1) ?? '';
       if (request.includes('creation-html') || request.includes('legacy-html')) {
         const legacy = request.includes('legacy-html');

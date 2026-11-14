@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { BotChoice, CatalogModel, EngineStatus, RunStage } from './protocol.js';
 import { STANDARD_SPEED } from './protocol.js';
 import type { ComposedTurn } from './context.js';
+import type { Departure } from './admission.js';
 import { childEnv } from './child-env.js';
 import {
   ENGINE_ERRORS,
@@ -61,6 +62,11 @@ export type RunInput = {
   /** Called once the thread exists and before the turn starts, so usage can always find its attempt. */
   onThread: (threadId: string) => void;
   onTurn: (turnId: string) => void;
+  /**
+   * The one-use permit of this call. The engine takes it in the same tick as the request that starts the turn:
+   * a refusal is the call's outcome and nothing is sent.
+   */
+  depart: () => Departure;
   /** Agent text received so far for one item of this thread and turn. The completed item replaces what the fragments built. */
   onText?: (text: AgentText) => void;
 };
@@ -412,7 +418,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
     }
   }
 
-  async function runTurn({ turn, choice, signal, onStage, onThread, onTurn, onText, tools: offered }: RunInput): Promise<EngineOutcome> {
+  async function runTurn({ turn, choice, signal, onStage, onThread, onTurn, onText, depart, tools: offered }: RunInput): Promise<EngineOutcome> {
     const tools = offered?.specs.length ? offered : null;
     if (tools && !options.dynamicTools) return engineFailure('rpc_refused', 'Ce moteur n’accepte aucun outil de service. Mino n’a pas lancé l’appel.');
     const toolNames = new Set(tools?.specs.map(spec => spec.name));
@@ -596,6 +602,11 @@ export function createCodexEngine(options: EngineOptions): Engine {
       };
       signal.addEventListener('abort', onAbort);
 
+      const departure = depart();
+      if (!departure.ok) {
+        finish(engineFailure('admission_refused', departure.reason));
+        return;
+      }
       conn.request('turn/start', {
         threadId,
         input: [{ type: 'text', text: turn.input }],

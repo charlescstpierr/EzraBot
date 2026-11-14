@@ -49,6 +49,7 @@ function engine() {
     calls++;
     const threadId = randomUUID(), turnId = randomUUID();
     input.onThread(threadId); input.onTurn(turnId); input.onStage('writing');
+    const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
     if (replyMode === 'hold') {
       await new Promise(resolve => input.signal.aborted ? resolve() : input.signal.addEventListener('abort', resolve, { once: true }));
       return { kind: 'cancelled' };

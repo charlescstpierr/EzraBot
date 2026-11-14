@@ -33,6 +33,7 @@ function engine() {
   return { status: () => status, catalog: async () => status, close: async () => {}, onUsage: () => () => {},
     run: async input => {
       const ids = { threadId: randomUUID(), turnId: randomUUID() }; input.onThread(ids.threadId); input.onTurn(ids.turnId); input.onStage('writing');
+      const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
       if (failNext) { failNext = false; return { kind: 'failed', code: 'turn_failed', message: 'Échec contrôlé de vérification' }; }
       const document = input.turn.outputSchema === DOCUMENT_SCHEMA; const review = input.turn.outputSchema === OPINION_SCHEMA;
       const reply = { reply: document ? 'Je prépare le lancement. Le résultat reste ici pendant que nous discutons.' : review ? 'Je propose de conserver la réserve de 500 € et de confirmer la date de préouverture.' : 'Message reçu dans le moteur contrôlé de vérification.', deliverable: document ? { title: 'Lancement du café Boréal', body } : null };

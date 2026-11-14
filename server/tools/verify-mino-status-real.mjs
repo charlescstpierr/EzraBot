@@ -28,7 +28,7 @@ try {
   assert.ok(claim.turn.input.includes('"exitCode":1'));
   assert.ok(!claim.turn.input.includes('private-command-output-not-transmitted'));
   const out = await engine.run({ turn: claim.turn, choice: claim.choice, signal: AbortSignal.timeout(180_000),
-    onThread: id => store.bindThread(claim, id), onTurn: id => store.bindTurn(claim, id), onStage: stage => store.setStage(claim, stage) });
+    depart: () => store.depart(claim), onThread: id => store.bindThread(claim, id), onTurn: id => store.bindTurn(claim, id), onStage: stage => store.setStage(claim, stage) });
   assert.equal(out.kind, 'succeeded', out.kind === 'failed' ? out.message : out.kind);
   assert.match(out.reply.reply, /false/i); assert.match(out.reply.reply, /\b1\b/); assert.equal(out.reply.handoff, null);
   store.finishJob(claim, out);

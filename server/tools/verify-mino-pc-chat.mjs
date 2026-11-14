@@ -27,6 +27,7 @@ const chatEngine = {
   run: async input => {
     const n = ++chatN; const threadId = `controlled-chat-${n}`, turnId = `controlled-turn-${n}`;
     input.onThread(threadId); input.onTurn(turnId); input.onStage('writing');
+    const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
     return { kind: 'succeeded', reply: { reply: 'Je peux confier cette demande et la suivre ici.', deliverable: null,
       handoff: { goal: `Travail ${n} : ajoute slugify avec tests, puis documente-la dans le README.`, coordinated: true, why: 'Je peux organiser les étapes dans ce dossier.' } },
       used: { model: 'controlled', effort: 'low', speed: 'standard' }, threadId, turnId };

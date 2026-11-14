@@ -48,6 +48,7 @@ const chatStatus = { state: 'ready', account: 'chatgpt', models: [{ id: 'control
 const chatEngine = () => ({ status: () => chatStatus, catalog: async () => chatStatus, close: async () => {}, onUsage: () => () => {}, run: async input => {
   const threadId = 'controlled-chat-thread', turnId = 'controlled-chat-turn';
   input.onThread(threadId); input.onTurn(turnId); input.onStage('writing');
+  const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
   return { kind: 'succeeded', reply: { reply: 'Je peux confier cette demande sur ton ordinateur.', deliverable: null, handoff: { goal: 'Ajoute une section contact au projet sur mon ordinateur.', coordinated: true, why: 'Des étapes peuvent être séparées.' } }, used: { model: 'controlled', effort: 'low', speed: 'standard' }, threadId, turnId };
 }  });
 const fixture = join(build, 'dist/test/fixtures/fake-agent-server.js');

@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 // Test-only stand-in for `codex app-server`, driven by a scenario name.
@@ -312,6 +312,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     return;
   }
   if (message.id === undefined) return;
+  if (process.env.MINO_TEST_RPC_PROBE) appendFileSync(process.env.MINO_TEST_RPC_PROBE, message.method + '\n');
   try {
     send({ id: message.id, result: handle(message.method, isRecord(message.params) ? message.params : {}) });
   } catch {
