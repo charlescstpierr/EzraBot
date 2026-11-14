@@ -24,11 +24,11 @@ async function port(): Promise<number> {
   await new Promise<void>(r => probe.close(() => r())); if (!address || typeof address === 'string') throw new Error('Missing port'); return address.port;
 }
 const closeServer = async (server: Server) => { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); };
-async function fixture() {
+async function fixture(memory?: { workspacePrefix: string }) {
   const dir = mkdtempSync(join(tmpdir(), 'mino-device-'));
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem'), '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost'], { stdio: 'ignore' });
   const cert = readFileSync(join(dir, 'cert.pem'), 'utf8'); const key = readFileSync(join(dir, 'key.pem'), 'utf8');
-  const store = openStore({ path: join(dir, 'app.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
+  const store = openStore({ path: join(dir, 'app.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), ...(memory ? { memory } : {}) });
   const engine: Engine = {
     status: () => ({ state: 'ready', account: 'chatgpt', models: [{ id: 'test', displayName: 'Test', isDefault: true, efforts: ['low'], defaultEffort: 'low', speeds: [] }] }),
     catalog: async () => engine.status(), close: async () => {}, onUsage: () => () => {},
@@ -190,5 +190,30 @@ test('a paired device cannot grant, approve, refuse or retry a service action, n
     const snapshot = z.record(z.string(), z.unknown()).parse((await f.call('/m/view', undefined, f.auth)).body);
     assert.equal('tools' in snapshot, false);
     MobileSnapshotSchema.parse(snapshot);
+  } finally { await f.close(); }
+});
+
+test('a paired device sees the Honcho state of a character and gets a clear refusal for every memory command', async () => {
+  const f = await fixture({ workspacePrefix: 'ezra-essai' });
+  try {
+    await f.pair();
+    const enabled = f.store.memory.apply({ type: 'memory.enable', requestId: 'pc-enable-0001', botId: 'nova', label: 'Projet synthétique', acknowledged: true });
+    assert.equal(enabled.ok, true);
+    const snapshot = MobileSnapshotSchema.parse((await f.call('/m/view', undefined, f.auth)).body);
+    assert.deepEqual(snapshot.bots.map(bot => [bot.id, bot.memoryScope ?? null]).filter(([, scope]) => scope), [['nova', { label: 'Projet synthétique', state: 'preparing' }]]);
+    for (const command of [
+      { type: 'memory.declare', requestId: 'mobile-declare-1', botId: 'nova', text: 'Déclaration depuis le téléphone' },
+      { type: 'memory.forget', requestId: 'mobile-forget-01', botId: 'nova', confirmLabel: 'Projet synthétique' },
+      { type: 'memory.enable', requestId: 'mobile-enable-01', botId: 'atlas', label: 'Autre projet', acknowledged: true },
+    ]) {
+      const refused = await f.call('/m/commands', command, f.auth);
+      assert.deepEqual([refused.status, refused.body], [403, { ok: false, code: 'command_refused', message: 'La mémoire Honcho d’un personnage se gère sur l’ordinateur.' }]);
+    }
+    const local = MobileReplySchema.parse((await f.call('/m/commands', { type: 'memory.create', requestId: 'mobile-memory-1', botId: 'nova', text: 'Souvenir local parallèle' }, f.auth)).body);
+    assert.equal(!local.ok && local.code, 'invalid_transition');
+    assert.match(local.ok ? '' : local.message, /mémoire Honcho/);
+    assert.deepEqual(f.store.memory.view().scopes.map(scope => [scope.botId, scope.state, scope.declarations.length]), [['nova', 'preparing', 0]]);
+    const other = MobileReplySchema.parse((await f.call('/m/commands', { type: 'memory.create', requestId: 'mobile-memory-2', botId: 'atlas', text: 'Souvenir local d’un personnage sans projet' }, f.auth)).body);
+    assert.equal(other.ok, true, 'a character without a Honcho project keeps its local memories');
   } finally { await f.close(); }
 });

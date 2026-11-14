@@ -69,10 +69,13 @@ export class HonchoHttpClient {
     this.#maxResponseBytes = parsed.data.maxResponseBytes;
   }
 
-  provisionWorkspace(signal?: AbortSignal): Promise<HonchoHttpResult<{ workspaceId: string }>> {
+  /** `created` is false when the workspace already existed: the route is a get-or-create that answers 201 only for a new one. */
+  async provisionWorkspace(signal?: AbortSignal): Promise<HonchoHttpResult<{ workspaceId: string; created: boolean }>> {
+    let created = false;
     const schema = z.object({ id: z.literal(this.#workspaceId) })
       .transform((w) => ({ workspaceId: w.id }));
-    return this.#request('POST', '/v3/workspaces', { id: this.#workspaceId }, [200, 201], schema, true, signal);
+    const result = await this.#request('POST', '/v3/workspaces', { id: this.#workspaceId }, [200, 201], schema, true, signal, (status) => { created = status === 201; });
+    return result.kind === 'ok' ? { kind: 'ok', value: { ...result.value, created } } : result;
   }
 
   provisionSession(input: {
@@ -142,7 +145,7 @@ export class HonchoHttpClient {
   }
 
   async #request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body: unknown,
-    statuses: number[], schema: z.ZodType<T>, write: boolean, signal?: AbortSignal): Promise<HonchoHttpResult<T>> {
+    statuses: number[], schema: z.ZodType<T>, write: boolean, signal?: AbortSignal, onStatus?: (status: number) => void): Promise<HonchoHttpResult<T>> {
     if (signal?.aborted) return { kind: 'rejected', reason: 'cancelled' };
     const timeout = AbortSignal.timeout(this.#timeoutMs);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -163,6 +166,7 @@ export class HonchoHttpClient {
         return { kind: write && (status >= 500 || status === 408 || status < 400) ? 'uncertain'
           : status >= 400 && status < 500 ? 'rejected' : 'unavailable', reason };
       }
+      onStatus?.(response.status);
       reader = response.body?.getReader();
       let size = 0;
       const chunks: Uint8Array[] = [];

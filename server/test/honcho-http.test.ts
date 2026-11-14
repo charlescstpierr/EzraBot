@@ -57,7 +57,7 @@ test('les opérations explicites utilisent le vrai fetch et les seuls endpoints 
   });
   try {
     const client = new HonchoHttpClient(config(server.url));
-    assert.deepEqual(await client.provisionWorkspace(), { kind: 'ok', value: { workspaceId: 'workspace-a' } });
+    assert.deepEqual(await client.provisionWorkspace(), { kind: 'ok', value: { workspaceId: 'workspace-a', created: true } });
     assert.deepEqual(await client.provisionSession({ sessionId: 'session-a', peers: [
       { peerId: 'peer-a', observeMe: true, observeOthers: false },
     ] }), { kind: 'ok', value: { sessionId: 'session-a' } });
@@ -85,6 +85,13 @@ test('les opérations explicites utilisent le vrai fetch et les seuls endpoints 
       { method: 'DELETE', path: '/v3/workspaces/workspace-a/sessions/session%2F%3F%23', body: undefined },
       { method: 'DELETE', path: '/v3/workspaces/workspace-a', body: undefined },
     ]);
+  } finally { await server.close(); }
+});
+
+test('un workspace déjà présent répond 200 et n’est pas annoncé comme créé', async () => {
+  const server = await localServer((_req, res) => json(res, { id: 'workspace-a' }, 200));
+  try {
+    assert.deepEqual(await new HonchoHttpClient(config(server.url)).provisionWorkspace(), { kind: 'ok', value: { workspaceId: 'workspace-a', created: false } });
   } finally { await server.close(); }
 });
 

@@ -53,13 +53,6 @@ export type HonchoScope = z.infer<typeof HonchoScopeSchema>;
 export type HonchoRecallRequest = z.infer<typeof HonchoRecallRequestSchema>;
 export type HonchoWriteResult = z.infer<typeof HonchoWriteResultSchema>;
 
-type AuthorizedSource = Extract<HonchoSource, { kind: 'authorized' }>;
-export interface HonchoPort {
-  recall(request: HonchoRecallRequest): Promise<unknown>;
-  ingest(input: { binding: z.infer<typeof HonchoBindingSchema>; source: AuthorizedSource }): Promise<HonchoWriteResult>;
-  requestWithdrawal(input: { scope: HonchoScope; sourceIds: AuthorizedSource['sourceId'][] }): Promise<HonchoWriteResult>;
-}
-
 const SelectionSchema = z.strictObject({
   scope: HonchoScopeSchema,
   request: HonchoRecallRequestSchema,

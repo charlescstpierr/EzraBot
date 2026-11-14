@@ -1,13 +1,14 @@
 import { engineFailure } from './domain.js';
 import type { AgentText, Engine, TurnTools } from './engine.js';
 import { LANES, type Lane } from './protocol.js';
+import type { MemoryDesk } from './memory-desk.js';
 import type { Claim, Store } from './store.js';
 
 export type Worker = {
   /** Works whose engine run has not returned yet, in either lane, cancelled or not. */
   readonly activeWorkIds: readonly string[];
   kick(): void;
-  /** Stops any running call the store no longer marks running, then looks for new work. */
+  /** Stops any running call the store no longer marks running or whose memory sources changed, then looks for new work. */
   sync(): void;
   cancel(workId: string): void;
   idle(): Promise<void>;
@@ -18,6 +19,9 @@ export type WorkerEvent =
   | { event: 'job.claimed'; lane: Lane; workId: string; attempt: number }
   | { event: 'job.finished'; lane: Lane; workId: string; attempt: number; outcome: string; recorded: boolean }
   | { event: 'worker.error' };
+
+/** Plans in a row that may name another call before the chat call leaves without recall. */
+const RECALL_PLANS = 3;
 
 /** Received text is written at most this often per call, plus a last write when the call ends. */
 export const PROGRESS_INTERVAL_MS = 400;
@@ -34,6 +38,8 @@ export function createWorker(options: {
   engines: Record<Lane, Engine>;
   /** Service tools for a chat turn. The document lane never asks. */
   tools?: { forClaim(claim: Claim): TurnTools | undefined };
+  /** Honcho recall for a chat turn. Without it a character with a Honcho project answers without memory. */
+  memory?: Pick<MemoryDesk, 'recall'>;
   log?: (entry: WorkerEvent) => void;
   onFatal?: () => void;
   progressIntervalMs?: number;
@@ -107,27 +113,49 @@ export function createWorker(options: {
       log({ event: 'job.finished', lane: name, workId: claim.workId, attempt: claim.n, outcome: outcome.kind, recorded: recorded.kind === 'recorded' });
     }
 
+    /**
+     * The recall is searched before the claim, outside any transaction, for the one call the store would take now.
+     * When the store then takes another call, the search is planned again for that one.
+     */
+    async function claimNext(): Promise<Claim | null> {
+      const memory = name === 'chat' ? options.memory : undefined;
+      if (!memory) return store.claimNext(name);
+      for (let plans = 0; plans < RECALL_PLANS; plans += 1) {
+        const plan = store.planRecall();
+        const recall = plan.kind === 'search' ? await memory.recall(plan) : plan;
+        if (closed) return null;
+        const claim = store.claimNext(name, recall);
+        if (claim !== 'replan') return claim;
+      }
+      const claim = store.claimNext(name, { kind: 'forced' });
+      return claim === 'replan' ? null : claim;
+    }
+
     async function drain(): Promise<void> {
       do {
         again = false;
-        for (let claim = store.claimNext(name); claim && !closed; claim = closed ? null : store.claimNext(name)) await runClaim(claim);
+        for (let claim = await claimNext(); claim && !closed; claim = closed ? null : await claimNext()) await runClaim(claim);
       } while (again && !closed);
+    }
+
+    function kick(): void {
+      if (closed) return;
+      if (draining) {
+        again = true;
+        return;
+      }
+      // A claim can wait on a recall, so a kick may land after the last check of a drain and before it is cleared: it starts the next drain.
+      draining = drain().catch(fatal).finally(() => {
+        draining = null;
+        if (again) kick();
+      });
     }
 
     return {
       get active() {
         return active;
       },
-      kick() {
-        if (closed) return;
-        if (draining) {
-          again = true;
-          return;
-        }
-        draining = drain().catch(fatal).finally(() => {
-          draining = null;
-        });
-      },
+      kick,
       async idle() {
         while (draining) await draining;
       },
@@ -152,7 +180,7 @@ export function createWorker(options: {
     sync() {
       for (const runner of runners) {
         const active = runner.active;
-        if (active && !store.attemptRunning(active.attemptId)) active.controller.abort();
+        if (active && (!store.attemptRunning(active.attemptId) || !store.memory.holds(active.attemptId).ok)) active.controller.abort();
       }
       kickAll();
     },

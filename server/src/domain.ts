@@ -107,6 +107,7 @@ export const ENGINE_ERRORS = {
   turn_failed: 'Codex a signalé un échec sans réponse.',
   interrupted: 'Mino s’est arrêté pendant cet appel. Relancez-le quand vous voulez.',
   admission_refused: 'Mino n’a pas admis cet appel. Rien n’est parti.',
+  memory_changed: 'La mémoire de cette conversation a changé pendant cet appel : une source a été corrigée, exclue ou oubliée. Mino n’a rien publié. Relancez la demande.',
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;
