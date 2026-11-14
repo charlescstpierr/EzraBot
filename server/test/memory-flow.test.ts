@@ -145,7 +145,6 @@ test('a correction, an exclusion or a forget is checked again before the recall 
       return found;
     };
 
-    // Before the recall leaves: the search was reserved for a generation that no longer exists.
     const request = app.send('Quel repas préparer pour lundi ?');
     const plan = app.store.planRecall();
     assert(plan.kind === 'search');
@@ -154,7 +153,6 @@ test('a correction, an exclusion or a forget is checked again before the recall 
     assert.deepEqual(await app.desk.recall(plan), { kind: 'none' });
     assert.equal(searches(honcho), sent, 'the search planned before the exclusion never left');
 
-    // Before the composition: a search answered for the older generation is not used.
     const second = app.store.planRecall();
     assert(second.kind === 'search');
     const found = await app.desk.recall(second);
@@ -169,27 +167,25 @@ test('a correction, an exclusion or a forget is checked again before the recall 
     assert.match(claim.turn.input, /- Déclaration : Allergique aux noix\./);
     assert.doesNotMatch(claim.turn.input, /arachides|Nantes/, 'the corrected and the excluded versions are in no part of the text');
 
-    // Before the departure: the engine asks for its permit, is refused, and starts no turn.
     app.apply({ type: 'memory.exclude', target: { kind: 'declaration', declarationId: (await declaration('Allergique aux noix.')).declarationId } });
     const started = app.turnsStarted();
     const ran = await app.chat.run({
       turn: claim.turn, choice: claim.choice, signal: new AbortController().signal,
       onStage() {}, onThread() {}, onTurn() {}, depart: () => app.store.depart(claim),
     });
-    assert.equal(ran.kind, 'failed');
+    assert.equal(ran.kind, 'failed', 'the engine asked for its permit after the exclusion and was refused');
     assert.equal(app.turnsStarted(), started, 'no turn left for the App Server');
     assert.deepEqual(app.store.finishJob(claim, ran), { kind: 'recorded', state: 'failed' });
     const failed = (await app.view()).works.find(w => w.id === request.workId);
     assert.match(failed?.attempt?.error ?? '', /La mémoire de cette conversation a changé/);
 
-    // Before the publication: a turn that already left comes back after a forget, and nothing of it is recorded.
     const later = app.send('Une autre demande pour mardi ?');
     const fourth = app.store.planRecall();
     const leaving = app.store.claimNext('chat', fourth.kind === 'search' ? await app.desk.recall(fourth) : fourth);
     assert(leaving && leaving !== 'replan');
     assert.deepEqual(app.store.depart(leaving), { ok: true });
     app.apply({ type: 'memory.forget', confirmLabel: LABEL });
-    assert.deepEqual(app.store.finishJob(leaving, SUCCEEDED), { kind: 'recorded', state: 'failed' });
+    assert.deepEqual(app.store.finishJob(leaving, SUCCEEDED), { kind: 'recorded', state: 'failed' }, 'a turn that left before the forget records a failure when it comes back');
     const after = await app.view();
     assert.equal(after.messages.some(m => m.role === 'assistant' && m.workId === later.workId), false, 'no reply was published');
     assert.match(after.works.find(w => w.id === later.workId)?.attempt?.error ?? '', /La mémoire de cette conversation a changé/);
@@ -395,7 +391,6 @@ test('after a crash a request that had left is uncertain, one that had not left 
     await app.until(v => app.scopeOf(v).state === 'active', 'the person asked again and a new workspace is confirmed');
     assert.notEqual((honcho.requests[0]?.body as { id: string }).id, permit?.workspaceId, 'the interrupted workspace name is never used again');
 
-    // A forget whose first withdrawal was in flight at the crash still closes: the others leave, the interrupted one is not sent again.
     await app.desk?.close();
     app.apply({ type: 'memory.forget', confirmLabel: LABEL });
     const withdrawal = app.store.memory.next();
@@ -403,7 +398,7 @@ test('after a crash a request that had left is uncertain, one that had not left 
     assert.deepEqual(app.store.memory.begin(withdrawal)?.kind, 'withdraw');
     await app.stop();
     app = await open();
-    await app.until(v => app.scopeOf(v).state === 'withdrawal_unverified', 'the forget ends after the restart');
+    await app.until(v => app.scopeOf(v).state === 'withdrawal_unverified', 'a forget whose first withdrawal was in flight at the crash still closes');
     assert.deepEqual(honcho.requests.filter(r => r.method === 'DELETE').map(r => r.path.split('/').slice(4).join('/')), ['sessions/conversation', ''],
       'only the withdrawals that had not left were sent');
   } finally {

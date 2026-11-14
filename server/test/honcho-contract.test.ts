@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  HonchoRecallResultSchema, HonchoScopeSchema, HonchoSourceSchema, HonchoWriteResultSchema, selectHonchoRecall,
+  HonchoRecallResultSchema, HonchoScopeSchema, HonchoSourceSchema, selectHonchoRecall,
 } from '../src/honcho-contract.js';
 
 const binding = { projectId: 'project-a', workspaceId: 'workspace-a', generation: 1 };
@@ -134,13 +134,4 @@ test('des identifiants locaux ambigus ferment le rappel et une indisponibilité 
     { kind: 'refused', reason: 'ambiguous_sources' });
   assert.deepEqual(selectHonchoRecall({ ...input, response: { kind: 'unavailable', reason: 'Hors ligne' } }),
     { kind: 'refused', reason: 'unavailable' });
-});
-
-test('le port distingue ACK, capacité absente et incertitude sans prétendre une suppression vérifiée', () => {
-  for (const result of [
-    { kind: 'acknowledged', receiptId: 'receipt-1' },
-    { kind: 'unsupported', reason: 'Granularité non établie' },
-    { kind: 'uncertain', reason: 'Délai dépassé' },
-  ]) assert.equal(HonchoWriteResultSchema.safeParse(result).success, true);
-  assert.equal(HonchoWriteResultSchema.safeParse({ kind: 'deleted', receiptId: 'receipt-1' }).success, false);
 });

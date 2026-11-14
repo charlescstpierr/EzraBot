@@ -111,6 +111,10 @@ async function ask(page: Page, text: string) {
   return replies.nth(before);
 }
 
+// Tall enough for a whole memory section of a character page, so each picture and video shows it in one piece.
+const SIZE = { width: 1280, height: 1500 };
+test.use({ viewport: SIZE, video: { mode: "on", size: SIZE } });
+
 test.beforeAll(() => mkdirSync(EVIDENCE, { recursive: true }));
 
 test("consentement : les limites sont dites avant la bascule, puis un souvenir local choisi devient une déclaration vérifiée", async ({

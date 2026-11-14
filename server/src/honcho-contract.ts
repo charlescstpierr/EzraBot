@@ -42,16 +42,8 @@ export const HonchoRecallResponseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('unavailable'), reason: z.string().min(1).max(500) }),
 ]);
 
-export const HonchoWriteResultSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('acknowledged'), receiptId: id }),
-  z.strictObject({ kind: z.literal('unsupported'), reason: z.string().min(1).max(500) }),
-  z.strictObject({ kind: z.literal('uncertain'), reason: z.string().min(1).max(500) }),
-]);
-
 export type HonchoSource = z.infer<typeof HonchoSourceSchema>;
 export type HonchoScope = z.infer<typeof HonchoScopeSchema>;
-export type HonchoRecallRequest = z.infer<typeof HonchoRecallRequestSchema>;
-export type HonchoWriteResult = z.infer<typeof HonchoWriteResultSchema>;
 
 const SelectionSchema = z.strictObject({
   scope: HonchoScopeSchema,

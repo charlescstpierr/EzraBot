@@ -37,6 +37,7 @@ export function createMemoryDesk(options: {
     baseUrl, apiKey, workspaceId, timeoutMs, maxResponseBytes: MAX_RESPONSE_BYTES,
     ...(options.allowLoopbackHttpForTests ? { allowLoopbackHttpForTests: true } : {}),
   });
+  // Throws at start, before any request, when the address or the key cannot be used.
   clientFor('configuration');
   let stopping = false;
   let closed = false;
