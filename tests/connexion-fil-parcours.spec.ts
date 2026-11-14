@@ -60,6 +60,21 @@ async function say(page: Page, text: string) {
 const card = (page: Page, service: string) =>
   page.getByRole("region", { name: `Connexion proposée ${service}` });
 
+/** A synthetic gmail account connected through the real PC routes, with no right for anyone. */
+async function connectedGmail(request: APIRequestContext, alias: string) {
+  const link: ToolsReplyOf<"link"> = await (
+    await request.post(`${TOOLS}/api/tools/link`, {
+      headers: HEADERS,
+      data: { serviceId: "ac_synthetique_gmail", alias },
+    })
+  ).json();
+  const checked = await request.post(
+    `${TOOLS}/api/tools/links/${link.linkId}/check`,
+    { headers: HEADERS, data: {} },
+  );
+  expect((await checked.json()).link.state).toBe("active");
+}
+
 /** Every call a page makes to the provider-backed routes, to prove a card calls nothing by itself. */
 function providerCalls(page: Page) {
   const calls: string[] = [];
@@ -176,6 +191,7 @@ test("fenêtre bloquée sur petit écran : l’attente survit au rechargement, l
     window.open = () => null;
   });
   await character(request, "Lien B");
+  await connectedGmail(request, "Courriel déjà relié");
   let alias = "Compte attente du fil";
   await nameAccount(page, () => alias);
   const calls = providerCalls(page);
@@ -184,7 +200,9 @@ test("fenêtre bloquée sur petit écran : l’attente survit au rechargement, l
   const gmail = card(page, "gmail");
   await expect(gmail).toBeVisible();
 
-  await gmail.getByRole("button", { name: "Connecter gmail" }).click();
+  await gmail
+    .getByRole("button", { name: "Relier un autre compte gmail" })
+    .click();
   const fallback = gmail.getByRole("link", {
     name: "Ouvrir la page de connexion",
   });
@@ -279,16 +297,7 @@ test("service hors catalogue, compte déjà connecté, puis droit donné : la ca
   ).toBeEnabled();
   await page.screenshot({ path: `${EVIDENCE}/carte-hors-catalogue-1100.png` });
 
-  const link: ToolsReplyOf<"link"> = await (
-    await request.post(`${TOOLS}/api/tools/link`, {
-      headers: HEADERS,
-      data: { serviceId: "ac_synthetique_gmail", alias: "Courriel de Lien C" },
-    })
-  ).json();
-  await request.post(`${TOOLS}/api/tools/links/${link.linkId}/check`, {
-    headers: HEADERS,
-    data: {},
-  });
+  await connectedGmail(request, "Courriel de Lien C");
   await say(page, "Lis mes derniers courriels Gmail");
   const gmail = card(page, "gmail");
   await expect(gmail).toContainText(
@@ -316,6 +325,13 @@ test("service hors catalogue, compte déjà connecté, puis droit donné : la ca
   await expect(gmail).toContainText(
     "Lien C a déjà des droits sur gmail : GMAIL_SEND_EMAIL. Chaque action attend votre confirmation.",
   );
+  await expect(gmail).not.toContainText("déjà connecté sur ce PC");
   await expect(gmail).toHaveAttribute("data-state", "proposed");
+  await expect(
+    gmail.getByRole("button", { name: "Relier un autre compte gmail" }),
+  ).toBeEnabled();
+  await expect(
+    gmail.getByRole("button", { name: "Connecter gmail" }),
+  ).toHaveCount(0);
   await page.screenshot({ path: `${EVIDENCE}/carte-droits-donnes-1100.png` });
 });

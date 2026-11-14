@@ -78,7 +78,7 @@ export function ConnectionCard({
       <p role="status" className="ez-tools-outcome">
         {status}
       </p>
-      {stage !== "active" && other && (
+      {stage !== "active" && other && !rights.length && (
         <p className="ez-tools-outcome">
           Un compte {toolkit} est déjà connecté sur ce PC (« {other.alias} »).
           Vous pouvez choisir les droits de {bot} sans relier un autre compte.
@@ -93,11 +93,15 @@ export function ConnectionCard({
         {stage === "proposed" && (
           <button
             type="button"
-            className="black"
+            className={other || rights.length ? "outline" : "black"}
             disabled={opening}
             onClick={start}
           >
-            {opening ? "Ouverture…" : `Connecter ${toolkit}`}
+            {opening
+              ? "Ouverture…"
+              : other || rights.length
+                ? `Relier un autre compte ${toolkit}`
+                : `Connecter ${toolkit}`}
             <Link2 size={16} />
           </button>
         )}
