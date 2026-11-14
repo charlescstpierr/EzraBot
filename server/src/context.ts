@@ -114,7 +114,7 @@ export type TaskSource = {
 export type Exchange = {
   request: { messageId?: string; text: string; trigger?: AutomaticOrigin['kind']; attachments: { name: string; chars: number }[] };
   replies: { attemptId?: string; by: string; text: string }[];
-  deliverable: { attemptId?: string; title: string; body: string; n: number } | null;
+  deliverable: { builtOn?: string[]; attemptId?: string; title: string; body: string; n: number } | null;
 };
 
 export type ContextSource = {
@@ -420,6 +420,7 @@ export function composeContext(source: ContextSource): ComposedContext {
     const exchange = source.exchanges[latestWithDeliverable];
     if (exchange?.request.messageId) used.historyMessageIds.push(exchange.request.messageId);
     if (latest.attemptId) used.replyAttemptIds.push(latest.attemptId);
+    used.replyAttemptIds.push(...(latest.builtOn ?? []));
   }
   return { turn, plan, sha256, used };
 }

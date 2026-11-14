@@ -97,11 +97,19 @@ function attemptFacts(work: WorkView, name: BotNamer): Fact[] {
   );
   if (attempt.plan) {
     facts.push(...planFacts(attempt.plan));
-    if ('history' in attempt.plan) for (const entry of attempt.plan.history.entries) {
-      facts.push([entry.kind === 'recent' ? 'Échange récent' : 'Extrait ancien', entry.components.map(c => `${c.by} · ${count(c.sourceChars - c.omittedChars)} / ${count(c.sourceChars)} points de code, ${count(c.omittedChars)} omis`).join(' ; ')]);
-    }
-  }
-  else facts.push(["Contexte envoyé", "non enregistré pour cet appel"]);
+    if ("history" in attempt.plan)
+      for (const entry of attempt.plan.history.entries) {
+        facts.push([
+          entry.kind === "recent" ? "Échange récent" : "Extrait ancien",
+          entry.components
+            .map(
+              (c) =>
+                `${c.by} · ${count(c.sourceChars - c.omittedChars)} / ${count(c.sourceChars)} points de code, ${count(c.omittedChars)} omis`,
+            )
+            .join(" ; "),
+        ]);
+      }
+  } else facts.push(["Contexte envoyé", "non enregistré pour cet appel"]);
   if (usage)
     facts.push(
       ["Jetons de la dernière requête", tokens(usage.last)],
@@ -141,8 +149,8 @@ export function Diagnostics({
       <summary>Diagnostic du dernier appel</summary>
       {[work, ...(review ? [review] : [])].map((each) => (
         <dl key={each.id} className="ez-doc-facts" data-work-id={each.id}>
-          {attemptFacts(each, name).map(([term, value]) => (
-            <div key={`${term}-${value}`}>
+          {attemptFacts(each, name).map(([term, value], index) => (
+            <div key={`${term}-${index}`}>
               <dt>{term}</dt>
               <dd>{value}</dd>
             </div>

@@ -1624,7 +1624,7 @@ export function openStore(options: StoreOptions): Store {
       return [{
         request: { messageId: requestMessageId, text: str(request, 'text'), ...triggerOf(request), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', requestMessageId).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
           replies: responses.map(row => ({ attemptId: str(row, 'attempt_id'), by: str(row, 'name'), text: str(row, 'text') })),
-          deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n'), ...(strOrNull(lastVersion, 'attempt_id') ? { attemptId: str(lastVersion, 'attempt_id') } : {}) } : null,
+          deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n'), ...(strOrNull(lastVersion, 'attempt_id') ? { attemptId: str(lastVersion, 'attempt_id') } : { builtOn: succeededAttempts(str(lastVersion, 'work_id')) }) } : null,
       }];
     });
   }

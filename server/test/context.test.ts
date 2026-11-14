@@ -218,3 +218,31 @@ test('stored plans from every legacy policy remain readable without admitting a 
   assert.equal(ContextPlanSchema.safeParse({ ...common, policyVersion: 12 }).success, false);
   assert(ContextPlanSchema.safeParse(plan).success);
 });
+
+for (const [contextSize, budget] of [['short', 4000], ['standard', 12000], ['long', 30000]] as const) {
+  test(`${contextSize} counts labels, markers and metadata within its unchanged historical envelope`, () => {
+    const exchanges = Array.from({ length: 8 }, (_, i) => exchange(i, 6000));
+    const { turn, plan } = composeContext(source({ exchanges, bot: { ...bot, contextSize } }));
+    assert('history' in plan);
+    assert.equal(plan.history.budgetChars, budget);
+    const history = turn.input.slice(0, turn.input.indexOf('\nDemande actuelle :'));
+    assert.equal(Array.from(history).length, plan.history.usedChars);
+    assert(plan.history.usedChars <= budget);
+    assert.deepEqual(plan.history.entries.filter(entry => entry.kind === 'recent').map(entry => entry.components[0]?.sourceChars), [6010, 6010]);
+    const short = composeContext(source({ bot: { ...bot, contextSize }, exchanges: [exchange(0, 4), exchange(1, 4)] }));
+    assert.equal(short.plan.exchanges.full, 2);
+    assert.equal(short.plan.clippedChars, 0);
+  });
+}
+
+test('unrenderable attribution metadata omits the whole exchange explicitly and keeps deliverable ancestry', () => {
+  const { plan, turn, used } = composeContext(source({ exchanges: [{ request: { messageId: 'q', text: 'Question', attachments: [] },
+    replies: [{ by: 'Auteur'.repeat(2000), text: 'Réponse', attemptId: 'hidden-reply' }],
+    deliverable: { title: 'Édité', body: 'Texte édité', n: 2, builtOn: ['original-document'] },
+  }] }));
+  assert('history' in plan);
+  assert(plan.history.usedChars <= 4000);
+  assert.match(turn.input, /1 échange non inclus/);
+  assert.match(turn.input, /Texte édité/);
+  assert.deepEqual(used, { historyMessageIds: ['q'], replyAttemptIds: ['original-document'] });
+});
