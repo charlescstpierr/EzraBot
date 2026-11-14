@@ -421,7 +421,6 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     const messageId = strOrNull(proposal, 'source_message_id');
     return messageId === null ? null : sources.of(messageId);
   };
-  /** A proposal that cites a source it can no longer read is changed too: it never counts as a proposal without source. */
   const sourceChanged = (proposal: Row): boolean => {
     if (proposal.source_message_id === null) return false;
     const source = sourceOf(proposal);

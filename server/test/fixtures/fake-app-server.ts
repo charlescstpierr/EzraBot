@@ -87,10 +87,8 @@ function ask(id: string | number, method: string, params: unknown): Promise<Reco
   });
 }
 
-/** The document version Mino put in the turn when the person prepared the action from one. */
 const sourceText = (input: string): string | null => /Texte complet :\n([\s\S]*?)\n--- fin de la version source ---/.exec(input)?.[1] ?? null;
 
-/** Synthetic arguments built from the person's request, so a test steers the action through its message. A source version becomes the body. */
 function toolArguments(tool: string, request: string, input: string): Record<string, unknown> {
   if (tool === 'GMAIL_SEND_EMAIL') return { to: 'personne@exemple.invalid', subject: request, body: sourceText(input) ?? 'Texte synthétique du faux moteur.' };
   if (tool === 'SLACK_SEND_MESSAGE') return { channel: '#synthetique', text: request };

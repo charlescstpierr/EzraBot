@@ -649,7 +649,6 @@ test('an open proposal survives an automatic admission and a restart unchanged, 
   }
 });
 
-/** A saved document version, written by a chat turn of Nova. */
 function versioned(store: Store, body = 'Version un.'): { workId: string; versionId: string } {
   const claim = claimFor(store, 'Rédige une note');
   assert.equal(store.finishJob(claim, reply('Voici la note.', { title: 'Note', body })).kind, 'recorded');
@@ -666,7 +665,6 @@ function revised(store: Store, workId: string, body: string): string {
   return saved.result.versionId;
 }
 
-/** The person prepares an action from this version; the turn is claimed and has not answered yet. */
 function claimFrom(store: Store, source: { workId: string; versionId: string }): Claim {
   const sent = store.dispatch({ type: 'message.send', requestId: rid(), botId: 'nova', text: 'Envoie cette version', attachments: [], source });
   assert.equal(sent.ok, true, sent.ok ? '' : sent.message);

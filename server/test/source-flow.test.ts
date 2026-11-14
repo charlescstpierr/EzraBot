@@ -7,9 +7,6 @@ import type { PcView, ToolProposalView } from '../src/tools-protocol.js';
 import { SEND_EMAIL, createFakeProvider } from './fixtures/fake-composio.js';
 import { find, rid, start } from './fixtures/tools-app.js';
 
-// From a saved document version to a service action, with the same real parts as tools-flow.test.ts:
-// SQLite store, worker, local HTTP, both engines speaking to a fake App Server, and the desk speaking to a fake provider.
-// The fake chat engine copies the version it was given into the body of the action. Everything is synthetic.
 
 type App = Awaited<ReturnType<typeof start>>;
 type Source = { workId: string; versionId: string };
@@ -20,7 +17,6 @@ const code = async (response: Response): Promise<string> => z.object({ code: z.s
 
 const versionsOf = (view: PcView, workId: string) => view.works.find(work => work.id === workId)?.versions ?? [];
 
-/** A document written by the real document lane. Its first version is the fake engine's text. */
 async function document(app: App) {
   const tasks = (await app.view()).tasks.length;
   const sent = await app.post('/api/commands', { type: 'message.send', requestId: rid(), botId: 'nova', text: 'Rédige une invitation', attachments: [], document: { reviewerBotId: null } });
@@ -34,7 +30,6 @@ async function document(app: App) {
   return { taskId: task.id, workId: task.authorWorkId, v1: first.id };
 }
 
-/** The person saves a new version in the editor. */
 async function edit(app: App, doc: { taskId: string; workId: string }, body: string): Promise<string> {
   const head = versionsOf(await app.view(), doc.workId).at(-1);
   assert(head);
@@ -49,7 +44,6 @@ async function edit(app: App, doc: { taskId: string; workId: string }, body: str
 const ask = (app: App, source: Source, text: string, extra: Record<string, unknown> = {}) =>
   app.post('/api/commands', { type: 'message.send', requestId: rid(), botId: 'nova', text, attachments: [], source, ...extra });
 
-/** The person prepares an action from this version, and the bot proposes one. */
 async function prepared(app: App, source: Source, text = 'Envoie cette version'): Promise<ToolProposalView> {
   const before = (await app.view()).tools.proposals.length;
   const sent = await ask(app, source, text);
@@ -59,7 +53,6 @@ async function prepared(app: App, source: Source, text = 'Envoie cette version')
   return found;
 }
 
-/** The approval is committed as the route commits it, without waking the desk: the instant between the decision and the send. */
 function approveQuietly(app: App, proposal: ToolProposalView): void {
   const account = app.provider?.accounts.get(proposal.accountId);
   assert(account);
@@ -205,7 +198,6 @@ test('the approval and the last check before the send read the source again: a f
   approveQuietly(first, missing);
   await first.stop();
 
-  // What no command of Mino can do: the triggers and the foreign key that protect a saved version and a frozen source are removed by hand.
   const db = new DatabaseSync(first.path);
   assert.throws(() => db.prepare('DELETE FROM message_sources WHERE version_id = ?').run(lost.v1), /sources are kept/);
   db.exec('PRAGMA foreign_keys=OFF; DROP TRIGGER versions_immutable; DROP TRIGGER message_sources_kept;');

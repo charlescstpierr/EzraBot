@@ -321,7 +321,6 @@ const sqlList = (values: readonly string[]) => values.map(value => `'${value}'`)
 /** Migration backups Mino writes next to the database. Each holds the whole space at that time. */
 const MANAGED_BACKUPS = ['.pre-v2'] as const;
 
-/** `rebuild`: the migration replaces a table, so it runs with foreign keys off and is checked afterwards. `backup`: the space is copied first. */
 const MIGRATIONS: readonly { sql: string; rebuild?: true; backup?: (typeof MANAGED_BACKUPS)[number] }[] = [
   { sql: `ALTER TABLE bots ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
    ALTER TABLE bots ADD COLUMN reply_style TEXT NOT NULL DEFAULT '${DEFAULT_REPLY_STYLE}' CHECK(reply_style IN (${sqlList(REPLY_STYLES)}));

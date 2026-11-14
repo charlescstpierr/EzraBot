@@ -7,9 +7,6 @@ import {
 import type { Command } from "../server/src/protocol";
 import type { PcView, ToolsReplyOf } from "../server/src/tools-protocol";
 
-// Real isolated store, worker and HTTP server. The provider and the App Server are fakes started by scripts/test-server.mjs.
-// The fake engine writes a synthetic note, and copies the version it receives into the body of the action it proposes.
-// Every account, document, action and result on these pages is synthetic.
 
 const TOOLS = "http://127.0.0.1:4398";
 const HEADERS = { origin: TOOLS, "x-mino-csrf": "test-only-token" };
@@ -28,7 +25,6 @@ async function command(request: APIRequestContext, data: object) {
   return response.json();
 }
 
-/** A new bot with one saved note of two versions, written through the real chat lane before the bot has any right. */
 async function botWithNote(request: APIRequestContext, name: string) {
   const shape = (await pcView(request)).bots[0];
   const created = await command(request, {

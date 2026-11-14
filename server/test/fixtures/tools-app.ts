@@ -16,8 +16,6 @@ import { ToolsReplySchema, type PcView, type ToolProposalView, type ToolsReply, 
 import { createWorker } from '../../src/worker.js';
 import { createFakeProvider, type FakeProvider } from './fake-composio.js';
 
-// The whole chain with real parts: SQLite store, worker, local HTTP, the chat engine speaking to a fake App Server process,
-// and the action desk speaking to a fake provider. Every account, action and result is synthetic.
 
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const fixture = fileURLToPath(new URL('./fake-app-server.js', import.meta.url));
@@ -42,7 +40,6 @@ export async function start(options: Options = {}) {
   const store = openStore({ path, mascots, serviceTools: provider !== null, ...(options.policy ? { policy: options.policy } : {}) });
   const engineOptions = { command: process.execPath, args: [fixture, options.scenario ?? 'tool-call'], workDir: dir, clientVersion: 'test', turnTimeoutMs: 5000, requestTimeoutMs: 2000, interruptGraceMs: 300 };
   const chat = createCodexEngine({ ...engineOptions, ...(provider ? { dynamicTools: true as const } : {}) });
-  // The document engine never has the tool option: a tool offered to it would fail the run.
   const doc = createCodexEngine({ ...engineOptions, args: [fixture, 'deliverable'] });
   const port = await freePort();
   const logs: DeskEvent[] = [];
