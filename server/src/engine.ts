@@ -79,7 +79,8 @@ export type Engine = {
   run(input: RunInput): Promise<EngineOutcome>;
   /**
    * Usage notifications for any thread on the connection, including ones that arrive after a turn ended.
-   * Usage received while a turn starts is reported after `onTurn`, so a listener knows the accepted turn first.
+   * For an accepted start, buffered usage is reported after `onTurn`.
+   * If the start fails before acceptance, buffered usage is still reported without an accepted turn identity.
    */
   onUsage(listener: (observation: UsageObservation) => void): () => void;
   close(): Promise<void>;

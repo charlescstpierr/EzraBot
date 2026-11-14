@@ -4,7 +4,6 @@ import { createInterface } from 'node:readline';
 // Test-only stand-in for `codex app-server`, driven by a scenario name.
 // Mino spawns it as `node fake-app-server.js <scenario> app-server --listen stdio:// --disable …`.
 const named = process.argv[2] ?? 'reply';
-/** `one-read:<scenario>` plays the scenario and writes each turn in one piece, from what precedes the answer to `turn/start` up to `turn/completed`, so Mino reads all these lines at once. */
 const oneRead = named.startsWith('one-read:');
 const scenario = oneRead ? named.slice('one-read:'.length) : named;
 const args = process.argv.slice(3);

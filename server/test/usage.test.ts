@@ -56,7 +56,6 @@ function app(scenario: string): { store: Store; stop: () => Promise<void>; send:
 
 const attempt = (view: StoreView, workId: string) => view.works.find(w => w.id === workId)?.attempt ?? null;
 
-/** One call as its caller sees it when `run` returns: the thread, the accepted turn and each usage, in the order they were reported. */
 async function callEvents(engine: Engine, cancelBeforeTurnStart = false): Promise<{ outcome: EngineOutcome; events: string[] }> {
   const controller = new AbortController();
   const ids = { thread: '', turn: '' };
