@@ -32,7 +32,7 @@ export const ToolCommandSchema = z.discriminatedUnion('type', [
 export type ToolCommand = z.infer<typeof ToolCommandSchema>;
 export type ToolCommandOf<T extends ToolCommand['type']> = Extract<ToolCommand, { type: T }>;
 
-export const STALE_REASONS = ['turn_failed', 'grant_changed', 'account_inactive', 'schema_changed'] as const;
+export const STALE_REASONS = ['turn_failed', 'grant_changed', 'account_inactive', 'schema_changed', 'source_changed'] as const;
 export type StaleReason = (typeof STALE_REASONS)[number];
 
 export const ToolResultSchema = z.discriminatedUnion('kind', [
@@ -101,6 +101,22 @@ export const ExecutionViewSchema = z.strictObject({
 });
 export type ExecutionView = z.infer<typeof ExecutionViewSchema>;
 
+/** The saved document version a request was prepared from, as the server froze it. */
+export const SourceViewSchema = z.strictObject({
+  /** The request of the person that cites this version. */
+  messageId: z.string(),
+  workId: z.string(),
+  versionId: z.string(),
+  versionN: z.number(),
+  title: z.string(),
+  contentSha256: z.string(),
+  /** The newest version of the document when the request was sent. Greater than `versionN` when the person picked an older version. */
+  headN: z.number(),
+  /** `changed`: the document got a newer version since the request, or the frozen version is no longer readable as it was. */
+  state: z.enum(['holds', 'changed']),
+});
+export type SourceView = z.infer<typeof SourceViewSchema>;
+
 export const ToolProposalViewSchema = z.strictObject({
   id: z.string(),
   botId: z.string(),
@@ -119,6 +135,8 @@ export const ToolProposalViewSchema = z.strictObject({
   staleReason: z.enum(STALE_REASONS).nullable(),
   createdAt: z.string(),
   execution: ExecutionViewSchema.nullable(),
+  /** Null when the request cited no document version. */
+  source: SourceViewSchema.nullable(),
 });
 export type ToolProposalView = z.infer<typeof ToolProposalViewSchema>;
 
@@ -129,6 +147,8 @@ export const ToolsViewSchema = z.strictObject({
   /** Active rights by bot. A bot without an entry has no right. */
   grants: z.record(z.string(), z.array(GrantViewSchema)),
   proposals: z.array(ToolProposalViewSchema),
+  /** Every request prepared from a document version, with or without a proposal. */
+  sources: z.array(SourceViewSchema),
 });
 export type ToolsView = z.infer<typeof ToolsViewSchema>;
 

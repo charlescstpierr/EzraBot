@@ -4,6 +4,7 @@ import type { Admission } from './admission.js';
 import type { ReceiptContext } from './context.js';
 import type { ToolCall, ToolReply } from './engine.js';
 import type { WorkState } from './protocol.js';
+import type { FrozenSource, Sources } from './source.js';
 import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
 import {
   ACCOUNT_STATUSES,
@@ -18,6 +19,7 @@ import {
   type ExecutionView,
   type GrantView,
   type LinkView,
+  type SourceView,
   type StaleReason,
   type ToolCommand,
   type ToolCommandOf,
@@ -109,6 +111,8 @@ export type ToolLedger = {
   endReport(executionId: string, report: 'done' | 'failed' | 'suppressed'): WorkState;
   cancelReport(workId: string): WorkState | null;
   hasLiveExecution(workId: string): boolean;
+  /** This document got a new version: every action prepared from it that has not left is closed, and nothing is sent. */
+  sourceMoved(workId: string): void;
   syncDrafts(): void;
   recover(): number;
   blocksPurge(botId: string, erasedWorks: string): boolean;
@@ -236,6 +240,74 @@ CREATE TRIGGER attempts_report_source BEFORE INSERT ON attempts
   BEGIN SELECT RAISE(ABORT, 'a report turn belongs to a queued receipt of its work'); END;
 `;
 
+/**
+ * A proposal now points at the document version its request was prepared from, and can go stale because of it.
+ * SQLite cannot widen a CHECK in place, so the table is rebuilt; this runs with foreign keys off.
+ * SQLite refuses the rename while a trigger of another table names the dropped table, so those two are dropped and written back unchanged.
+ */
+export const TOOL_SOURCE_MIGRATION = `
+DROP TRIGGER tool_proposals_source;
+DROP TRIGGER tool_proposals_frozen;
+DROP TRIGGER tool_proposals_kept;
+DROP TRIGGER tool_executions_approved;
+DROP TRIGGER attempts_report_source;
+CREATE TABLE tool_proposals_v2(
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id),
+  work_id TEXT NOT NULL REFERENCES works(id),
+  attempt_id TEXT NOT NULL UNIQUE REFERENCES attempts(id),
+  call_id TEXT NOT NULL,
+  grant_id TEXT NOT NULL REFERENCES tool_grants(id),
+  toolkit TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  tool_slug TEXT NOT NULL,
+  version TEXT NOT NULL,
+  schema_sha256 TEXT NOT NULL,
+  arguments TEXT NOT NULL CHECK(json_valid(arguments)),
+  fingerprint TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('drafted','open','approved','refused','stale')),
+  stale_reason TEXT CHECK(stale_reason IS NULL OR stale_reason IN ('turn_failed','grant_changed','account_inactive','schema_changed','source_changed')),
+  created_at TEXT NOT NULL,
+  closed_at TEXT,
+  source_message_id TEXT REFERENCES message_sources(message_id),
+  CHECK((state = 'stale') = (stale_reason IS NOT NULL))
+) STRICT;
+INSERT INTO tool_proposals_v2(id, bot_id, work_id, attempt_id, call_id, grant_id, toolkit, account_id, tool_slug, version, schema_sha256, arguments, fingerprint, state, stale_reason, created_at, closed_at)
+  SELECT id, bot_id, work_id, attempt_id, call_id, grant_id, toolkit, account_id, tool_slug, version, schema_sha256, arguments, fingerprint, state, stale_reason, created_at, closed_at
+  FROM tool_proposals ORDER BY rowid;
+DROP TABLE tool_proposals;
+ALTER TABLE tool_proposals_v2 RENAME TO tool_proposals;
+CREATE INDEX tool_proposals_by_work ON tool_proposals(work_id);
+CREATE TRIGGER tool_proposals_source BEFORE INSERT ON tool_proposals
+  WHEN NEW.state IS NOT 'drafted' OR NOT EXISTS(SELECT 1 FROM attempts a JOIN works w ON w.id = a.work_id
+    WHERE a.id = NEW.attempt_id AND a.state = 'running' AND a.lane = 'chat' AND a.tool_execution_id IS NULL AND w.id = NEW.work_id AND w.bot_id = NEW.bot_id)
+    OR NOT EXISTS(SELECT 1 FROM tool_grants g WHERE g.id = NEW.grant_id AND g.revoked_at IS NULL AND g.bot_id = NEW.bot_id AND g.toolkit = NEW.toolkit
+      AND g.account_id = NEW.account_id AND g.tool_slug = NEW.tool_slug AND g.version = NEW.version AND g.schema_sha256 = NEW.schema_sha256)
+    OR NEW.source_message_id IS NOT (SELECT s.message_id FROM works w JOIN message_sources s ON s.message_id = w.request_message_id WHERE w.id = NEW.work_id)
+  BEGIN SELECT RAISE(ABORT, 'a proposal comes from a running chat turn, an active grant and the source of its request'); END;
+CREATE TRIGGER tool_proposals_frozen BEFORE UPDATE ON tool_proposals
+  WHEN OLD.state IN ('approved','refused','stale')
+    OR (OLD.state = 'drafted' AND NEW.state NOT IN ('open','stale'))
+    OR (OLD.state = 'open' AND NEW.state NOT IN ('approved','refused','stale'))
+    OR NEW.id IS NOT OLD.id OR NEW.bot_id IS NOT OLD.bot_id OR NEW.work_id IS NOT OLD.work_id OR NEW.attempt_id IS NOT OLD.attempt_id
+    OR NEW.call_id IS NOT OLD.call_id OR NEW.grant_id IS NOT OLD.grant_id OR NEW.toolkit IS NOT OLD.toolkit OR NEW.account_id IS NOT OLD.account_id
+    OR NEW.tool_slug IS NOT OLD.tool_slug OR NEW.version IS NOT OLD.version OR NEW.schema_sha256 IS NOT OLD.schema_sha256
+    OR NEW.arguments IS NOT OLD.arguments OR NEW.fingerprint IS NOT OLD.fingerprint OR NEW.created_at IS NOT OLD.created_at
+    OR NEW.source_message_id IS NOT OLD.source_message_id
+  BEGIN SELECT RAISE(ABORT, 'a proposal is immutable and closes once'); END;
+CREATE TRIGGER tool_proposals_kept BEFORE DELETE ON tool_proposals
+  WHEN NOT EXISTS(SELECT 1 FROM purge_target t WHERE t.tbl = 'tool_proposals' AND t.id = OLD.id)
+  BEGIN SELECT RAISE(ABORT, 'proposals are kept'); END;
+CREATE TRIGGER tool_executions_approved BEFORE INSERT ON tool_executions
+  WHEN NEW.state IS NOT 'approved' OR NEW.report IS NOT 'none'
+    OR NOT EXISTS(SELECT 1 FROM tool_proposals p WHERE p.id = NEW.proposal_id AND p.state = 'approved')
+  BEGIN SELECT RAISE(ABORT, 'an execution starts from an approved proposal'); END;
+CREATE TRIGGER attempts_report_source BEFORE INSERT ON attempts
+  WHEN NEW.tool_execution_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM tool_executions e JOIN tool_proposals p ON p.id = e.proposal_id
+    WHERE e.id = NEW.tool_execution_id AND e.report = 'queued' AND p.work_id = NEW.work_id)
+  BEGIN SELECT RAISE(ABORT, 'a report turn belongs to a queued receipt of its work'); END;
+`;
+
 export const TOOL_PURGE_ORDER = [
   ['tool_executions', 'id'],
   ['tool_proposals', 'id'],
@@ -331,7 +403,7 @@ const CAPABILITY = 'composio.action';
 export function createToolLedger(kit: LedgerKit, receipts: {
   find(requestId: string): { type: string; fingerprint: string; result: string } | null;
   save(requestId: string, type: string, fingerprint: string, result: string): void;
-}, admission: Admission): ToolLedger {
+}, admission: Admission, sources: Sources): ToolLedger {
   const { get, all, run, now, newId } = kit;
 
   kit.transaction(() => {
@@ -339,9 +411,22 @@ export function createToolLedger(kit: LedgerKit, receipts: {
   });
   const ownerId = str(get('SELECT value FROM meta WHERE key = ?', 'composio_owner') ?? {}, 'value');
 
-  const fingerprintOf = (pin: Omit<Pin, 'proposalId'>, args: unknown) => sha256(canonicalJson({
+  /** Without a source the fingerprint is the one proposals always had, so the ones recorded before sources still match. */
+  const fingerprintOf = (pin: Omit<Pin, 'proposalId'>, args: unknown, source: FrozenSource | null) => sha256(canonicalJson({
     v: 1, owner: ownerId, accountId: pin.accountId, toolkit: pin.toolkit, version: pin.version, slug: pin.toolSlug, schemaSha256: pin.schemaSha256, arguments: args,
+    source: source ? { workId: source.workId, versionId: source.versionId, contentSha256: source.contentSha256, headVersionId: source.headVersionId } : undefined,
   }));
+
+  const sourceOf = (proposal: Row): FrozenSource | null => {
+    const messageId = strOrNull(proposal, 'source_message_id');
+    return messageId === null ? null : sources.of(messageId);
+  };
+  /** A proposal that cites a source it can no longer read is changed too: it never counts as a proposal without source. */
+  const sourceChanged = (proposal: Row): boolean => {
+    if (proposal.source_message_id === null) return false;
+    const source = sourceOf(proposal);
+    return !source || !sources.holds(source);
+  };
 
   const liveBot = (botId: string) => get('SELECT 1 AS x FROM bots WHERE id = ? AND deleted_at IS NULL', botId) !== undefined;
   const pinOf = (proposal: Row): Pin => ({
@@ -436,10 +521,11 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     const assessment = tool ? assessTool(tool, pin.toolkit) : null;
     const reason: StaleReason | null =
       !grantMatches(proposal) || !liveBot(str(proposal, 'bot_id')) ? 'grant_changed'
-        : !live.account || live.account.id !== pin.accountId || live.account.toolkit !== pin.toolkit || live.account.status !== 'ACTIVE' ? 'account_inactive'
-          : !assessment?.ok || assessment.version !== pin.version || assessment.schemaSha256 !== pin.schemaSha256
-            || fingerprintOf(pin, parseArguments(proposal)) !== str(proposal, 'fingerprint') ? 'schema_changed'
-            : null;
+        : sourceChanged(proposal) ? 'source_changed'
+          : !live.account || live.account.id !== pin.accountId || live.account.toolkit !== pin.toolkit || live.account.status !== 'ACTIVE' ? 'account_inactive'
+            : !assessment?.ok || assessment.version !== pin.version || assessment.schemaSha256 !== pin.schemaSha256
+              || fingerprintOf(pin, parseArguments(proposal), sourceOf(proposal)) !== str(proposal, 'fingerprint') ? 'schema_changed'
+              : null;
     if (reason) {
       closeProposals(`id = ? AND state = 'open'`, reason, command.proposalId);
       const closed = oneOf(get('SELECT stale_reason FROM tool_proposals WHERE id = ?', command.proposalId) ?? {}, 'stale_reason', STALE_REASONS);
@@ -544,12 +630,17 @@ export function createToolLedger(kit: LedgerKit, receipts: {
       const current = get('SELECT * FROM tool_grants WHERE id = ? AND revoked_at IS NULL', snapshot.grantId);
       const account = get('SELECT status FROM tool_accounts WHERE id = ?', snapshot.accountId);
       if (!current || !account || str(account, 'status') !== 'ACTIVE') return refused('Action refusée : ce droit ou ce compte n’est plus actif.');
+      const request = get('SELECT request_message_id FROM works WHERE id = ?', turn.workId);
+      const source = request ? sources.of(str(request, 'request_message_id')) : null;
+      if (source && !sources.holds(source)) {
+        return refused('Action refusée : le document source a changé depuis la demande. Rien n’a été enregistré. Dis à la personne de préparer de nouveau l’action depuis le lecteur du document.');
+      }
       const pin = { toolkit: snapshot.toolkit, accountId: snapshot.accountId, toolSlug: snapshot.toolSlug, version: snapshot.version, schemaSha256: snapshot.schemaSha256 };
       const proposalId = newId('tp');
-      run(`INSERT INTO tool_proposals(id, bot_id, work_id, attempt_id, call_id, grant_id, toolkit, account_id, tool_slug, version, schema_sha256, arguments, fingerprint, state, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'drafted', ?)`,
+      run(`INSERT INTO tool_proposals(id, bot_id, work_id, attempt_id, call_id, grant_id, toolkit, account_id, tool_slug, version, schema_sha256, arguments, fingerprint, state, created_at, source_message_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'drafted', ?, ?)`,
       proposalId, turn.botId, turn.workId, turn.attemptId, call.callId, snapshot.grantId, pin.toolkit, pin.accountId, pin.toolSlug, pin.version, pin.schemaSha256,
-      canonical, fingerprintOf(pin, call.arguments), now());
+      canonical, fingerprintOf(pin, call.arguments, source), now(), source?.messageId ?? null);
       return recorded(proposalId);
     });
   }
@@ -569,9 +660,10 @@ export function createToolLedger(kit: LedgerKit, receipts: {
           : !grantMatches(row) ? 'grant_changed'
             : !liveBot(str(row, 'bot_id')) ? 'bot_deleted'
               : !work || !WORK_STATES_AFTER_TURN.some(state => state === str(work, 'state')) ? 'work_changed'
-                : reading.kind !== 'found' || reading.account.id !== pin.accountId || reading.account.toolkit !== pin.toolkit || reading.account.status !== 'ACTIVE' ? 'account_inactive'
-                  : fingerprintOf(pin, args) !== str(row, 'fingerprint') ? 'schema_changed'
-                    : null;
+                : sourceChanged(row) ? 'source_changed'
+                  : reading.kind !== 'found' || reading.account.id !== pin.accountId || reading.account.toolkit !== pin.toolkit || reading.account.status !== 'ACTIVE' ? 'account_inactive'
+                    : fingerprintOf(pin, args, sourceOf(row)) !== str(row, 'fingerprint') ? 'schema_changed'
+                      : null;
       if (category) {
         voidApproved('id = ?', category, executionId);
         return null;
@@ -673,6 +765,11 @@ export function createToolLedger(kit: LedgerKit, receipts: {
         toolSlug: str(row, 'tool_slug'), version: str(row, 'version'), description: str(row, 'description'), grantedAt: str(row, 'granted_at'),
       });
     }
+    const sourceView = (source: FrozenSource): SourceView => ({
+      messageId: source.messageId, workId: source.workId, versionId: source.versionId, versionN: source.versionN, title: source.title,
+      contentSha256: source.contentSha256, headN: source.headN, state: sources.holds(source) ? 'holds' : 'changed',
+    });
+    const frozen = new Map(sources.list().map(source => [source.messageId, sourceView(source)]));
     const proposals: ToolProposalView[] = all(`SELECT p.*, reply.id AS message_id, request.bot_id AS thread_bot_id, a.alias,
         e.id AS execution_id, e.state AS execution_state, e.category, e.log_id, e.summary, e.report, e.updated_at AS execution_updated_at
       FROM tool_proposals p JOIN messages reply ON reply.attempt_id = p.attempt_id JOIN works w ON w.id = p.work_id
@@ -688,7 +785,7 @@ export function createToolLedger(kit: LedgerKit, receipts: {
         toolkit: str(row, 'toolkit'), accountId: str(row, 'account_id'), accountAlias: strOrNull(row, 'alias') ?? str(row, 'account_id'),
         toolSlug: str(row, 'tool_slug'), version: str(row, 'version'), arguments: parseArguments(row), fingerprint: str(row, 'fingerprint'),
         state: oneOf(row, 'state', ['open', 'approved', 'refused', 'stale'] as const), staleReason: oneOfOrNull(row, 'stale_reason', STALE_REASONS),
-        createdAt: str(row, 'created_at'), execution,
+        createdAt: str(row, 'created_at'), execution, source: frozen.get(strOrNull(row, 'source_message_id') ?? '') ?? null,
       };
     });
     return {
@@ -697,6 +794,7 @@ export function createToolLedger(kit: LedgerKit, receipts: {
       links: all(`SELECT * FROM tool_links WHERE state IS NOT 'active' ORDER BY created_at DESC, rowid DESC LIMIT 10`).map(linkOf),
       grants,
       proposals,
+      sources: [...frozen.values()],
     };
   }
 
@@ -756,6 +854,11 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     },
     hasLiveExecution(workId) {
       return get(`SELECT 1 AS x FROM tool_executions e JOIN tool_proposals p ON p.id = e.proposal_id WHERE p.work_id = ? AND e.state IS NOT 'voided'`, workId) !== undefined;
+    },
+    sourceMoved(workId) {
+      const cited = 'source_message_id IN (SELECT message_id FROM message_sources WHERE work_id = ?)';
+      closeProposals(`state IN ('drafted','open') AND ${cited}`, 'source_changed', workId);
+      voidApproved(`proposal_id IN (SELECT id FROM tool_proposals WHERE ${cited})`, 'source_changed', workId);
     },
     syncDrafts() {
       run(`UPDATE tool_proposals SET state = 'open' WHERE state = 'drafted'

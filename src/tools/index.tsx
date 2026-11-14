@@ -651,6 +651,7 @@ const STALE_LABELS: Record<StaleReason, string> = {
   grant_changed: "le droit a été retiré ou remplacé",
   account_inactive: "le compte n’est plus actif",
   schema_changed: "le service a changé cet outil depuis la proposition",
+  source_changed: "le document source a changé depuis votre demande",
 };
 
 const VOID_LABELS: Record<string, string> = {
@@ -659,6 +660,7 @@ const VOID_LABELS: Record<string, string> = {
   provider_unavailable: "le fournisseur ne répondait pas",
   bot_deleted: "le personnage a été supprimé",
   work_changed: "le travail a changé",
+  source_changed: "le document source a changé depuis votre demande",
   session: "la session du fournisseur n’a pas pu s’ouvrir",
   tool_absent: "le service ne propose plus cet outil",
   version_missing: "le service n’annonce plus de version",

@@ -87,9 +87,12 @@ function ask(id: string | number, method: string, params: unknown): Promise<Reco
   });
 }
 
-/** Synthetic arguments built from the person's request, so a test steers the action through its message. */
-function toolArguments(tool: string, request: string): Record<string, unknown> {
-  if (tool === 'GMAIL_SEND_EMAIL') return { to: 'personne@exemple.invalid', subject: request, body: 'Texte synthétique du faux moteur.' };
+/** The document version Mino put in the turn when the person prepared the action from one. */
+const sourceText = (input: string): string | null => /Texte complet :\n([\s\S]*?)\n--- fin de la version source ---/.exec(input)?.[1] ?? null;
+
+/** Synthetic arguments built from the person's request, so a test steers the action through its message. A source version becomes the body. */
+function toolArguments(tool: string, request: string, input: string): Record<string, unknown> {
+  if (tool === 'GMAIL_SEND_EMAIL') return { to: 'personne@exemple.invalid', subject: request, body: sourceText(input) ?? 'Texte synthétique du faux moteur.' };
   if (tool === 'SLACK_SEND_MESSAGE') return { channel: '#synthetique', text: request };
   if (tool === 'GMAIL_FETCH_EMAILS') return { query: request };
   return {};
@@ -110,7 +113,7 @@ async function toolTurn(threadId: string, turnId: string, input: string, early: 
   const params = {
     threadId: scenario === 'tool-call-wrong-thread' ? 'thread-elsewhere' : threadId,
     turnId: scenario === 'tool-call-wrong-turn' ? 'turn-elsewhere' : turnId,
-    callId: 'call-1', namespace: scenario === 'tool-call-namespace' ? 'autre' : scenario === 'tool-call-no-namespace' ? null : 'ezrabot_services', tool, arguments: toolArguments(tool, request),
+    callId: 'call-1', namespace: scenario === 'tool-call-namespace' ? 'autre' : scenario === 'tool-call-no-namespace' ? null : 'ezrabot_services', tool, arguments: toolArguments(tool, request, input),
   };
   const item = { type: 'dynamicToolCall', id: 'tool-1', namespace: scenario === 'tool-item-foreign-namespace' ? 'autre' : scenario === 'tool-item-no-namespace' ? null : 'ezrabot_services', tool: scenario === 'tool-item-foreign' ? 'shell' : registered[0] ?? tool, arguments: params.arguments, status: 'inProgress', contentItems: null, success: null, durationMs: null };
   notify('item/started', { threadId, turnId, item });
@@ -152,9 +155,12 @@ function plainTurn(threadId: string, turnId: string, input: string) {
     notify('error', { threadId, turnId, willRetry: false, error: { message: 'raw upstream text', codexErrorInfo: 'serverOverloaded' } });
     return complete(threadId, turnId, 'failed', { message: 'raw upstream text', codexErrorInfo: 'serverOverloaded' });
   }
+  const asked = input.split('\n').at(-1) ?? '';
   agentMessage(threadId, turnId, state
     ? JSON.stringify({ reply: `Compte rendu : l’action est dans l’état ${state}.`, deliverable: null })
-    : REPLY);
+    : asked.includes('note synthétique')
+      ? JSON.stringify({ reply: 'Voici la note.', deliverable: { title: 'Note synthétique', body: 'Première version de la note synthétique.' } })
+      : REPLY);
   complete(threadId, turnId, 'completed');
 }
 
@@ -166,7 +172,7 @@ function startTurn(params: Record<string, unknown>) {
   const withTools = TOOL_SCENARIOS.has(scenario) && (threadTools.get(threadId)?.length ?? 0) > 0;
   // Sent before this function returns, so it reaches Mino before the answer to turn/start.
   const early = scenario === 'tool-call-early' && withTools
-    ? ask(EARLY_ID, 'item/tool/call', { threadId, turnId, callId: 'call-1', namespace: 'ezrabot_services', tool: threadTools.get(threadId)?.[0], arguments: toolArguments(threadTools.get(threadId)?.[0] ?? '', first.split('\n').at(-1) ?? '') })
+    ? ask(EARLY_ID, 'item/tool/call', { threadId, turnId, callId: 'call-1', namespace: 'ezrabot_services', tool: threadTools.get(threadId)?.[0], arguments: toolArguments(threadTools.get(threadId)?.[0] ?? '', first.split('\n').at(-1) ?? '', first) })
     : null;
   if (scenario === 'usage-before-wrong-turn') usage(threadId, 'turn-elsewhere', 9000);
   if (scenario === 'early-item') agentMessage(threadId, turnId, REPLY);
