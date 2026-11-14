@@ -12,7 +12,8 @@ import {
 // This QA server receives synthetic signed events beside its PC routes, with a fake transport, secret and account.
 const QA = "http://127.0.0.1:4397";
 const SECRET = "whsec_qa_synthetique_0001";
-const EVIDENCE = "test-results/evenements-parcours";
+const EVIDENCE =
+  process.env.EVENT_EVIDENCE_DIR ?? "test-results/evenements-parcours";
 const owner = () =>
   readFileSync(join(tmpdir(), "mino-qa-owner-4397"), "utf8").trim();
 
@@ -136,6 +137,7 @@ test("un abonnement se crée inactif, refuse avant activation, crée une seule d
       name: /Demande créée par l’événement GITHUB_ISSUE_ADDED_EVENT/,
     })
     .click();
+  await expect.soft(card).toBeInViewport();
   await card.getByRole("button", { name: "Modifier" }).click();
   const edit = page.getByRole("form", { name: "Modifier l’abonnement" });
   await expect(edit.getByLabel("Identifiant du déclencheur")).toBeDisabled();
@@ -171,6 +173,11 @@ test("un abonnement se crée inactif, refuse avant activation, crée une seule d
   await card.getByRole("button", { name: "Confirmer la révocation" }).click();
   await expect(card.getByText("Révoqué", { exact: true })).toBeVisible();
   await expect(card.getByRole("button", { name: "Reprendre" })).toHaveCount(0);
+  await shot(page, "5-revoque-formulaire");
+  await expect.soft(edit).toHaveCount(0);
+  await expect
+    .soft(card.getByText("La révocation est définitive.", { exact: false }))
+    .toHaveCount(0);
   expect(
     (await view(page)).messages.filter((m) => m.trigger?.kind === "event"),
   ).toHaveLength(1);
