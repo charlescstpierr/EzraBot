@@ -79,6 +79,22 @@ export const LinkViewSchema = z.strictObject({
 });
 export type LinkView = z.infer<typeof LinkViewSchema>;
 
+/**
+ * A bot's proposal to connect a service, shown under its reply. It grants nothing and connects nothing by itself.
+ * `toolkit` is the name the bot wrote: it is only compared with the server's catalogue when the person starts the connection.
+ */
+export const ConnectionViewSchema = z.strictObject({
+  id: z.string(),
+  botId: z.string(),
+  /** The bot message that carries the proposal. */
+  messageId: z.string(),
+  toolkit: z.string(),
+  /** The link the person started from this card, as the provider last reported it. Null until then. */
+  link: LinkViewSchema.nullable(),
+  createdAt: z.string(),
+});
+export type ConnectionView = z.infer<typeof ConnectionViewSchema>;
+
 export const GrantViewSchema = z.strictObject({
   id: z.string(), botId: z.string(), toolkit: z.string(), accountId: z.string(), accountAlias: z.string(),
   toolSlug: z.string(), version: z.string(), description: z.string(), grantedAt: z.string(),
@@ -149,6 +165,8 @@ export const ToolsViewSchema = z.strictObject({
   proposals: z.array(ToolProposalViewSchema),
   /** Every request prepared from a document version, with or without a proposal. */
   sources: z.array(SourceViewSchema),
+  /** Connection requests of live bots. Empty without a provider key. */
+  connections: z.array(ConnectionViewSchema),
 });
 export type ToolsView = z.infer<typeof ToolsViewSchema>;
 
@@ -176,6 +194,8 @@ export type AvailableTool = z.infer<typeof AvailableToolSchema>;
 /** `alias` is the name the person gives this account. It is what an approval card later shows. */
 export const LinkRequestSchema = z.strictObject({ serviceId: providerId, alias: z.string().trim().min(1).max(40) });
 export const AvailableQuerySchema = z.strictObject({ accountId: providerId });
+/** `after` is the link the card shows, or null: a start that no longer matches it is a stale repeat and starts nothing. */
+export const ConnectionLinkSchema = z.strictObject({ alias: LinkRequestSchema.shape.alias, after: id.nullable() });
 
 export const ToolsReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('catalog'), services: z.array(ServiceOptionSchema) }),

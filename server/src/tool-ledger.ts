@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Ajv } from 'ajv';
 import type { Admission } from './admission.js';
+import type { Connections } from './connection.js';
 import type { ReceiptContext } from './context.js';
 import type { ToolCall, ToolReply } from './engine.js';
 import type { WorkState } from './protocol.js';
@@ -16,6 +17,7 @@ import {
   ToolResultSchema,
   isMetaTool,
   type AccountStatus,
+  type ConnectionView,
   type ExecutionView,
   type GrantView,
   type LinkView,
@@ -94,7 +96,9 @@ export type ToolLedger = {
   view(status: ToolsStatus): ToolsView;
   /** Applies one PC command. The same `requestId` with the same content returns the first receipt. */
   apply(command: ToolCommand, live: LiveFacts | null): ToolOutcome;
-  recordLink(link: { linkId: string; toolkit: string; accountId: string }): void;
+  /** `connectionId`: the request whose card started this link. It shows this link from now on. */
+  recordLink(link: { linkId: string; toolkit: string; accountId: string; connectionId?: string }): void;
+  connection(connectionId: string): ConnectionView | null;
   link(linkId: string): LinkView | null;
   observeAccount(account: AccountFacts): void;
   account(accountId: string): AccountFacts | null;
@@ -403,7 +407,7 @@ const CAPABILITY = 'composio.action';
 export function createToolLedger(kit: LedgerKit, receipts: {
   find(requestId: string): { type: string; fingerprint: string; result: string } | null;
   save(requestId: string, type: string, fingerprint: string, result: string): void;
-}, admission: Admission, sources: Sources): ToolLedger {
+}, admission: Admission, sources: Sources, connections: Connections): ToolLedger {
   const { get, all, run, now, newId } = kit;
 
   kit.transaction(() => {
@@ -794,6 +798,7 @@ export function createToolLedger(kit: LedgerKit, receipts: {
       grants,
       proposals,
       sources: [...frozen.values()],
+      connections: status.state === 'ready' ? connections.list() : [],
     };
   }
 
@@ -807,9 +812,13 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     view,
     apply,
     recordLink(link) {
-      run(`INSERT INTO tool_links(id, toolkit, account_id, state, created_at) VALUES (?, ?, ?, 'pending', ?)`, link.linkId, link.toolkit, link.accountId, now());
+      kit.transaction(() => {
+        run(`INSERT INTO tool_links(id, toolkit, account_id, state, created_at) VALUES (?, ?, ?, 'pending', ?)`, link.linkId, link.toolkit, link.accountId, now());
+        if (link.connectionId !== undefined) connections.attach(link.connectionId, link.linkId);
+      });
       kit.changed();
     },
+    connection: connections.of,
     link(linkId) {
       const row = get('SELECT * FROM tool_links WHERE id = ?', linkId);
       return row ? linkOf(row) : null;

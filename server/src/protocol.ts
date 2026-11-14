@@ -196,10 +196,14 @@ export const HandoffSchema = z.strictObject({
 });
 export type Handoff = z.infer<typeof HandoffSchema>;
 
+/** A bot's proposal to connect a service it cannot use. Recorded with the reply; it connects nothing and grants nothing. */
+export const ConnectionOfferSchema = z.strictObject({ service: z.string().max(200) });
+
 export const EngineReplySchema = z.strictObject({
   reply: text(20000),
   deliverable: DeliverableSchema.nullable(),
   handoff: HandoffSchema.nullable().optional(),
+  connection: ConnectionOfferSchema.nullable().optional(),
 });
 export type EngineReply = z.infer<typeof EngineReplySchema>;
 
