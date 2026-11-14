@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AgentCommandSchema, type CheckView, type LeadIdentity, type ObservedView } from '../src/agent-protocol.js';
 import { createAgentEngine } from '../src/agent-engine.js';
 import { createAgentWorker } from '../src/agent-worker.js';
+import { missionOrigins } from '../src/routines.js';
 import { admissionIn } from './fixtures/admission.js';
 import { openMissions, type AttemptClaim, type CoordinationDeps } from '../src/missions.js';
 
@@ -462,4 +463,32 @@ for (const stale of [false, true]) test(`an unknown review requires its own read
     assert.equal(child?.attempts.find(a => a.id === review.attemptId)?.state, 'interrupted');
     assert.notEqual(r.missions.detail(root)?.waiting?.includes('résultat confirmé'), true);
   } finally { r.close(); r.b.cleanup(); }
+});
+
+test('routine mission facts include each new interrupted step behind the same lead', () => {
+  const r = registry();
+  try {
+    const rootId = r.coordinated();
+    r.turn(r.claim(), decision({ title: 'Étape', goal: 'Preuve synthétique.' }), 'thread-lead');
+    const step = r.claim();
+    r.missions.finish(step, { kind: 'interrupted', message: 'Résultat inconnu.' });
+    const first = missionOrigins(r.missions).find((m) => m.missionId === rootId);
+    assert(first);
+    assert.equal(first.status, 'interrupted');
+    assert.deepEqual(first.interruptions, [step.attemptId]);
+    assert.equal(r.missions.view().missions.length, 1, 'the step is absent from the top-level list');
+    assert(r.say({ type: 'mission.resume', missionId: step.missionId }).ok);
+    const resumed = r.claim();
+    assert.equal(resumed.missionId, step.missionId);
+    assert.equal(missionOrigins(r.missions).find((m) => m.missionId === rootId)?.status, 'running');
+    r.missions.finish(resumed, { kind: 'interrupted', message: 'Deuxième résultat inconnu.' });
+    const second = missionOrigins(r.missions).find((m) => m.missionId === rootId);
+    assert(second);
+    assert.equal(second.status, 'interrupted');
+    assert.deepEqual(second.interruptions, [step.attemptId, resumed.attemptId].sort());
+    assert.notDeepEqual(second.interruptions, first.interruptions, 'a prior confirmation cannot name the next interruption');
+  } finally {
+    r.close();
+    r.b.cleanup();
+  }
 });

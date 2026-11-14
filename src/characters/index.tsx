@@ -25,9 +25,10 @@ const deletionLabels: Record<string, string> = {
   keptDeliverables: "Documents conservés ailleurs",
   keptMentions: "Mentions conservées ailleurs",
   tasks: "Tâches",
+  routines: "Routines",
 };
 type Accepted = Extract<AppOutcome, { kind: "accepted" }>;
-function useAction(port: Port) {
+export function useAction(port: Port) {
   const lock = useRef(false),
     held = useRef<{
       command: Command;

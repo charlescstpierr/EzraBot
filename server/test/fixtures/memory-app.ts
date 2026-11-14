@@ -44,6 +44,8 @@ type Options = {
   timeoutMs?: number;
   /** Connected services with this fake provider: the chat engine offers the granted actions and the action desk sends them. */
   provider?: FakeProvider;
+  /** The store's clock. */
+  now?: () => string;
 };
 
 /** The real store, worker, desk and HTTP server, in front of a fake Honcho and the fake App Server. */
@@ -61,7 +63,7 @@ export async function startMemory(options: Options) {
   const budget = options.budget === undefined ? 500 : options.budget;
   const declared = { ...DEFAULT_POLICY, budgets: { ...DEFAULT_POLICY.budgets, ...(budget === null ? {} : { honcho: { callsPerDay: budget } }) } };
   const store = openStore({
-    path, mascots, serviceTools: options.provider !== undefined, policy: options.honcho ? withMemoryCapabilities(declared) : declared,
+    path, mascots, serviceTools: options.provider !== undefined, ...(options.now ? { now: options.now } : {}), policy: options.honcho ? withMemoryCapabilities(declared) : declared,
     ...(options.honcho ? { memory: { workspacePrefix: PREFIX } } : {}),
   });
   const engineOptions = { command: process.execPath, workDir: dir, clientVersion: 'test', turnTimeoutMs: 5000, requestTimeoutMs: 2000, interruptGraceMs: 300 };

@@ -286,7 +286,7 @@ test('a database of an older version gains the request table with valid links an
   }
   const db = new DatabaseSync(path);
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 11);
+    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 12);
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     const guards = db.prepare(`SELECT name FROM sqlite_master WHERE tbl_name = 'tool_connections' AND type = 'trigger' ORDER BY name`).all().map(row => String(row.name));
     assert.deepEqual(guards, ['tool_connections_frozen', 'tool_connections_kept', 'tool_connections_source']);

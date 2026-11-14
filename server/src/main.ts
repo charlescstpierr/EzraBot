@@ -14,6 +14,7 @@ import { createAgentEngine } from './agent-engine.js';
 import { createAgentRoutes } from './agent-http.js';
 import { createAgentWorker } from './agent-worker.js';
 import { MissionsLockedError, openMissions } from './missions.js';
+import { missionOrigins } from './routines.js';
 import { buildMissionChatContext } from './mission-context.js';
 import { HonchoConfigError, takeHonchoConfig, takeProviderKey } from './child-env.js';
 import { withMemoryCapabilities } from './memory-ledger.js';
@@ -21,8 +22,10 @@ import { createMemoryDesk } from './memory-desk.js';
 import { createComposioProvider, createComposioSdk } from './composio.js';
 import { createActionDesk } from './tool-desk.js';
 import { BudgetConfigError, policyFromEnv } from './admission.js';
+import { ROUTINE_LIMITS } from './protocol.js';
 
 const VERSION = '0.1.0';
+const startedAt = new Date().toISOString();
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
 function log(entry: Record<string, unknown>): void {
@@ -61,7 +64,9 @@ const policy = (() => {
 
 function open(): Store {
   try {
-    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
+    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions),
+      missions: () => missionOrigins(missions),
+      serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
     throw error;
@@ -69,10 +74,6 @@ function open(): Store {
 }
 const store = open();
 log({ event: 'budgets', usage: store.admission.usage() });
-if (store.view().erasure === 'incomplete') log({ event: 'erasure', state: 'incomplete' });
-const recovered = store.recoverInterrupted();
-if (recovered) log({ event: 'recovery', interruptedAttempts: recovered });
-
 const engineOptions = { command: process.env.MINO_CODEX_BIN ?? 'codex', workDir, clientVersion: VERSION };
 const missions = (() => {
   try {
@@ -84,6 +85,10 @@ const missions = (() => {
 })();
 const interruptedMissions = missions.recoverInterrupted();
 if (interruptedMissions) log({ event: 'recovery', interruptedMissionAttempts: interruptedMissions });
+if (store.view().erasure === 'incomplete') log({ event: 'erasure', state: 'incomplete' });
+const recovered = store.recoverInterrupted();
+if (recovered) log({ event: 'recovery', interruptedAttempts: recovered });
+
 const agentEngine = createAgentEngine({ command: engineOptions.command, tmpDir: join(dataDir, 'agent-tmp'), clientVersion: VERSION });
 const agentWorker = createAgentWorker({ missions, engine: agentEngine, log, onFatal: () => fail('Le registre des missions a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
 const agents = createAgentRoutes({ missions, worker: agentWorker, engine: agentEngine,
@@ -136,6 +141,15 @@ const server = createHttpServer({
   csrfToken: randomBytes(32).toString('hex'),
 });
 
+function tickRoutines(): void {
+  try {
+    if (store.tickRoutines(startedAt) > 0) worker.kick();
+  } catch {
+    fail('Les routines ont échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.');
+  }
+}
+let routineClock: NodeJS.Timeout | undefined;
+
 server.on('error', error => fail(`Le serveur n’a pas pu démarrer sur 127.0.0.1:${port} (${'code' in error ? String(error.code) : 'erreur'}).`));
 server.listen(port, '127.0.0.1', () => {
   log({ event: 'ready', url: `http://127.0.0.1:${port}`, dataDir });
@@ -144,12 +158,15 @@ server.listen(port, '127.0.0.1', () => {
   agentWorker.kick();
   desk.kick();
   memoryDesk?.kick();
+  tickRoutines();
+  routineClock = setInterval(tickRoutines, ROUTINE_LIMITS.tickSeconds * 1000);
 });
 
 let stopping = false;
 async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
+  clearInterval(routineClock);
   server.closeAllConnections();
   server.close();
   deviceServer?.closeAllConnections();

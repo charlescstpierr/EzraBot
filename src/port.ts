@@ -54,6 +54,7 @@ export type Route =
   | { page: "projects" }
   | { page: "characters"; botId?: string }
   | { page: "carnet" }
+  | { page: "routines"; routineId?: string }
   | { page: "results" };
 export type Port = {
   view: PcView;

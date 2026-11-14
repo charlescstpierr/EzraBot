@@ -9,12 +9,14 @@ const HONCHO_STATES: Record<string, string> = {
 };
 import React, { useEffect, useState } from "react";
 import { Text, View } from "react-native";
-import type {
-  Command,
-  MobileBot,
-  MobileSnapshot,
-  MobileTask,
-  MobileWork,
+import {
+  phoneRoutineActions,
+  type Command,
+  type MobileBot,
+  type MobileRoutine,
+  type MobileSnapshot,
+  type MobileTask,
+  type MobileWork,
 } from "./generated/mobile-protocol";
 import { Button, Code, Field, Mascot, catalog, s } from "./ui";
 type CommandInput = Command extends infer C
@@ -178,6 +180,10 @@ export function Profile({
             : "Catalogue en cours de démarrage."}
         </Text>
       )}
+      <Routines
+        routines={(snapshot.routines ?? []).filter((r) => r.botId === bot.id)}
+        send={send}
+      />
       {bot.memoryScope ? (
         <View style={s.card}>
           <Text style={s.title}>
@@ -244,6 +250,68 @@ export function Profile({
           }
         />
       </View>
+    </View>
+  );
+}
+const ROUTINE_STATES: Record<MobileRoutine["state"], string> = {
+  inactive: "Inactive",
+  active: "Active",
+  paused: "En pause",
+  held: "Attend une vérification sur l’ordinateur",
+  ended: "Terminée",
+};
+function Routines({
+  routines,
+  send,
+}: {
+  routines: MobileRoutine[];
+  send: Dispatch;
+}) {
+  return (
+    <View style={s.card}>
+      <Text style={s.title}>Routines</Text>
+      <Text style={s.muted}>
+        Elles se créent, se modifient, s’activent et se suppriment sur
+        l’ordinateur, qui doit rester allumé. Ici : lecture, pause et reprise.
+      </Text>
+      {routines.length === 0 && (
+        <Text style={s.text}>Aucune routine pour ce personnage.</Text>
+      )}
+      {routines.map((routine) => (
+        <View key={routine.id}>
+          <Text style={s.text}>{routine.text}</Text>
+          <Text style={s.muted}>
+            {routine.time} · {routine.zone} · {ROUTINE_STATES[routine.state]}{" "}
+            · {routine.admitted} sur {routine.cap} demandes
+          </Text>
+          {routine.upcoming.slice(0, 3).map((slot) => (
+            <Text key={slot.date} style={s.muted}>
+              {slot.kind === "due"
+                ? `${slot.date} à ${routine.time}${slot.repeated ? ", premier passage seulement" : ""}`
+                : `${slot.date} : cette heure n’existe pas, la date est sautée`}
+            </Text>
+          ))}
+          {routine.heldOn && (
+            <Text style={s.text}>
+              {routine.heldOn.label} La vérification et la reprise se font sur
+              l’ordinateur.
+            </Text>
+          )}
+          {phoneRoutineActions(routine).map((action) => (
+            <Button
+              key={action}
+              title={action === "pause" ? "Mettre en pause" : "Reprendre"}
+              onPress={() =>
+                void send(
+                  action === "pause"
+                    ? { type: "routine.pause", routineId: routine.id }
+                    : { type: "routine.resume", routineId: routine.id },
+                )
+              }
+            />
+          ))}
+        </View>
+      ))}
     </View>
   );
 }
