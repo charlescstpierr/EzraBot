@@ -11,10 +11,12 @@ import React, { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import {
   phoneRoutineActions,
+  phoneSubscriptionActions,
   type Command,
   type MobileBot,
   type MobileRoutine,
   type MobileSnapshot,
+  type MobileSubscription,
   type MobileTask,
   type MobileWork,
 } from "./generated/mobile-protocol";
@@ -184,6 +186,12 @@ export function Profile({
         routines={(snapshot.routines ?? []).filter((r) => r.botId === bot.id)}
         send={send}
       />
+      <Subscriptions
+        subscriptions={(snapshot.events?.subscriptions ?? []).filter(
+          (sub) => sub.botId === bot.id,
+        )}
+        send={send}
+      />
       {bot.memoryScope ? (
         <View style={s.card}>
           <Text style={s.title}>
@@ -307,6 +315,60 @@ function Routines({
                     ? { type: "routine.pause", routineId: routine.id }
                     : { type: "routine.resume", routineId: routine.id },
                 )
+              }
+            />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+const SUBSCRIPTION_STATES: Record<MobileSubscription["state"], string> = {
+  inactive: "Inactif",
+  active: "Actif",
+  paused: "En pause",
+  revoked: "Révoqué",
+};
+function Subscriptions({
+  subscriptions,
+  send,
+}: {
+  subscriptions: MobileSubscription[];
+  send: Dispatch;
+}) {
+  if (!subscriptions.length) return null;
+  return (
+    <View style={s.card}>
+      <Text style={s.title}>Événements de service</Text>
+      <Text style={s.muted}>
+        Ils se créent, se modifient, s’activent, reprennent et se révoquent sur
+        l’ordinateur. Ici : lecture et pause. Le compte affiché est son dernier
+        état connu sur l’ordinateur.
+      </Text>
+      {subscriptions.map((sub) => (
+        <View key={sub.id}>
+          <Text style={s.text}>
+            {sub.triggerSlug} · {SUBSCRIPTION_STATES[sub.state]}
+          </Text>
+          <Text style={s.muted}>
+            {sub.account
+              ? `Compte « ${sub.account.alias} », ${sub.account.status}`
+              : "Compte inconnu"}{" "}
+            · {sub.today.admitted} sur {sub.perDay} demandes aujourd’hui ·{" "}
+            {sub.today.refused} refus
+          </Text>
+          {sub.last && (
+            <Text style={s.muted}>
+              Dernier événement :{" "}
+              {sub.last.outcome === "admitted" ? "demande créée" : "refusé"}
+            </Text>
+          )}
+          {phoneSubscriptionActions(sub).map((action) => (
+            <Button
+              key={action}
+              title="Mettre en pause"
+              onPress={() =>
+                void send({ type: "subscription.pause", subscriptionId: sub.id })
               }
             />
           ))}

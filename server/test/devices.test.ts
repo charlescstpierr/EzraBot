@@ -14,7 +14,7 @@ import { createDeviceServer } from '../src/device-http.js';
 import { createHttpServer } from '../src/http.js';
 import { loadMascots } from '../src/domain.js';
 import type { Engine } from '../src/engine.js';
-import { MobileSnapshotSchema, MobileReplySchema, PairStatusSchema, phoneRoutineActions } from '../src/mobile-protocol.js';
+import { MobileSnapshotSchema, MobileReplySchema, PairStatusSchema, phoneRoutineActions, phoneSubscriptionActions } from '../src/mobile-protocol.js';
 import { openStore } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
 
@@ -24,11 +24,11 @@ async function port(): Promise<number> {
   await new Promise<void>(r => probe.close(() => r())); if (!address || typeof address === 'string') throw new Error('Missing port'); return address.port;
 }
 const closeServer = async (server: Server) => { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); };
-async function fixture(memory?: { workspacePrefix: string }) {
+async function fixture(memory?: { workspacePrefix: string }, events?: { transport: string }) {
   const dir = mkdtempSync(join(tmpdir(), 'mino-device-'));
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem'), '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost'], { stdio: 'ignore' });
   const cert = readFileSync(join(dir, 'cert.pem'), 'utf8'); const key = readFileSync(join(dir, 'key.pem'), 'utf8');
-  const store = openStore({ path: join(dir, 'app.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), ...(memory ? { memory } : {}) });
+  const store = openStore({ path: join(dir, 'app.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), ...(memory ? { memory } : {}), ...(events ? { events } : {}) });
   const engine: Engine = {
     status: () => ({ state: 'ready', account: 'chatgpt', models: [{ id: 'test', displayName: 'Test', isDefault: true, efforts: ['low'], defaultEffort: 'low', speeds: [] }] }),
     catalog: async () => engine.status(), close: async () => {}, onUsage: () => () => {},
@@ -251,6 +251,43 @@ test('a paired phone reads routines and can only pause or plainly resume them; e
     assert.equal(resumed.ok && resumed.view.routines?.find(r => r.id === routineId)?.state, 'active');
     f.devices.revoke(f.credential.deviceId);
     assert.equal((await f.call('/m/commands', { type: 'routine.pause', requestId: 'phone-routine-pause-2', routineId }, f.auth)).status, 401);
+    assert.equal(seen()?.state, 'active', 'a revoked phone paused nothing');
+  } finally { await f.close(); }
+});
+
+test('a paired phone sees subscriptions without their instruction and may only pause one; a revoked phone pauses nothing', async () => {
+  const f = await fixture(undefined, { transport: 'projet-essai' });
+  try {
+    await f.pair();
+    f.store.tools.observeAccount({ id: 'ca_1', toolkit: 'github', alias: 'Compte travail', status: 'ACTIVE' });
+    const created = f.store.dispatch({ type: 'subscription.create', requestId: 'pc-sub-1', botId: 'nova', accountId: 'ca_1', triggerId: 'ti_1', triggerSlug: 'GITHUB_ISSUE_ADDED_EVENT', text: 'Consigne privée', fields: ['title'], perDay: 20 });
+    assert(created.ok && created.result.kind === 'subscription');
+    const subscriptionId = created.result.subscriptionId;
+    const seen = () => f.store.view().events.subscriptions.find(sub => sub.id === subscriptionId);
+    const viewed = await f.call('/m/view', undefined, f.auth);
+    assert.equal(MobileSnapshotSchema.parse(viewed.body).events?.subscriptions[0]?.state, 'inactive');
+    assert.doesNotMatch(JSON.stringify((viewed.body as { events?: unknown }).events), /Consigne privée|"fields"|ti_1/, 'the phone never receives the instruction, fields or trigger id');
+    const scope = { text: 'Autre', fields: [], perDay: 5 };
+    for (const command of [
+      { type: 'subscription.create', requestId: 'phone-sub-create', botId: 'nova', accountId: 'ca_1', triggerId: 'ti_2', triggerSlug: 'GITHUB_ISSUE_ADDED_EVENT', ...scope },
+      { type: 'subscription.update', requestId: 'phone-sub-update', subscriptionId, expectedRevision: 1, ...scope },
+      { type: 'subscription.activate', requestId: 'phone-sub-activate', subscriptionId, expectedRevision: 1 },
+      { type: 'subscription.resume', requestId: 'phone-sub-resume', subscriptionId, expectedRevision: 1 },
+      { type: 'subscription.revoke', requestId: 'phone-sub-revoke', subscriptionId },
+    ]) {
+      const refused = await f.call('/m/commands', command, f.auth);
+      assert.deepEqual([refused.status, (refused.body as { code?: string }).code], [403, 'command_refused'], command.type);
+    }
+    const extra = await f.call('/m/commands', { type: 'subscription.pause', requestId: 'phone-sub-extra', subscriptionId, state: 'active' }, f.auth);
+    assert.equal(extra.status, 422, 'an extra field is refused');
+    assert.deepEqual([seen()?.revision, seen()?.state], [1, 'inactive'], 'nothing changed from the phone');
+    assert(f.store.dispatch({ type: 'subscription.activate', requestId: 'pc-sub-activate', subscriptionId, expectedRevision: 1 }).ok);
+    assert.deepEqual(phoneSubscriptionActions({ state: 'active' }), ['pause']);
+    const paused = MobileReplySchema.parse((await f.call('/m/commands', { type: 'subscription.pause', requestId: 'phone-sub-pause', subscriptionId }, f.auth)).body);
+    assert.equal(paused.ok && paused.view.events?.subscriptions.find(sub => sub.id === subscriptionId)?.state, 'paused');
+    assert(f.store.dispatch({ type: 'subscription.resume', requestId: 'pc-sub-resume', subscriptionId, expectedRevision: 3 }).ok);
+    f.devices.revoke(f.credential.deviceId);
+    assert.equal((await f.call('/m/commands', { type: 'subscription.pause', requestId: 'phone-sub-pause-2', subscriptionId }, f.auth)).status, 401);
     assert.equal(seen()?.state, 'active', 'a revoked phone paused nothing');
   } finally { await f.close(); }
 });

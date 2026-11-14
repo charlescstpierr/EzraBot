@@ -16,6 +16,7 @@ import {
   Sparkles,
   Users,
   CalendarClock,
+  Webhook,
 } from "lucide-react";
 import type { CommandOf } from "../server/src/protocol";
 import type { PcView } from "../server/src/tools-protocol";
@@ -45,6 +46,7 @@ import { ToolCards, ToolConnections } from "./tools";
 import { MemoryTrace } from "./memory";
 import { ResultsPage } from "./results";
 import { RoutinesPage } from "./routines";
+import { EventsPage } from "./events";
 import "./style.css";
 function browserStorage(
   kind: "localStorage" | "sessionStorage",
@@ -309,6 +311,7 @@ function App() {
     { id: "carnet", label: "Carnet", Icon: BookOpen },
     { id: "characters", label: "Personnages", Icon: Users },
     { id: "routines", label: "Routines", Icon: CalendarClock },
+    { id: "events", label: "Événements", Icon: Webhook },
   ];
   function openHome() {
     const bot = view?.bots.find((b) => b.id === "mino");
@@ -353,6 +356,7 @@ function App() {
                 else if (id === "results") go({ page: "results" });
                 else if (id === "projects") go({ page: "projects" });
                 else if (id === "routines") go({ page: "routines" });
+                else if (id === "events") go({ page: "events" });
                 else if (id === "characters")
                   go({
                     page: "characters",
@@ -571,6 +575,8 @@ function App() {
               <ResultsPage port={port} unavailable={Boolean(offline)} />
             ) : route.page === "routines" ? (
               <RoutinesPage port={port} routineId={route.routineId} />
+            ) : route.page === "events" ? (
+              <EventsPage port={port} subscriptionId={route.subscriptionId} />
             ) : route.page === "projects" ? (
               <ProjectsPage port={port} />
             ) : route.page === "missions" ? (

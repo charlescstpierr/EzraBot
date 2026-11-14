@@ -458,6 +458,27 @@ function Thread({ port, botId, focusMessageId, source, drafts, slots }: Props) {
                   tapée. Elle n’accorde aucun droit. Voir la routine
                 </button>
               )}
+              {m.trigger?.kind === "event" &&
+                (() => {
+                  const subscriptionId = m.trigger.subscriptionId;
+                  const sub = port.view.events.subscriptions.find(
+                    (candidate) => candidate.id === subscriptionId,
+                  );
+                  return (
+                    <button
+                      className="ez-chat-trigger"
+                      onClick={() =>
+                        port.go({ page: "events", subscriptionId })
+                      }
+                    >
+                      Demande créée par l’événement{" "}
+                      {sub ? sub.triggerSlug : "d’un abonnement"}
+                      {sub?.account ? `, compte « ${sub.account.alias} »` : ""},
+                      que personne n’a tapée. Elle n’accorde aucun droit. Voir
+                      l’abonnement
+                    </button>
+                  );
+                })()}
               {!!m.attachments.length && (
                 <ul className="ez-chat-files">
                   {m.attachments.map((f, i) => (

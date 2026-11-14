@@ -55,6 +55,7 @@ export type Route =
   | { page: "characters"; botId?: string }
   | { page: "carnet" }
   | { page: "routines"; routineId?: string }
+  | { page: "events"; subscriptionId?: string }
   | { page: "results" };
 export type Port = {
   view: PcView;
