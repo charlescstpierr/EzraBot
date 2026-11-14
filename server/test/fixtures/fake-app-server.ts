@@ -3,7 +3,9 @@ import { createInterface } from 'node:readline';
 
 // Test-only stand-in for `codex app-server`, driven by a scenario name.
 // Mino spawns it as `node fake-app-server.js <scenario> app-server --listen stdio:// --disable …`.
-const scenario = process.argv[2] ?? 'reply';
+const named = process.argv[2] ?? 'reply';
+const oneRead = named.startsWith('one-read:');
+const scenario = oneRead ? named.slice('one-read:'.length) : named;
 const args = process.argv.slice(3);
 const disabled = new Set<string>();
 args.forEach((arg, i) => {
@@ -14,7 +16,12 @@ args.forEach((arg, i) => {
 const envProbe = process.env.MINO_TEST_ENV_PROBE;
 if (envProbe) writeFileSync(envProbe, JSON.stringify(Object.keys(process.env).filter(name => /composio/i.test(name))));
 
-const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
+let turnLines: string[] | null = null;
+const send = (value: unknown) => {
+  const line = JSON.stringify(value) + '\n';
+  if (turnLines) turnLines.push(line);
+  else process.stdout.write(line);
+};
 const notify = (method: string, params: unknown) => send({ method, params });
 let serverRequestId = 1000;
 let activeTurn: { threadId: string; turnId: string } | null = null;
@@ -37,6 +44,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function complete(threadId: string, turnId: string, status: string, error: unknown = null) {
   notify('turn/completed', { threadId, turn: { id: turnId, status, error, items: [] } });
+  if (turnLines) process.stdout.write(turnLines.join(''));
+  turnLines = null;
   activeTurn = null;
 }
 
@@ -170,6 +179,7 @@ function startTurn(params: Record<string, unknown>) {
   const threadId = String(params.threadId);
   const turnId = `turn-${Date.now()}-${serverRequestId++}`;
   activeTurn = { threadId, turnId };
+  if (oneRead) turnLines = [];
   const first = Array.isArray(params.input) && isRecord(params.input[0]) ? String(params.input[0].text) : '';
   const withTools = TOOL_SCENARIOS.has(scenario) && (threadTools.get(threadId)?.length ?? 0) > 0;
   // Sent before this function returns, so it reaches Mino before the answer to turn/start.
@@ -294,7 +304,9 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     }
     case 'turn/start': {
       if (process.env.MINO_TEST_BOUNDARY_PROBE) writeFileSync(process.env.MINO_TEST_BOUNDARY_PROBE, JSON.stringify({ argv: args, thread: threadParams, turn: params }));
-      if (scenario === 'reject-turn') throw new Error('turn refused');
+      if (scenario === 'usage-then-refuse' || scenario === 'usage-then-exit') usage(String(params.threadId), 'turn-unanswered', 400);
+      if (scenario === 'usage-then-exit') process.exit(3);
+      if (scenario === 'reject-turn' || scenario === 'usage-then-refuse') throw new Error('turn refused');
       const sandbox = isRecord(params.sandboxPolicy) ? params.sandboxPolicy : {};
       if (sandbox.type !== 'readOnly' || sandbox.networkAccess !== false || !isRecord(params.outputSchema)) throw new Error('unsafe turn');
       return startTurn(params);
