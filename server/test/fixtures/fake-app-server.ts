@@ -165,9 +165,9 @@ function plainTurn(threadId: string, turnId: string, input: string, offered: boo
     ? JSON.stringify({ reply: `Compte rendu : l’action est dans l’état ${state}.`, deliverable: null })
     : service
       ? JSON.stringify({ reply: `Je ne peux pas utiliser ${service} pour le moment. Je vous propose de relier ce service sur votre PC. Cela ne me donne aucun droit : vous les choisirez ensuite dans ma page.`, deliverable: null, connection: { service } })
-    : asked.includes('note synthétique')
-      ? JSON.stringify({ reply: 'Voici la note.', deliverable: { title: 'Note synthétique', body: 'Première version de la note synthétique.' } })
-      : REPLY);
+      : asked.includes('note synthétique')
+        ? JSON.stringify({ reply: 'Voici la note.', deliverable: { title: 'Note synthétique', body: 'Première version de la note synthétique.' } })
+        : REPLY);
   complete(threadId, turnId, 'completed');
 }
 

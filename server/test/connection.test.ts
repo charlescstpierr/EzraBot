@@ -57,6 +57,8 @@ test('a chat reply that names a service records one connection request under tha
     assert.deepEqual(others, []);
     assert.deepEqual({ ...request, id: '', createdAt: '' }, { id: '', botId: 'nova', messageId: message.id, toolkit: 'gmail', link: null, createdAt: '' });
     assert.match(request?.id ?? '', /^tc_/);
+    const shared = JSON.stringify(store.view());
+    assert(request && !shared.includes(request.id) && !('connection' in message), 'the view a phone is built from carries the reply text and nothing of the request');
 
     assert.equal(store.finishJob(claim, reply('slack')).kind, 'stale', 'a second end of the same turn is refused');
     assert.deepEqual(requests(store).map(r => r.toolkit), ['gmail']);
