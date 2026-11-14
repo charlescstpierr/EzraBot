@@ -1,5 +1,12 @@
 const labels: Record<string,string> = {pending:'En attente',queued:'En attente',running:'En cours',writing:'Rédaction',thinking:'Réflexion',starting:'Démarrage',review:'À valider',done:'Terminé',failed:'Échoué',cancelled:'Annulé',draft:'Rédaction',synthesis:'Synthèse',revise:'Nouvelle passe',finished:'Prêt à valider',validated:'Validé',stopped:'Interrompu',goal_changed:'Objectif modifié',needs_decision:'À arbitrer',info_waiting:'Précision en attente',reviewer_unavailable:'Relecture impossible',succeeded:'Terminé'};
 const label = (value:string) => labels[value] ?? value;
+const HONCHO_STATES: Record<string, string> = {
+  preparing: "Préparation de l’espace Honcho en cours.",
+  active: "Mémoire active.",
+  withdrawal_pending: "Oubli en cours. La mémoire est fermée.",
+  withdrawal_unverified: "Mémoire fermée après un oubli. L’effacement chez Honcho n’est pas prouvé.",
+  reset_pending: "Préparation d’un nouvel espace vide en cours.",
+};
 import React, { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import type {
@@ -171,27 +178,47 @@ export function Profile({
             : "Catalogue en cours de démarrage."}
         </Text>
       )}
-      <Text style={s.title}>Souvenirs · {bot.memoryChars} caractères</Text>
-      {bot.memories.map((item) => (
-        <Memory key={item.id} botId={bot.id} item={item} send={send} />
-      ))}
-      <Field
-        label="Nouveau souvenir"
-        value={memory}
-        onChange={setMemory}
-        multiline
-      />
-      <Button
-        title="Ajouter le souvenir"
-        disabled={!memory.trim()}
-        onPress={() =>
-          void send({
-            type: "memory.create",
-            botId: bot.id,
-            text: memory,
-          }).then(() => setMemory(""))
-        }
-      />
+      {bot.memoryScope ? (
+        <View style={s.card}>
+          <Text style={s.title}>
+            Mémoire Honcho · {bot.memoryScope.label}
+          </Text>
+          <Text style={s.text}>
+            {HONCHO_STATES[bot.memoryScope.state] ?? bot.memoryScope.state}
+          </Text>
+          <Text style={s.text}>
+            Les déclarations, leur correction, l’exclusion et l’oubli se gèrent
+            sur l’ordinateur. Les souvenirs locaux de {bot.name} ne sont plus
+            envoyés.
+          </Text>
+        </View>
+      ) : (
+        <>
+          <Text style={s.title}>
+            Souvenirs · {bot.memoryChars} caractères
+          </Text>
+          {bot.memories.map((item) => (
+            <Memory key={item.id} botId={bot.id} item={item} send={send} />
+          ))}
+          <Field
+            label="Nouveau souvenir"
+            value={memory}
+            onChange={setMemory}
+            multiline
+          />
+          <Button
+            title="Ajouter le souvenir"
+            disabled={!memory.trim()}
+            onPress={() =>
+              void send({
+                type: "memory.create",
+                botId: bot.id,
+                text: memory,
+              }).then(() => setMemory(""))
+            }
+          />
+        </>
+      )}
       <View style={s.card}>
         <Text style={s.title}>Supprimer {bot.name}</Text>
         <Text style={s.text}>

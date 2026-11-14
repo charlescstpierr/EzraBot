@@ -648,7 +648,8 @@ function refreshCharacter(botId: string): void {
   if (aiNote) aiNote.textContent = choiceLabel(bot.choice);
   const memoryNote = playContent.querySelector('#character-memory-note');
   if (memoryNote) {
-    memoryNote.textContent = `${bot.memories.length} souvenir${bot.memories.length > 1 ? 's' : ''}${bot.memoryChars > LIMITS.memoryTotalChars ? ' · trop longue' : ''}`;
+    memoryNote.textContent = bot.memoryScope ? `Honcho · ${bot.memoryScope.label}`
+      : `${bot.memories.length} souvenir${bot.memories.length > 1 ? 's' : ''}${bot.memoryChars > LIMITS.memoryTotalChars ? ' · trop longue' : ''}`;
   }
   const repliesNote = playContent.querySelector('#character-replies-note');
   if (repliesNote) repliesNote.textContent = `${REPLY_STYLE_LABELS[bot.replyStyle]} · contexte ${CONTEXT_SIZE_LABELS[bot.contextSize].toLocaleLowerCase('fr')}${bot.instructions ? ' · consignes' : ''}`;
@@ -657,6 +658,14 @@ function refreshCharacter(botId: string): void {
 function showMemory(botId: string): void {
   const bot = botById(botId);
   if (!bot) return;
+  if (bot.memoryScope) {
+    openPlay(`Mémoire de ${bot.name}`, `<p>${escapeMarkup(bot.name)} utilise la mémoire Honcho, projet « ${escapeMarkup(bot.memoryScope.label)} ». Ses souvenirs locaux ne sont plus envoyés.</p>
+<p class="secondary-note">Ses déclarations, leur correction, l’exclusion et l’oubli se gèrent dans l’interface principale d’EzraBot, sur cet ordinateur, dans la page du personnage.</p>
+<div class="dialog-buttons"><button id="memory-back" type="button">Retour au bot</button></div>`, () => {
+      q('#memory-back', HTMLButtonElement).onclick = () => showBotSettings(botId);
+    });
+    return;
+  }
   const rows = bot.memories.length
     ? bot.memories.map(m => `<div><input data-memory-id="${escapeMarkup(m.id)}" maxlength="500" aria-label="Souvenir" value="${escapeMarkup(m.text)}"><button type="button" data-forget="${escapeMarkup(m.id)}" aria-label="Oublier ce souvenir">×</button></div>`).join('')
     : '<p class="secondary-note">Par exemple : « Je préfère des réponses courtes. »</p>';

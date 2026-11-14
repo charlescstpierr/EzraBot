@@ -47,6 +47,8 @@ type Props = {
     task(message: MessageView): ReactNode;
     mission(message: MessageView): ReactNode;
     tools(message: MessageView): ReactNode;
+    /** How the Honcho recall of a bot reply ended, with its sources. */
+    memory(message: MessageView): ReactNode;
   };
 };
 const empty = (): PromptContent => ({ text: "", files: [], mentions: [] });
@@ -450,6 +452,7 @@ function Thread({ port, botId, focusMessageId, source, drafts, slots }: Props) {
               {slots.task(m)}
               {slots.mission(m)}
               {slots.tools(m)}
+              {slots.memory(m)}
             </article>
           );
         })}

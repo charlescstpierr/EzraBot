@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { MemoryView } from './memory-protocol.js';
 import type { AppView } from './protocol.js';
 
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,80}$/);
@@ -170,7 +171,7 @@ export const ToolsViewSchema = z.strictObject({
 });
 export type ToolsView = z.infer<typeof ToolsViewSchema>;
 
-export type PcView = AppView & { tools: ToolsView };
+export type PcView = AppView & { tools: ToolsView; memory: MemoryView };
 
 export const ServiceOptionSchema = z.strictObject({
   id: z.string(),

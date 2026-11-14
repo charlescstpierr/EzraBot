@@ -4,6 +4,7 @@ import type { Admission } from './admission.js';
 import type { Connections } from './connection.js';
 import type { ReceiptContext } from './context.js';
 import type { ToolCall, ToolReply } from './engine.js';
+import type { MemoryLedger } from './memory-ledger.js';
 import type { WorkState } from './protocol.js';
 import type { FrozenSource, Sources } from './source.js';
 import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
@@ -117,6 +118,8 @@ export type ToolLedger = {
   hasLiveExecution(workId: string): boolean;
   /** This document got a new version: every action prepared from it that has not left is closed, and nothing is sent. */
   sourceMoved(workId: string): void;
+  /** A memory source was corrected, excluded or forgotten: every action prepared by a turn whose memory no longer holds, and that has not left, is closed. */
+  memoryMoved(): void;
   syncDrafts(): void;
   recover(): number;
   blocksPurge(botId: string, erasedWorks: string): boolean;
@@ -407,7 +410,7 @@ const CAPABILITY = 'composio.action';
 export function createToolLedger(kit: LedgerKit, receipts: {
   find(requestId: string): { type: string; fingerprint: string; result: string } | null;
   save(requestId: string, type: string, fingerprint: string, result: string): void;
-}, admission: Admission, sources: Sources, connections: Connections): ToolLedger {
+}, admission: Admission, sources: Sources, connections: Connections, memory: Pick<MemoryLedger, 'holds'>): ToolLedger {
   const { get, all, run, now, newId } = kit;
 
   kit.transaction(() => {
@@ -430,6 +433,7 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     const source = sourceOf(proposal);
     return !source || !sources.holds(source);
   };
+  const memoryChanged = (proposal: Row): boolean => !memory.holds(str(proposal, 'attempt_id')).ok;
 
   const liveBot = (botId: string) => get('SELECT 1 AS x FROM bots WHERE id = ? AND deleted_at IS NULL', botId) !== undefined;
   const pinOf = (proposal: Row): Pin => ({
@@ -524,7 +528,7 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     const assessment = tool ? assessTool(tool, pin.toolkit) : null;
     const reason: StaleReason | null =
       !grantMatches(proposal) || !liveBot(str(proposal, 'bot_id')) ? 'grant_changed'
-        : sourceChanged(proposal) ? 'source_changed'
+        : sourceChanged(proposal) || memoryChanged(proposal) ? 'source_changed'
           : !live.account || live.account.id !== pin.accountId || live.account.toolkit !== pin.toolkit || live.account.status !== 'ACTIVE' ? 'account_inactive'
             : !assessment?.ok || assessment.version !== pin.version || assessment.schemaSha256 !== pin.schemaSha256
               || fingerprintOf(pin, parseArguments(proposal), sourceOf(proposal)) !== str(proposal, 'fingerprint') ? 'schema_changed'
@@ -664,9 +668,10 @@ export function createToolLedger(kit: LedgerKit, receipts: {
             : !liveBot(str(row, 'bot_id')) ? 'bot_deleted'
               : !work || !WORK_STATES_AFTER_TURN.some(state => state === str(work, 'state')) ? 'work_changed'
                 : sourceChanged(row) ? 'source_changed'
-                  : reading.kind !== 'found' || reading.account.id !== pin.accountId || reading.account.toolkit !== pin.toolkit || reading.account.status !== 'ACTIVE' ? 'account_inactive'
-                    : fingerprintOf(pin, args, sourceOf(row)) !== str(row, 'fingerprint') ? 'schema_changed'
-                      : null;
+                  : memoryChanged(row) ? 'memory_changed'
+                    : reading.kind !== 'found' || reading.account.id !== pin.accountId || reading.account.toolkit !== pin.toolkit || reading.account.status !== 'ACTIVE' ? 'account_inactive'
+                      : fingerprintOf(pin, args, sourceOf(row)) !== str(row, 'fingerprint') ? 'schema_changed'
+                        : null;
       if (category) {
         voidApproved('id = ?', category, executionId);
         return null;
@@ -867,6 +872,14 @@ export function createToolLedger(kit: LedgerKit, receipts: {
       const cited = 'source_message_id IN (SELECT message_id FROM message_sources WHERE work_id = ?)';
       closeProposals(`state IN ('drafted','open') AND ${cited}`, 'source_changed', workId);
       voidApproved(`proposal_id IN (SELECT id FROM tool_proposals WHERE ${cited})`, 'source_changed', workId);
+    },
+    memoryMoved() {
+      const pending = all(`SELECT p.id, p.attempt_id FROM tool_proposals p LEFT JOIN tool_executions e ON e.proposal_id = p.id
+        WHERE p.state IN ('drafted','open') OR e.state = 'approved'`);
+      for (const proposal of pending.filter(memoryChanged)) {
+        closeProposals(`id = ? AND state IN ('drafted','open')`, 'source_changed', str(proposal, 'id'));
+        voidApproved('proposal_id = ?', 'memory_changed', str(proposal, 'id'));
+      }
     },
     syncDrafts() {
       run(`UPDATE tool_proposals SET state = 'open' WHERE state = 'drafted'

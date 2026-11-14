@@ -42,23 +42,8 @@ export const HonchoRecallResponseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('unavailable'), reason: z.string().min(1).max(500) }),
 ]);
 
-export const HonchoWriteResultSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('acknowledged'), receiptId: id }),
-  z.strictObject({ kind: z.literal('unsupported'), reason: z.string().min(1).max(500) }),
-  z.strictObject({ kind: z.literal('uncertain'), reason: z.string().min(1).max(500) }),
-]);
-
 export type HonchoSource = z.infer<typeof HonchoSourceSchema>;
 export type HonchoScope = z.infer<typeof HonchoScopeSchema>;
-export type HonchoRecallRequest = z.infer<typeof HonchoRecallRequestSchema>;
-export type HonchoWriteResult = z.infer<typeof HonchoWriteResultSchema>;
-
-type AuthorizedSource = Extract<HonchoSource, { kind: 'authorized' }>;
-export interface HonchoPort {
-  recall(request: HonchoRecallRequest): Promise<unknown>;
-  ingest(input: { binding: z.infer<typeof HonchoBindingSchema>; source: AuthorizedSource }): Promise<HonchoWriteResult>;
-  requestWithdrawal(input: { scope: HonchoScope; sourceIds: AuthorizedSource['sourceId'][] }): Promise<HonchoWriteResult>;
-}
 
 const SelectionSchema = z.strictObject({
   scope: HonchoScopeSchema,

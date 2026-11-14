@@ -13,6 +13,7 @@ import type { BrowserAdmission } from './web-admission.js';
 import type { AgentRoutes } from './agent-http.js';
 import type { ActionDesk } from './tool-desk.js';
 import type { PcView } from './tools-protocol.js';
+import { MemoryCommandSchema, type MemoryRefusalCode } from './memory-protocol.js';
 
 export type HttpOptions = {
   store: Store;
@@ -27,7 +28,7 @@ export type HttpOptions = {
   /** Connected services. Without it the PC view says the provider key is missing and the tools routes are closed. */
   actions?: ActionDesk;
   longPollMs?: number;
-  log?: (entry: { event: 'command'; type: string; ok: boolean; code?: RefusalCode }) => void;
+  log?: (entry: { event: 'command'; type: string; ok: boolean; code?: RefusalCode | MemoryRefusalCode }) => void;
 };
 
 const STATIC_FILES: Record<string, { file: string; type: string }> = {
@@ -56,6 +57,8 @@ const REFUSAL_STATUS: Partial<Record<RefusalCode, number>> = {
   not_found: 404,
   busy: 409,
 };
+
+const MEMORY_STATUS: Partial<Record<MemoryRefusalCode, number>> = { invalid_command: 422, not_found: 404, memory_unavailable: 503 };
 
 class HttpRefusal extends Error {
   constructor(readonly status: number, message: string) {
@@ -113,7 +116,9 @@ export function createHttpServer(options: HttpOptions): Server {
   const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   const indexHtml = readFileSync(join(root, 'web/react.html'), 'utf8').replace('__MINO_CSRF__', csrfToken);
   /** The PC view only. Paired devices get their own projection, which has no tools field. */
-  const appView = (): PcView => ({ ...store.view(), engine: engine.status(), tools: options.actions?.view() ?? store.tools.view({ state: 'missing_key' }) });
+  const appView = (): PcView => ({
+    ...store.view(), engine: engine.status(), tools: options.actions?.view() ?? store.tools.view({ state: 'missing_key' }), memory: store.memory.view(),
+  });
 
   function waitForChange(after: number, req: IncomingMessage): Promise<void> {
     if (store.rev !== after) return Promise.resolve();
@@ -222,6 +227,21 @@ export function createHttpServer(options: HttpOptions): Server {
       if ('page' in reply) return send(res, reply.status, 'text/html; charset=utf-8', reply.page, { 'content-security-policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
       if ('outcome' in reply) return sendJson(res, reply.status, { ...reply.outcome, view: appView() });
       return sendJson(res, reply.status, reply.body);
+    }
+    if (path === '/api/memory/commands' && req.method === 'POST') {
+      requireLocalPost(req);
+      const parsed = MemoryCommandSchema.safeParse(await readJson(req));
+      const outcome = parsed.success ? store.memory.apply(parsed.data)
+        : { ok: false as const, code: 'invalid_command' as const, message: 'Cette commande est incomplète ou invalide.' };
+      options.log?.({ event: 'command', type: parsed.success ? parsed.data.type : 'unknown', ok: outcome.ok, ...(outcome.ok ? {} : { code: outcome.code }) });
+      if (outcome.ok) worker.sync();
+      return sendJson(res, outcome.ok ? 200 : MEMORY_STATUS[outcome.code] ?? 409, { ...outcome, view: appView() });
+    }
+    if (path === '/api/memory/provenance' && req.method === 'GET') {
+      const messageId = url.searchParams.get('messageId') ?? '';
+      const found = /^[A-Za-z0-9_-]{1,80}$/.test(messageId) ? store.memory.provenance(messageId) : null;
+      if (!found) throw new HttpRefusal(404, 'Cette réponse n’existe pas.');
+      return sendJson(res, 200, { ok: true, ...found });
     }
     if (req.method === 'POST' && path === '/api/commands') return command(req, res);
     if (req.method !== 'GET') throw new HttpRefusal(405, 'Méthode refusée.');

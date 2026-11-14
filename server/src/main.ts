@@ -15,7 +15,9 @@ import { createAgentRoutes } from './agent-http.js';
 import { createAgentWorker } from './agent-worker.js';
 import { MissionsLockedError, openMissions } from './missions.js';
 import { buildMissionChatContext } from './mission-context.js';
-import { takeProviderKey } from './child-env.js';
+import { HonchoConfigError, takeHonchoConfig, takeProviderKey } from './child-env.js';
+import { withMemoryCapabilities } from './memory-ledger.js';
+import { createMemoryDesk } from './memory-desk.js';
 import { createComposioProvider, createComposioSdk } from './composio.js';
 import { createActionDesk } from './tool-desk.js';
 import { BudgetConfigError, policyFromEnv } from './admission.js';
@@ -33,6 +35,14 @@ function fail(message: string): never {
 }
 
 const providerKey = takeProviderKey(process.env);
+const honcho = (() => {
+  try {
+    return takeHonchoConfig(process.env);
+  } catch (error) {
+    if (error instanceof HonchoConfigError) fail(error.message);
+    throw error;
+  }
+})();
 const port = Number(process.env.MINO_PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) fail('MINO_PORT doit être un numéro de port entre 1024 et 65535.');
 const dataDir = resolve(process.env.MINO_DATA_DIR ?? join(root, 'data'));
@@ -41,7 +51,8 @@ mkdirSync(workDir, { recursive: true });
 
 const policy = (() => {
   try {
-    return policyFromEnv(process.env.MINO_BUDGETS);
+    const declared = policyFromEnv(process.env.MINO_BUDGETS);
+    return honcho ? withMemoryCapabilities(declared) : declared;
   } catch (error) {
     if (error instanceof BudgetConfigError) fail(error.message);
     throw error;
@@ -50,7 +61,7 @@ const policy = (() => {
 
 function open(): Store {
   try {
-    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null, policy });
+    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
     throw error;
@@ -84,7 +95,15 @@ const desk = createActionDesk({
   provider: providerKey ? createComposioProvider({ sdk: createComposioSdk(providerKey), ownerId: store.tools.ownerId }) : null,
   wake: () => worker.kick(),
 });
-const worker = createWorker({ store, engines: { chat: engine, doc: docEngine }, tools: desk, log, onFatal: () => fail('Le stockage du travail a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
+const memoryDesk = (() => {
+  if (!honcho) return null;
+  try {
+    return createMemoryDesk({ store, config: honcho, log });
+  } catch {
+    fail(new HonchoConfigError().message);
+  }
+})();
+const worker = createWorker({ store, engines: { chat: engine, doc: docEngine }, tools: desk, ...(memoryDesk ? { memory: memoryDesk } : {}), log, onFatal: () => fail('Le stockage du travail a échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.') });
 let devices: Devices | undefined;
 let browserAdmission: BrowserAdmission | undefined;
 let deviceServer: ReturnType<typeof createDeviceServer> | undefined;
@@ -124,6 +143,7 @@ server.listen(port, '127.0.0.1', () => {
   worker.kick();
   agentWorker.kick();
   desk.kick();
+  memoryDesk?.kick();
 });
 
 let stopping = false;
@@ -134,7 +154,7 @@ async function shutdown(): Promise<void> {
   server.close();
   deviceServer?.closeAllConnections();
   deviceServer?.close();
-  await Promise.all([worker.close(), agentWorker.close(), desk.close()]);
+  await Promise.all([worker.close(), agentWorker.close(), desk.close(), memoryDesk?.close()]);
   await Promise.all([engine.close(), docEngine.close(), agentEngine.close()]);
   const interrupted = store.recoverInterrupted();
   store.close();

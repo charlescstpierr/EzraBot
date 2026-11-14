@@ -284,7 +284,13 @@ export const ContextPlanSchema = z.strictObject({
     z.strictObject({ kind: z.literal('complete'), chars: count }),
     z.strictObject({ kind: z.literal('excerpt'), chars: count, omittedChars: count }),
   ]),
-  memory: z.strictObject({ count, chars: count, overBudget: z.boolean() }),
+  memory: z.strictObject({
+    count, chars: count, overBudget: z.boolean(),
+    /** Absent when the turn had no Honcho recall to make: a character without a project, a document step, a report or a guest. */
+    recall: z.strictObject({
+      state: z.enum(['used', 'empty', 'unavailable', 'suspended']), items: count, chars: count, truncated: count, omitted: count,
+    }).optional(),
+  }),
   attachments: z.strictObject({ count, chars: count }),
   instructionsChars: count,
   baseChars: count,
@@ -517,6 +523,11 @@ export type BotView = {
   contextSize: ContextSize;
   memories: { id: string; text: string; updatedAt: string }[];
   memoryChars: number;
+  /**
+   * Set once the person gave this character a Honcho project. From then on its local memories are no longer sent,
+   * and its memory is managed on the PC only.
+   */
+  memoryScope: { label: string; state: 'preparing' | 'active' | 'withdrawal_pending' | 'withdrawal_unverified' | 'reset_pending' } | null;
   deletion: DeletionCounts;
 };
 

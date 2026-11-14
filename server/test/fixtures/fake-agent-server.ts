@@ -34,7 +34,7 @@ const disabled = new Set<string>();
 process.argv.forEach((arg, i) => { const next = process.argv[i + 1]; if (arg === '--disable' && next) disabled.add(next); });
 
 const envProbe = process.env.MINO_TEST_ENV_PROBE;
-if (envProbe) writeFileSync(envProbe, JSON.stringify(Object.keys(process.env).filter(name => /composio/i.test(name))));
+if (envProbe) writeFileSync(envProbe, JSON.stringify(Object.keys(process.env).filter(name => /composio|honcho/i.test(name))));
 
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
 const notify = (method: string, params: unknown) => send({ method, params });

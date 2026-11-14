@@ -76,6 +76,8 @@ import { SOURCE_MIGRATION, createSources } from './source.js';
 import { CONNECTION_MIGRATION, createConnections } from './connection.js';
 import { ADMISSION_MIGRATION, DEFAULT_POLICY, createAdmission, type Admission, type Departure, type Target } from './admission.js';
 import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type AutomaticOrigin, type Origin } from './admission-protocol.js';
+import { createMemoryLedger, type Candidate, type MemoryLedger, type RecallOutcome, type RecallPlan } from './memory-ledger.js';
+import { MEMORY_MIGRATION, MEMORY_PURGE_ORDER } from './memory-schema.js';
 
 export type Claim = {
   lane: Lane;
@@ -108,6 +110,8 @@ export type Store = {
   readonly tools: ToolLedger;
   /** The shared ceilings and one-use permits of every call, in this same database. */
   readonly admission: Admission;
+  /** The Honcho project of each character: consent, sources, mapping and one row per request, in this same database. */
+  readonly memory: MemoryLedger;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
   /**
    * Creates the work an automatic origin asks for. The same occurrence with the same content returns the first work;
@@ -117,7 +121,14 @@ export type Store = {
   view(): StoreView;
   diagnostics(): StoreDiagnostics;
   claimNextJob(): Claim | null;
+  /**
+   * What the next chat call needs from Honcho before it is claimed. A search is reserved here and sent by the caller,
+   * outside any transaction.
+   */
+  planRecall(): RecallPlan;
   claimNext(lane: Lane): Claim | null;
+  /** `replan`: the call that would be claimed is not the one this recall was planned for. Nothing was claimed. */
+  claimNext(lane: Lane, recall: RecallOutcome): Claim | 'replan' | null;
   /** Keeps the latest received text of this claim's turn, decoded without repair. Ignored unless thread and turn are the claim's. */
   recordProgress(claim: Claim, text: AgentText): void;
   /** False once the person cancelled the call or the server recovered it. */
@@ -620,6 +631,7 @@ CREATE TRIGGER works_admitted BEFORE INSERT ON works
   { sql: ADMISSION_MIGRATION },
   { rebuild: true, sql: SOURCE_MIGRATION + TOOL_SOURCE_MIGRATION },
   { sql: CONNECTION_MIGRATION },
+  { sql: MEMORY_MIGRATION },
 ];
 const SQLITE_COMPANIONS = ['', '-wal', '-shm', '-journal'] as const;
 export const managedBackupPaths = (path: string): string[] =>
@@ -627,6 +639,7 @@ export const managedBackupPaths = (path: string): string[] =>
 
 /** The rows erased with a bot, in an order that never leaves a dangling reference between statements. */
 const PURGE_ORDER = [
+  ...MEMORY_PURGE_ORDER,
   ...TOOL_PURGE_ORDER,
   ['tool_connections', 'id'],
   ['message_sources', 'message_id'],
@@ -695,6 +708,8 @@ export type StoreOptions = {
   serviceTools?: boolean;
   /** The ceilings of this server. Without it, only the calls Mino already made keep a daily ceiling. */
   policy?: AdmissionPolicy;
+  /** Set when the server has a Honcho configuration. Without it no character can get a Honcho project. */
+  memory?: { workspacePrefix: string };
 };
 
 export function openStore(options: StoreOptions): Store {
@@ -826,21 +841,19 @@ export function openStore(options: StoreOptions): Store {
   const sources = createSources({ get, all, run, now });
   const connections = createConnections({ get, all, run, now, newId });
 
-  const tools = createToolLedger(
-    { get, all, run, transaction, now, newId, changed, sign },
-    {
-      find(requestId) {
-        const prior = get('SELECT type, fingerprint, result FROM commands WHERE request_id = ?', requestId);
-        return prior ? { type: str(prior, 'type'), fingerprint: str(prior, 'fingerprint'), result: str(prior, 'result') } : null;
-      },
-      save(requestId, type, print, result) {
-        run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
-      },
+  const kit = { get, all, run, transaction, now, newId, changed, sign };
+  const receipts = {
+    find(requestId: string) {
+      const prior = get('SELECT type, fingerprint, result FROM commands WHERE request_id = ?', requestId);
+      return prior ? { type: str(prior, 'type'), fingerprint: str(prior, 'fingerprint'), result: str(prior, 'result') } : null;
     },
-    admission,
-    sources,
-    connections,
-  );
+    save(requestId: string, type: string, print: string, result: string) {
+      run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
+    },
+  };
+  const tools = createToolLedger(kit, receipts, admission, sources, connections, { holds: attemptId => memory.holds(attemptId) });
+  const memory = createMemoryLedger(kit, receipts, admission, options.memory ?? null, tools.memoryMoved);
+  const HONCHO_OWNS_MEMORY = 'Ce personnage utilise la mémoire Honcho. Ses déclarations se gèrent sur l’ordinateur, dans sa page. Rien n’a été enregistré.';
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
     const bot = get('SELECT * FROM bots WHERE id = ? AND deleted_at IS NULL', botId);
@@ -1199,6 +1212,7 @@ export function openStore(options: StoreOptions): Store {
       }
       case 'memory.create': {
         requireBot(command.botId);
+        if (memory.scoped(command.botId)) throw new Refusal('invalid_transition', HONCHO_OWNS_MEMORY);
         const count = int(get('SELECT COUNT(*) AS n FROM memories WHERE bot_id = ?', command.botId) ?? {}, 'n');
         if (count >= LIMITS.memoriesPerBot) throw new Refusal('limit_reached', 'La mémoire de ce bot est pleine. Retirez un souvenir avant d’en ajouter.');
         requireMemoryRoom(command.botId, 0, command.text);
@@ -1207,12 +1221,13 @@ export function openStore(options: StoreOptions): Store {
         return { kind: 'memory', memoryId };
       }
       case 'memory.update': {
-        const memory = requireMemory(command.botId, command.memoryId);
-        const current = str(memory, 'updated_at');
+        const stored = requireMemory(command.botId, command.memoryId);
+        if (memory.scoped(command.botId)) throw new Refusal('invalid_transition', HONCHO_OWNS_MEMORY);
+        const current = str(stored, 'updated_at');
         if (command.baseUpdatedAt !== undefined && command.baseUpdatedAt !== current) {
           throw new Refusal('stale_base', 'Ce souvenir a changé entre-temps, par exemple dans un autre onglet. Rien n’a été écrasé.');
         }
-        requireMemoryRoom(command.botId, Array.from(str(memory, 'text')).length, command.text);
+        requireMemoryRoom(command.botId, Array.from(str(stored, 'text')).length, command.text);
         run('UPDATE memories SET text = ?, updated_at = ? WHERE id = ?', command.text, nextUpdatedAt(current, now()), command.memoryId);
         return { kind: 'memory', memoryId: command.memoryId };
       }
@@ -1277,6 +1292,7 @@ export function openStore(options: StoreOptions): Store {
     const at = now();
     run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at) VALUES (?, ?, 'user', ?, NULL, ?)`, messageId, request.botId, request.text, at);
     run('INSERT INTO origins(message_id, bot_id, kind, occurrence, fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?)', messageId, request.botId, origin.kind, occurrence, print, at);
+    if (origin.kind === 'human') memory.observe({ id: messageId, threadBotId: request.botId });
     for (const file of request.attachments) {
       run('INSERT INTO attachments(message_id, name, text) VALUES (?, ?, ?)', messageId, file.name, file.text);
     }
@@ -1329,7 +1345,7 @@ export function openStore(options: StoreOptions): Store {
         (SELECT COUNT(*) FROM tasks WHERE request_message_id IN (SELECT id FROM req)) AS tasks`, botId) ?? {};
     return {
       messages: int(row, 'messages'), files: int(row, 'files'), deliverables: int(row, 'deliverables'),
-      publications: int(row, 'publications'), memories: int(row, 'memories'), waiting: int(row, 'waiting'),
+      publications: int(row, 'publications'), memories: int(row, 'memories') + memory.declarationCount(botId), waiting: int(row, 'waiting'),
       keptReplies: int(row, 'keptReplies'), keptDeliverables: int(row, 'keptDeliverables'), keptMentions: int(row, 'keptMentions'),
       tasks: int(row, 'tasks'),
     };
@@ -1365,6 +1381,9 @@ export function openStore(options: StoreOptions): Store {
     if (tools.blocksPurge(botId, targetsOf('works'))) {
       throw new Refusal('busy', 'Une action de service approuvée pour ce bot, ou dans sa conversation, est en cours d’envoi. Attendez son reçu. Rien n’a été supprimé.');
     }
+    if (memory.blocksPurge(botId)) {
+      throw new Refusal('busy', 'Ce personnage a une mémoire Honcho ouverte ou en cours de préparation. Demandez d’abord son oubli dans sa page et attendez la fin des demandes de retrait. Rien n’a été supprimé.');
+    }
     if (stableStringify(deletionCounts(botId)) !== stableStringify(command.expected)) {
       throw new Refusal('stale_base', 'Le contenu de ce bot a changé depuis l’ouverture de la confirmation. Vérifiez les nouveaux chiffres. Rien n’a été supprimé.');
     }
@@ -1385,6 +1404,7 @@ export function openStore(options: StoreOptions): Store {
     target('message_sources', `SELECT 'message_sources', message_id FROM message_sources WHERE message_id IN (${targetsOf('messages')})`);
     target('tool_connections', `SELECT 'tool_connections', id FROM tool_connections WHERE bot_id = ? OR work_id IN (${targetsOf('works')})`, botId);
     tools.markPurge(botId, targetsOf('works'));
+    memory.markPurge(botId, targetsOf('attempts'));
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
     run(`UPDATE commands SET fingerprint = '',
@@ -1572,21 +1592,33 @@ export function openStore(options: StoreOptions): Store {
   };
   const originKind = (messageId: string): Row => get('SELECT kind AS origin_kind FROM origins WHERE message_id = ?', messageId) ?? {};
 
-  function threadExchanges(threadBotId: string, beforeSeq: number): Exchange[] {
+  type Traced = { exchange: Exchange; requestMessageId: string; attemptIds: string[] };
+
+  function threadExchanges(threadBotId: string, beforeSeq: number): Traced[] {
     return all(`SELECT request.*, o.kind AS origin_kind FROM messages request JOIN origins o ON o.message_id = request.id
       WHERE request.role='user' AND request.bot_id=? AND request.seq < ?
       AND EXISTS(SELECT 1 FROM works w WHERE w.request_message_id=request.id AND w.state IN ('review','done')) ORDER BY request.seq`,
-    threadBotId, beforeSeq).map(request => {
-      const responses = all(`SELECT w.id AS work_id, reply.text, b.name FROM works w
+    threadBotId, beforeSeq).flatMap(request => {
+      const requestMessageId = str(request, 'id');
+      if (!memory.requestAllowed(requestMessageId)) return [];
+      const recorded = all(`SELECT w.id AS work_id, a.id AS attempt_id, reply.text, b.name FROM works w
         JOIN bots b ON b.id=w.bot_id JOIN attempts a ON a.work_id=w.id AND a.state='succeeded'
         JOIN messages reply ON reply.attempt_id=a.id
-        WHERE w.request_message_id=? AND w.state IN ('review','done') ORDER BY w.rowid, a.n`, str(request, 'id'));
+        WHERE w.request_message_id=? AND w.state IN ('review','done') ORDER BY w.rowid, a.n`, requestMessageId);
+      const responses = recorded.filter(row => !memory.workRetired(str(row, 'work_id')));
+      if (recorded.length && !responses.length) return [];
       const lastVersion = responses.map(row => currentVersion(str(row, 'work_id'))).findLast(v => v !== undefined);
-      return { request: { text: str(request, 'text'), ...triggerOf(request), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
-        replies: responses.map(row => ({ by: str(row, 'name'), text: str(row, 'text') })),
-        deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n') } : null };
+      return [{
+        requestMessageId,
+        attemptIds: responses.map(row => str(row, 'attempt_id')),
+        exchange: { request: { text: str(request, 'text'), ...triggerOf(request), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', requestMessageId).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
+          replies: responses.map(row => ({ by: str(row, 'name'), text: str(row, 'text') })),
+          deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n') } : null },
+      }];
     });
   }
+  const succeededAttempts = (workId: string): string[] =>
+    all(`SELECT id FROM attempts WHERE work_id = ? AND state = 'succeeded'`, workId).map(row => str(row, 'id'));
 
   const botSource = (bot: Row): ContextSource['bot'] => ({
     name: str(bot, 'name'),
@@ -1606,7 +1638,14 @@ export function openStore(options: StoreOptions): Store {
     info_waiting: 'une précision attend une nouvelle passe',
   };
 
-  type Prepared = { workId: string; botId: string; bot: Row; memories: { id: string; text: string }[]; source: ContextSource };
+  type Prepared = {
+    workId: string; botId: string; bot: Row; memories: { id: string; text: string }[]; source: Omit<ContextSource, 'exchanges'>;
+    threadBotId: string; requestMessageId: string; exchanges: Traced[];
+    /** Recalled source rows of this turn, and how the recall ended. */
+    recalled?: { sourceIds: string[]; category: string | null };
+    /** Attempts whose recorded output this text contains outside the past exchanges: a handoff, a prior reply, a document. */
+    builtOn?: string[];
+  };
 
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
@@ -1615,6 +1654,7 @@ export function openStore(options: StoreOptions): Store {
       ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
+      exchanges: prepared.exchanges.map(traced => traced.exchange),
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
       ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
       ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? { connections: true as const } : {}),
@@ -1633,11 +1673,21 @@ export function openStore(options: StoreOptions): Store {
       lane, frozen?.step ?? null, frozen?.taskRevision ?? null, frozen?.baseVersionId ?? null, frozen?.eventsThrough ?? null,
       frozen?.handoffId ?? null, frozen?.continued ? 1 : 0, purpose.kind === 'receipt' ? purpose.executionId : null,
     );
+    const lastDeliverable = prepared.exchanges.findLastIndex(traced => traced.exchange.deliverable !== null);
+    const sent = prepared.exchanges.filter((_, index) => index >= composed.plan.exchanges.omitted || index === lastDeliverable);
+    memory.freeze(attemptId, {
+      threadBotId: prepared.threadBotId,
+      recalled: prepared.recalled?.sourceIds ?? [],
+      recall: { state: source.recall?.state ?? 'none', category: prepared.recalled?.category ?? null, omitted: source.recall?.omitted ?? 0 },
+      requestMessageId: prepared.requestMessageId,
+      historyMessageIds: sent.map(traced => traced.requestMessageId),
+      replyAttemptIds: [...sent.flatMap(traced => traced.attemptIds), ...(prepared.builtOn ?? [])],
+    });
     return { lane, workId: prepared.workId, attemptId, n, botId: prepared.botId, choice, turn: composed.turn, toolGrants, purpose };
   }
 
-  const memoriesOf = (botId: string) =>
-    all('SELECT id, text FROM memories WHERE bot_id = ? ORDER BY seq', botId).map(row => ({ id: str(row, 'id'), text: str(row, 'text') }));
+  const memoriesOf = (botId: string) => memory.scoped(botId) ? []
+    : all('SELECT id, text FROM memories WHERE bot_id = ? ORDER BY seq', botId).map(row => ({ id: str(row, 'id'), text: str(row, 'text') }));
   const requestAttachments = (messageId: string) =>
     all('SELECT name, text FROM attachments WHERE message_id = ? ORDER BY seq', messageId).map(row => ({ name: str(row, 'name'), text: str(row, 'text') }));
 
@@ -1647,10 +1697,11 @@ export function openStore(options: StoreOptions): Store {
     const memories = memoriesOf(report.botId);
     const claim = startAttempt('chat', {
       workId: report.workId, botId: report.botId, bot, memories,
+      threadBotId: report.threadBotId, requestMessageId: report.requestMessageId,
+      exchanges: threadExchanges(report.threadBotId, report.requestSeq), builtOn: succeededAttempts(report.workId),
       source: {
         bot: botSource(bot),
         memories,
-        exchanges: threadExchanges(report.threadBotId, report.requestSeq),
         request: { text: report.requestText, ...triggerOf(originKind(report.requestMessageId)), attachments: requestAttachments(report.requestMessageId) },
         receipt: report.receipt,
       },
@@ -1659,21 +1710,39 @@ export function openStore(options: StoreOptions): Store {
     return claim;
   }
 
-  function claimChat(): Claim | null {
+  const peekChat = (): Row | undefined => get(
+    `SELECT w.id AS work_id, w.bot_id, m.bot_id AS thread_bot_id, m.seq, m.id AS message_id, m.text, o.kind AS origin_kind
+     FROM works w JOIN messages m ON m.id = w.request_message_id JOIN origins o ON o.message_id = m.id
+       JOIN bots actor ON actor.id = w.bot_id AND actor.deleted_at IS NULL
+     WHERE w.state = 'pending' AND w.task_id IS NULL ORDER BY m.seq, w.rowid LIMIT 1`,
+  );
+  const candidateOf = (next: Row): Candidate => ({
+    workId: str(next, 'work_id'), botId: str(next, 'bot_id'), threadBotId: str(next, 'thread_bot_id'), requestMessageId: str(next, 'message_id'),
+  });
+
+  function planRecall(): RecallPlan {
+    const plan = transaction((): RecallPlan => {
+      if (get(`SELECT id FROM attempts WHERE state = 'running' AND lane = 'chat'`) || tools.nextReport()) return { kind: 'none' };
+      const next = peekChat();
+      return next ? memory.plan(candidateOf(next)) : { kind: 'none' };
+    });
+    if (plan.kind === 'unavailable') changed();
+    return plan;
+  }
+
+  function claimChat(recall: RecallOutcome | undefined): Claim | 'replan' | null {
     const report = tools.nextReport();
     if (report) return claimReport(report);
-    const next = get(
-      `SELECT w.id AS work_id, w.bot_id, m.bot_id AS thread_bot_id, m.seq, m.id AS message_id, m.text, o.kind AS origin_kind
-       FROM works w JOIN messages m ON m.id = w.request_message_id JOIN origins o ON o.message_id = m.id
-         JOIN bots actor ON actor.id = w.bot_id AND actor.deleted_at IS NULL
-       WHERE w.state = 'pending' AND w.task_id IS NULL ORDER BY m.seq, w.rowid LIMIT 1`,
-    );
+    const next = peekChat();
     if (!next) return null;
     const workId = str(next, 'work_id');
     const botId = str(next, 'bot_id');
+    const recalled = memory.recall(candidateOf(next), recall);
+    if (recalled === 'replan') return 'replan';
     const bot = requireBot(botId);
     const memories = memoriesOf(botId);
     const ongoing = all(`SELECT t.* FROM tasks t JOIN messages m ON m.id = t.request_message_id WHERE m.bot_id = ? AND t.cancelled_at IS NULL ORDER BY m.seq`, str(next, 'thread_bot_id'))
+      .filter(task => memory.requestAllowed(str(task, 'request_message_id')))
       .flatMap(task => {
         const state = ONGOING_LABELS[taskStatus(taskFacts(task))];
         return state ? [{ title: str(authorWork(task), 'title'), state }] : [];
@@ -1681,10 +1750,14 @@ export function openStore(options: StoreOptions): Store {
     const source = sources.of(str(next, 'message_id'));
     const claim = startAttempt('chat', {
       workId, botId, bot, memories,
+      threadBotId: str(next, 'thread_bot_id'), requestMessageId: str(next, 'message_id'),
+      exchanges: threadExchanges(str(next, 'thread_bot_id'), int(next, 'seq')),
+      ...(recalled ? { recalled: { sourceIds: recalled.recalled, category: recalled.category } } : {}),
+      ...(source ? { builtOn: succeededAttempts(source.workId) } : {}),
       source: {
         bot: botSource(bot),
         memories,
-        exchanges: threadExchanges(str(next, 'thread_bot_id'), int(next, 'seq')),
+        ...(recalled ? { recall: recalled.part } : {}),
         request: { text: str(next, 'text'), ...triggerOf(next), attachments: requestAttachments(str(next, 'message_id')) },
         ...(source ? { chosen: { title: source.title, n: source.versionN, headN: source.headN, body: sources.body(source), holds: sources.holds(source) } } : {}),
         ...(ongoing.length ? { ongoing } : {}),
@@ -1732,10 +1805,12 @@ export function openStore(options: StoreOptions): Store {
       setWorkState(requireWork(str(work, 'id')), 'running');
       return startAttempt('doc', {
         workId: str(work, 'id'), botId, bot, memories,
+        threadBotId: str(task, 'thread_bot_id'), requestMessageId: str(task, 'request_message_id'),
+        exchanges: threadExchanges(str(task, 'thread_bot_id'), int(task, 'seq')),
+        builtOn: [...(base ? succeededAttempts(str(author, 'id')) : []), ...(handoff ? [str(handoff, 'from_attempt_id')] : [])],
         source: {
           bot: botSource(bot),
           memories,
-          exchanges: threadExchanges(str(task, 'thread_bot_id'), int(task, 'seq')),
           request: { text: str(task, 'text'), attachments: requestAttachments(str(task, 'request_message_id')) },
           task: taskSource,
         },
@@ -1756,13 +1831,21 @@ export function openStore(options: StoreOptions): Store {
    * A claim leaves this function with its ceilings reserved. A refused one is recorded as a call that never left,
    * with the reason, and the search goes on.
    */
-  function claimNext(lane: Lane): Claim | null {
+  function claimNext(lane: Lane): Claim | null;
+  function claimNext(lane: Lane, recall: RecallOutcome): Claim | 'replan' | null;
+  function claimNext(lane: Lane, recall?: RecallOutcome): Claim | 'replan' | null {
     let refused = false;
-    const claim = transaction((): Claim | null => {
+    const claim = transaction((): Claim | 'replan' | null => {
       if (get(`SELECT id FROM attempts WHERE state = 'running' AND lane = ?`, lane)) return null;
       for (;;) {
-        const candidate = lane === 'chat' ? claimChat() : claimDoc();
-        if (!candidate) return null;
+        const candidate = lane === 'chat' ? claimChat(recall) : claimDoc();
+        if (!candidate || candidate === 'replan') return candidate;
+        if (!memory.holds(candidate.attemptId).ok) {
+          refused = true;
+          finishAttempt(candidate, engineFailure('memory_changed'));
+          tools.syncDrafts();
+          continue;
+        }
         const facts = get(`SELECT a.task_revision, w.request_message_id, o.kind AS origin_kind FROM attempts a JOIN works w ON w.id = a.work_id
           JOIN origins o ON o.message_id = w.request_message_id WHERE a.id = ?`, candidate.attemptId) ?? {};
         const reserved = admission.reserve({
@@ -1782,6 +1865,7 @@ export function openStore(options: StoreOptions): Store {
 
   function depart(claim: Claim): Departure {
     return transaction((): Departure => {
+      if (!memory.holds(claim.attemptId).ok) return { ok: false, reason: ENGINE_ERRORS.memory_changed };
       const row = get(`SELECT a.state, w.state AS work_state, t.revision FROM attempts a JOIN works w ON w.id = a.work_id
         LEFT JOIN tasks t ON t.id = w.task_id WHERE a.id = ?`, claim.attemptId);
       if (!row || str(row, 'state') !== 'running' || str(row, 'work_state') !== 'running') {
@@ -1792,7 +1876,7 @@ export function openStore(options: StoreOptions): Store {
   }
 
   function recordProgress(claim: Claim, text: AgentText): void {
-    if (claim.lane !== 'doc') return;
+    if (claim.lane !== 'doc' || !memory.holds(claim.attemptId).ok) return;
     if (!get('SELECT 1 AS x FROM attempts WHERE id = ? AND thread_id = ? AND turn_id = ?', claim.attemptId, text.threadId, text.turnId)) return;
     const decoded = decodeReplyProgress(text.text);
     const prior = get('SELECT * FROM attempt_progress WHERE attempt_id = ? AND item_id = ?', claim.attemptId, text.itemId);
@@ -1844,7 +1928,7 @@ export function openStore(options: StoreOptions): Store {
     return result;
   }
 
-  function finishAttempt(claim: Claim, outcome: EngineOutcome): FinishResult {
+  function finishAttempt(claim: Claim, given: EngineOutcome): FinishResult {
     const attempt = get('SELECT * FROM attempts WHERE id = ?', claim.attemptId);
     const work = get('SELECT * FROM works WHERE id = ?', claim.workId);
     const latest = get('SELECT id FROM attempts WHERE work_id = ? ORDER BY n DESC LIMIT 1', claim.workId);
@@ -1853,6 +1937,9 @@ export function openStore(options: StoreOptions): Store {
       || str(attempt, 'state') !== 'running' || workState(work) !== 'running' || str(latest, 'id') !== claim.attemptId) {
       return { kind: 'stale' };
     }
+    const held = memory.holds(claim.attemptId).ok;
+    const outcome = held ? given : engineFailure('memory_changed');
+    if (!held) run(`UPDATE attempt_progress SET reply = '', title = NULL, body = NULL, readable = 0 WHERE attempt_id = ?`, claim.attemptId);
     if (work.task_id !== null) return finishTaskStep(claim, outcome, attempt, work);
     /** Set for a turn that reports a receipt: it records a message and nothing else, and the work returns to its earlier state. */
     const reportOf = strOrNull(attempt, 'tool_execution_id');
@@ -1963,7 +2050,7 @@ export function openStore(options: StoreOptions): Store {
 
   function recoverInterrupted(): number {
     const recovered = transaction(() => {
-      const unknownSends = tools.recover();
+      const unknownSends = tools.recover() + memory.recover();
       admission.recover();
       const interrupted = run(
         `UPDATE attempts SET state = 'interrupted', stage = NULL, error_code = 'interrupted', error_text = ?, finished_at = ? WHERE state = 'running'`,
@@ -2043,6 +2130,7 @@ export function openStore(options: StoreOptions): Store {
       contextSize: oneOf(row, 'context_size', CONTEXT_SIZES),
       memories: memoriesByBot.get(str(row, 'id')) ?? [],
       memoryChars: memoryChars(str(row, 'id')),
+      memoryScope: memory.scopeView(str(row, 'id')),
       deletion: deletionCounts(str(row, 'id')),
     }));
     const attachmentsByMessage = new Map<string, MessageView['attachments']>();
@@ -2240,11 +2328,13 @@ export function openStore(options: StoreOptions): Store {
     get rev() { return rev; },
     tools,
     admission,
+    memory,
     dispatch,
     admit,
     view,
     diagnostics,
     claimNextJob: () => claimNext('chat'),
+    planRecall,
     claimNext,
     recordProgress,
     attemptRunning: attemptId => get(`SELECT 1 AS x FROM attempts WHERE id = ? AND state = 'running'`, attemptId) !== undefined,

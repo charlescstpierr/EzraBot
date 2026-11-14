@@ -26,6 +26,8 @@ Un coût est `known`, `estimated` ou `unavailable`. Un coût indisponible n'est 
 
 Une capacité absente de cette table n'admet aucun appel. Lui donner un budget ne suffit pas : le code du serveur doit aussi la déclarer.
 
+Quand le serveur a une configuration Honcho, il déclare aussi `honcho.provision`, `honcho.ingest`, `honcho.read`, `honcho.search` et `honcho.withdraw` sur le budget `honcho`. Ce budget n'a aucun plafond par défaut : tant que `MINO_BUDGETS` ne le nomme pas, aucune requête Honcho ne part. Voir [honcho-memory.md](honcho-memory.md).
+
 ## Régler un plafond
 
 Donnez `MINO_BUDGETS` au serveur. La valeur est un objet JSON. Chaque clé est un budget.

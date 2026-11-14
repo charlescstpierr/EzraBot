@@ -36,6 +36,12 @@ Un personnage peut proposer une action sur un service relié. Vous confirmez cha
 
 Les tests navigateur de cette fonction utilisent un second service temporaire sur 127.0.0.1:4398, avec un faux fournisseur et un faux moteur. Toutes ses données sont synthétiques.
 
+## Mémoire Honcho
+
+Un personnage peut utiliser Honcho comme seule mémoire longue. Vous créez et nommez son projet de mémoire sur le PC, après avoir lu ses limites. Vos demandes dans sa conversation et vos déclarations sont alors envoyées à Honcho, et chaque réponse montre les sources rappelées. Vous pouvez corriger, exclure, oublier, puis repartir d’un espace vide. Le serveur a besoin de `HONCHO_BASE_URL`, `HONCHO_API_KEY`, `HONCHO_WORKSPACE_PREFIX` et d’un budget `honcho` dans `MINO_BUDGETS`. Sans eux, cette fonction est absente et aucun appel ne part. Voir [docs/honcho-memory.md](docs/honcho-memory.md) pour la configuration, les garanties et ce qui n’est pas vérifié avec une instance réelle.
+
+Les tests navigateur de cette fonction utilisent un troisième service temporaire sur 127.0.0.1:4397, avec un faux Honcho et un faux moteur. Toutes ses données sont synthétiques.
+
 ## Plafonds d’appels
 
 Chaque appel Codex et chaque action Composio réserve sa place avant de partir. Par défaut, le serveur admet 1000 appels Codex et 200 actions Composio par jour UTC. Quand un plafond est atteint, l’appel ne part pas et le travail affiche la raison. Pour changer un plafond : `MINO_BUDGETS='{"codex":{"callsPerDay":300}}' npm start`. Voir [docs/admission.md](docs/admission.md) pour les origines des travaux, les états d’une réservation, la reprise après un arrêt et les limites connues.

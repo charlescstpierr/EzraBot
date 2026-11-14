@@ -10,6 +10,7 @@ import { resolveChoice } from './domain.js';
 import type { Engine } from './engine.js';
 import { CommandSchema, LIMITS, type AppView } from './protocol.js';
 import { MobileSnapshotSchema } from './mobile-protocol.js';
+import { MEMORY_COMMAND_TYPES } from './memory-protocol.js';
 import type { Store } from './store.js';
 import type { Worker } from './worker.js';
 import type { AgentRoutes } from './agent-http.js';
@@ -166,7 +167,11 @@ export function createDeviceHandler(options: Options) {
     }
     if (req.method === 'GET' && url.pathname === '/m/catalog') { const status = await options.engine.catalog(); options.devices.authenticate(token, space); send(res, 200, status); return; }
     if (req.method === 'POST' && url.pathname === '/m/commands') {
-      const parsed = CommandSchema.safeParse(await read(req));
+      const input = await read(req);
+      if (input !== null && typeof input === 'object' && 'type' in input && MEMORY_COMMAND_TYPES.some(type => type === input.type)) {
+        throw new DeviceError(403, 'command_refused', 'La mémoire Honcho d’un personnage se gère sur l’ordinateur.');
+      }
+      const parsed = CommandSchema.safeParse(input);
       if (!parsed.success) throw new DeviceError(422, 'invalid_command', 'Cette commande est invalide.');
       const command = parsed.data;
       if (command.type === 'storage.purge' || command.type === 'bot.select') throw new DeviceError(403, 'command_refused', 'Cette commande se fait sur l’ordinateur.');

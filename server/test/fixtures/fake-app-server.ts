@@ -1,4 +1,4 @@
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 // Test-only stand-in for `codex app-server`, driven by a scenario name.
@@ -14,7 +14,7 @@ args.forEach((arg, i) => {
 });
 
 const envProbe = process.env.MINO_TEST_ENV_PROBE;
-if (envProbe) writeFileSync(envProbe, JSON.stringify(Object.keys(process.env).filter(name => /composio/i.test(name))));
+if (envProbe) writeFileSync(envProbe, JSON.stringify(Object.keys(process.env).filter(name => /composio|honcho/i.test(name))));
 
 let turnLines: string[] | null = null;
 const send = (value: unknown) => {
@@ -259,6 +259,17 @@ function startTurn(params: Record<string, unknown>) {
         return streamed(threadId, turnId, STREAMED, 12, 25, () => complete(threadId, turnId, 'completed'));
       case 'stream-cut':
         return streamed(threadId, turnId, STREAMED.slice(0, 80) + '"}', 6, 10, () => complete(threadId, turnId, 'completed'));
+      case 'gated': {
+        const gate = process.env.MINO_TEST_GATE ?? '';
+        const timer = setInterval(() => {
+          if (activeTurn?.turnId !== turnId) return clearInterval(timer);
+          if (!existsSync(gate)) return;
+          clearInterval(timer);
+          agentMessage(threadId, turnId, REPLY);
+          complete(threadId, turnId, 'completed');
+        }, 10);
+        return;
+      }
       case 'hang':
       case 'slow':
         return;
