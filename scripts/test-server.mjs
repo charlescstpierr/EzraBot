@@ -1,7 +1,7 @@
 // Isolated browser QA: synthetic SQLite data, deliberately unavailable engine, no provider calls.
 // With MINO_QA_TOOLS=1 the chat lane runs the real engine against the fake App Server process,
 // and connected services use the fake provider: every account, action and result is synthetic.
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHttpServer } from "../server/dist/src/http.js";
@@ -29,8 +29,34 @@ if (honcho)
     /panne-synthétique/.test(request.body?.query ?? "")
       ? { status: 503, body: {} }
       : undefined;
+// Routine slots follow a clock a spec can move: a shift in milliseconds, read from this file at each reading.
+const clockFile = join(tmpdir(), `mino-qa-clock-${port}`);
+writeFileSync(clockFile, "0");
+const now = () => {
+  let shift = 0;
+  try {
+    shift = Number(readFileSync(clockFile, "utf8")) || 0;
+  } catch {}
+  return new Date(Date.now() + shift).toISOString();
+};
+const startedAt = now();
 const store = openStore({
   path: join(data, "mino.sqlite"),
+  now,
+  missions: () =>
+    missions
+      .view()
+      .missions.flatMap((m) =>
+        m.originMessageId === null
+          ? []
+          : [
+              {
+                missionId: m.id,
+                originMessageId: m.originMessageId,
+                status: m.status,
+              },
+            ],
+      ),
   mascots: loadMascots(join(root, "assets/mascots.json")),
   serviceTools: withTools,
   ...(honcho
@@ -119,10 +145,14 @@ const server = createHttpServer({
   agents,
   actions: desk,
 });
+const routineClock = setInterval(() => {
+  if (store.tickRoutines(startedAt) > 0) worker.kick();
+}, 1000);
 server.listen(port, "127.0.0.1", () =>
   console.log(`QA http://127.0.0.1:${port} — isolated, no AI calls`),
 );
 async function stop() {
+  clearInterval(routineClock);
   server.closeAllConnections();
   server.close();
   await Promise.all([worker.close(), desk.close(), memoryDesk?.close()]);

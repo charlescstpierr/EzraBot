@@ -25,7 +25,7 @@ La fusion et la fermeture automatiques de PR sont incompatibles avec les règles
 
 Un nouveau mode d’enquête en lecture seule modifierait les protocoles, les décisions du moteur et les clients natifs. Le mode direct ou coordonné actuel reste en place. Les responsables et revues gardent leurs restrictions existantes.
 
-Le triage externe, les connecteurs, la recherche web, l’OCR, la voix, les notifications et les routines restent hors du périmètre documenté. Ils demandent leurs propres accès, validations et reçus. Aucun fournisseur payant ni service externe n’est ajouté.
+Le triage externe, les connecteurs, la recherche web, l’OCR, la voix et les notifications restent hors du périmètre documenté. Les routines sont décrites dans [routines.md](routines.md). Ils demandent leurs propres accès, validations et reçus. Aucun fournisseur payant ni service externe n’est ajouté.
 
 ## Limites de vérification
 

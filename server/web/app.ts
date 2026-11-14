@@ -2284,7 +2284,8 @@ function showAbout(): void {
 <li>Un document se rédige en arrière-plan sur une seconde connexion Codex : le fil reste libre. Avec une relecture choisie, le premier bot transmet son document enregistré au second, puis reçoit son avis : trois appels au plus, et deux reprises explicites au maximum.</li>
 <li>Seuls le document et les messages enregistrés passent d’un bot à l’autre. Les mémoires et les autres fils restent séparés. Deux bots qui relisent la même source ne vérifient pas les faits de façon indépendante.</li>
 <li>Les outils sont désactivés : aucune lecture de fichier, recherche web ou action externe par le bot.</li>
-<li>Pièces jointes : fichiers texte seulement. Images, PDF, audio, recherche web, routines, notifications, envois et connecteurs ne sont pas disponibles.</li>
+<li>Pièces jointes : fichiers texte seulement. Images, PDF, audio, recherche web, notifications, envois et connecteurs ne sont pas disponibles.</li>
+<li>Les routines se programment dans l’interface principale, page Routines. Elles demandent un PC allumé.</li>
 <li>Le Carnet est local : publier n’envoie rien à personne.</li>
 </ul>`);
 }

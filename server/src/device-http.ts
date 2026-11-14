@@ -176,6 +176,12 @@ export function createDeviceHandler(options: Options) {
       const command = parsed.data;
       if (command.type === 'storage.purge' || command.type === 'bot.select') throw new DeviceError(403, 'command_refused', 'Cette commande se fait sur l’ordinateur.');
       if (command.type === 'message.send' && command.source) throw new DeviceError(403, 'command_refused', 'Une action depuis une version de document se prépare sur l’ordinateur.');
+      if (command.type === 'routine.create' || command.type === 'routine.update' || command.type === 'routine.activate' || command.type === 'routine.delete') {
+        throw new DeviceError(403, 'command_refused', 'Une routine se crée, se modifie, s’active et se supprime sur l’ordinateur. Le téléphone peut la mettre en pause ou la reprendre.');
+      }
+      if (command.type === 'routine.resume' && command.confirmBlocker !== undefined) {
+        throw new DeviceError(403, 'command_refused', 'Un effet incertain se vérifie sur l’ordinateur avant de reprendre cette routine.');
+      }
       if (command.type === 'bot.configure') {
         const catalog = await options.engine.catalog();
         if (catalog.state !== 'ready') throw new DeviceError(409, 'choice_unavailable', 'Le catalogue est indisponible.');

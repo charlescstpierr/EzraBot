@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { WorkNextSchema, WorkFactSchema, CommandResultSchema, CommandSchema, DeletionCountsSchema, MentionSpanSchema, TASK_STATUSES, WORK_STATES } from './protocol.js';
+import { WorkNextSchema, WorkFactSchema, CommandResultSchema, CommandSchema, DeletionCountsSchema, MentionSpanSchema, ROUTINE_STATES, TASK_STATUSES, WORK_STATES } from './protocol.js';
 
 const id = z.string();
 const choice = z.object({ model: id.nullable(), effort: id.nullable(), speed: id });
@@ -32,6 +32,11 @@ export const MobileSnapshotSchema = z.object({
     progress: z.object({ botId: id, step: id, reply: id, title: id.nullable(), body: id.nullable(), complete: z.boolean(), readable: z.boolean(), updatedAt: id }).nullable(),
     createdAt: id, updatedAt: id })),
   carnet: z.array(z.object({ id, threadBotId: id, workId: id, botId: id, versionId: id, versionN: z.number(), title: id, body: id, payloadSha256: id, createdAt: id })),
+  /** Read, pause and plain resume only: creating, editing, activating, deleting and confirming an uncertain effect stay on the PC. */
+  routines: z.array(z.object({ id, botId: id, revision: z.number(), text: id, time: id, weekdays: z.array(z.number()), zone: id, endsOn: id, cap: z.number(), admitted: z.number(),
+    state: z.enum(ROUTINE_STATES), endedBecause: id.nullable(), heldOn: z.object({ label: id }).nullable(),
+    upcoming: z.array(z.discriminatedUnion('kind', [z.object({ kind: z.literal('due'), date: id, at: id, offsetMinutes: z.number(), repeated: z.boolean() }), z.object({ kind: z.literal('missing'), date: id })])),
+    last: z.object({ date: id, outcome: z.enum(['admitted', 'skipped', 'refused']), reason: id.optional(), message: id.optional() }).nullable() })).optional(),
   engine: z.discriminatedUnion('state', [z.object({ state: z.literal('starting') }), z.object({ state: z.literal('unavailable'), message: id }),
     z.object({ state: z.literal('ready'), account: z.literal('chatgpt'), models: z.array(z.object({ id, displayName: id, isDefault: z.boolean(), efforts: z.array(id), defaultEffort: id, speeds: z.array(z.object({ id, name: id, description: id })) })) })]),
 });
@@ -39,6 +44,11 @@ export type MobileSnapshot = z.infer<typeof MobileSnapshotSchema>;
 export type MobileBot = MobileSnapshot['bots'][number];
 export type MobileWork = MobileSnapshot['works'][number];
 export type MobileTask = MobileSnapshot['tasks'][number];
+export type MobileRoutine = NonNullable<MobileSnapshot['routines']>[number];
+/** The routine buttons a phone may show: exactly the commands `/m/commands` accepts for this state. */
+export function phoneRoutineActions(routine: Pick<MobileRoutine, 'state'>): ('pause' | 'resume')[] {
+  return routine.state === 'active' || routine.state === 'held' ? ['pause'] : routine.state === 'paused' ? ['resume'] : [];
+}
 
 export const MobileReplySchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), replayed: z.boolean(), result: CommandResultSchema, view: MobileSnapshotSchema }),

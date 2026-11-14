@@ -14,7 +14,7 @@ import { createDeviceServer } from '../src/device-http.js';
 import { createHttpServer } from '../src/http.js';
 import { loadMascots } from '../src/domain.js';
 import type { Engine } from '../src/engine.js';
-import { MobileSnapshotSchema, MobileReplySchema, PairStatusSchema } from '../src/mobile-protocol.js';
+import { MobileSnapshotSchema, MobileReplySchema, PairStatusSchema, phoneRoutineActions } from '../src/mobile-protocol.js';
 import { openStore } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
 
@@ -215,5 +215,42 @@ test('a paired device sees the Honcho state of a character and gets a clear refu
     assert.deepEqual(f.store.memory.view().scopes.map(scope => [scope.botId, scope.state, scope.declarations.length]), [['nova', 'preparing', 0]]);
     const other = MobileReplySchema.parse((await f.call('/m/commands', { type: 'memory.create', requestId: 'mobile-memory-2', botId: 'atlas', text: 'Souvenir local d’un personnage sans projet' }, f.auth)).body);
     assert.equal(other.ok, true, 'a character without a Honcho project keeps its local memories');
+  } finally { await f.close(); }
+});
+
+test('a paired phone reads routines and can only pause or plainly resume them; every other routine command stays on the PC, and revocation stops it', async () => {
+  const f = await fixture();
+  try {
+    await f.pair();
+    const created = f.store.dispatch({ type: 'routine.create', requestId: 'pc-routine-1', botId: 'nova', text: 'Point du matin', time: '08:30', weekdays: [1, 2, 3, 4, 5], zone: 'America/Toronto', endsOn: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10), cap: 10 });
+    assert(created.ok && created.result.kind === 'routine');
+    const routineId = created.result.routineId;
+    const seen = () => f.store.view().routines.find(r => r.id === routineId);
+    const viewed = MobileSnapshotSchema.parse((await f.call('/m/view', undefined, f.auth)).body).routines?.find(r => r.id === routineId);
+    assert.deepEqual(viewed && [viewed.text, viewed.state, viewed.upcoming.length > 0], ['Point du matin', 'inactive', true]);
+    assert.deepEqual(phoneRoutineActions({ state: 'inactive' }), [], 'an inactive routine shows no phone button');
+    const fields = { text: 'Autre', time: '09:00', weekdays: [1], zone: 'UTC', endsOn: viewed?.endsOn ?? '', cap: 3 };
+    for (const command of [
+      { type: 'routine.create', requestId: 'phone-routine-create', botId: 'nova', ...fields },
+      { type: 'routine.update', requestId: 'phone-routine-update', routineId, expectedRevision: 1, ...fields },
+      { type: 'routine.activate', requestId: 'phone-routine-activate', routineId, expectedRevision: 1 },
+      { type: 'routine.delete', requestId: 'phone-routine-delete', routineId },
+      { type: 'routine.resume', requestId: 'phone-routine-confirm', routineId, confirmBlocker: 'call:res_1' },
+    ]) {
+      const refused = await f.call('/m/commands', command, f.auth);
+      assert.deepEqual([refused.status, (refused.body as { code?: string }).code], [403, 'command_refused'], command.type);
+    }
+    assert.equal(seen()?.revision, 1, 'nothing changed from the phone');
+    const activated = f.store.dispatch({ type: 'routine.activate', requestId: 'pc-routine-activate', routineId, expectedRevision: 1 });
+    assert.equal(activated.ok, true);
+    assert.deepEqual(phoneRoutineActions({ state: 'active' }), ['pause']);
+    const paused = MobileReplySchema.parse((await f.call('/m/commands', { type: 'routine.pause', requestId: 'phone-routine-pause', routineId }, f.auth)).body);
+    assert.equal(paused.ok && paused.view.routines?.find(r => r.id === routineId)?.state, 'paused');
+    assert.deepEqual(phoneRoutineActions({ state: 'paused' }), ['resume']);
+    const resumed = MobileReplySchema.parse((await f.call('/m/commands', { type: 'routine.resume', requestId: 'phone-routine-resume', routineId }, f.auth)).body);
+    assert.equal(resumed.ok && resumed.view.routines?.find(r => r.id === routineId)?.state, 'active');
+    f.devices.revoke(f.credential.deviceId);
+    assert.equal((await f.call('/m/commands', { type: 'routine.pause', requestId: 'phone-routine-pause-2', routineId }, f.auth)).status, 401);
+    assert.equal(seen()?.state, 'active', 'a revoked phone paused nothing');
   } finally { await f.close(); }
 });

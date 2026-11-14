@@ -51,6 +51,12 @@ type Props = {
     memory(message: MessageView): ReactNode;
   };
 };
+const TRIGGERS: Record<"routine" | "event" | "voice" | "checkin", string> = {
+  routine: "Routine",
+  event: "Événement",
+  voice: "Voix",
+  checkin: "Bilan",
+};
 const empty = (): PromptContent => ({ text: "", files: [], mentions: [] });
 const suggestions = [
   ["Mettre mes idées au clair", "Peux-tu m’aider à structurer mes idées ?"],
@@ -424,7 +430,9 @@ function Thread({ port, botId, focusMessageId, source, drafts, slots }: Props) {
                 )}
                 <strong>
                   {m.role === "user"
-                    ? "Vous"
+                    ? m.trigger
+                      ? TRIGGERS[m.trigger.kind]
+                      : "Vous"
                     : (author?.name ?? "Personnage supprimé")}
                 </strong>
                 <time dateTime={m.createdAt}>
@@ -435,6 +443,21 @@ function Thread({ port, botId, focusMessageId, source, drafts, slots }: Props) {
                 </time>
               </div>
               <Markdown text={m.text} />
+              {m.trigger?.kind === "routine" && (
+                <button
+                  className="ez-chat-trigger"
+                  onClick={() =>
+                    m.trigger?.kind === "routine" &&
+                    port.go({
+                      page: "routines",
+                      routineId: m.trigger.routineId,
+                    })
+                  }
+                >
+                  Demande programmée du {m.trigger.date}, que personne n’a
+                  tapée. Elle n’accorde aucun droit. Voir la routine
+                </button>
+              )}
               {!!m.attachments.length && (
                 <ul className="ez-chat-files">
                   {m.attachments.map((f, i) => (

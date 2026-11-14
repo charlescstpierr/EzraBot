@@ -21,8 +21,11 @@ import { createMemoryDesk } from './memory-desk.js';
 import { createComposioProvider, createComposioSdk } from './composio.js';
 import { createActionDesk } from './tool-desk.js';
 import { BudgetConfigError, policyFromEnv } from './admission.js';
+import { ROUTINE_LIMITS } from './protocol.js';
 
 const VERSION = '0.1.0';
+/** Routine slots at or before this instant were missed while Mino was off: they are never admitted. */
+const startedAt = new Date().toISOString();
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
 function log(entry: Record<string, unknown>): void {
@@ -61,7 +64,9 @@ const policy = (() => {
 
 function open(): Store {
   try {
-    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
+    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions),
+      missions: () => missions.view().missions.flatMap(m => m.originMessageId === null ? [] : [{ missionId: m.id, originMessageId: m.originMessageId, status: m.status }]),
+      serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
     throw error;
@@ -136,6 +141,15 @@ const server = createHttpServer({
   csrfToken: randomBytes(32).toString('hex'),
 });
 
+function tickRoutines(): void {
+  try {
+    if (store.tickRoutines(startedAt) > 0) worker.kick();
+  } catch {
+    fail('Les routines ont échoué. Mino est arrêté; redémarrez-le pour reprendre depuis les données enregistrées.');
+  }
+}
+let routineClock: NodeJS.Timeout | undefined;
+
 server.on('error', error => fail(`Le serveur n’a pas pu démarrer sur 127.0.0.1:${port} (${'code' in error ? String(error.code) : 'erreur'}).`));
 server.listen(port, '127.0.0.1', () => {
   log({ event: 'ready', url: `http://127.0.0.1:${port}`, dataDir });
@@ -144,12 +158,15 @@ server.listen(port, '127.0.0.1', () => {
   agentWorker.kick();
   desk.kick();
   memoryDesk?.kick();
+  tickRoutines();
+  routineClock = setInterval(tickRoutines, ROUTINE_LIMITS.tickSeconds * 1000);
 });
 
 let stopping = false;
 async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
+  clearInterval(routineClock);
   server.closeAllConnections();
   server.close();
   deviceServer?.closeAllConnections();

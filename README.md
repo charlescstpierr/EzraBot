@@ -30,6 +30,10 @@ La compilation produit `server/dist/` et inclut le bundle React et son CSS. `npm
 
 Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de nouvelles bases SQLite et un moteur volontairement indisponible. Aucun appel fournisseur n’est effectué. Les tests serveur emploient leurs moteurs contrôlés. Le workflow GitHub Actions compile et exécute les tests serveur sur chaque push et pull request. Les essais navigateur et les copies de protocoles mobiles sont aussi vérifiés dans GitHub Actions. Les captures et vidéos restent dans ses artefacts.
 
+## Routines
+
+Une routine envoie un texte fixe à un personnage, à une heure de votre fuseau, sur les jours choisis, jusqu’à une date de fin et un plafond. Elle reste inactive jusqu’à son activation et demande un PC allumé. Voir [docs/routines.md](docs/routines.md).
+
 ## Services connectés (Composio)
 
 Un personnage peut proposer une action sur un service relié. Vous confirmez chaque action exacte sur le PC, puis le serveur l’envoie une seule fois. Quand un service manque, le personnage peut proposer une carte de connexion dans le fil ; relier un compte ne lui donne aucun droit. La clé se donne au serveur avec `COMPOSIO_API_KEY`. Sans clé, cette fonction est désactivée et le reste ne change pas. Voir [docs/composio.md](docs/composio.md) pour la configuration, les preuves simulées et ce qui n’est pas vérifié avec le vrai service.
