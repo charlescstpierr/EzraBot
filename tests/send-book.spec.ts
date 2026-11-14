@@ -575,3 +575,81 @@ test("un refus du rejeu ne résout pas une ancienne incertitude sans reçu serve
     { command: a.command, fact: { kind: "unknown" } },
   ]);
 });
+
+test("la purge échouée n’efface rien avant une réponse tardive d’un autre onglet", async () => {
+  const { storage } = browser();
+  let failMarker = false;
+  let removed = 0;
+  const limited: KeyValueStorage = {
+    get length() {
+      return storage.length;
+    },
+    key: (i) => storage.key(i),
+    getItem: (k) => storage.getItem(k),
+    setItem(k, v) {
+      if (failMarker) throw Error("quota");
+      storage.setItem(k, v);
+    },
+    removeItem(k) {
+      removed++;
+      storage.removeItem(k);
+    },
+  };
+  const result = deferred();
+  const a = input();
+  const writer = page(limited, () => result.promise);
+  const pending = writer.run(a);
+  const before = page(storage).snapshot();
+  failMarker = true;
+  const purger = page(limited);
+  purger.purge(["nova"]);
+  const after = page(storage).snapshot();
+  const local = purger.snapshot();
+  const status = purger.status();
+  failMarker = false;
+  result.resolve(accepted("a"));
+  await pending;
+  expect(status).toBe("storage-error");
+  expect(removed).toBe(0);
+  expect(after).toEqual(before);
+  expect(local).toHaveLength(1);
+});
+test("une collecte concurrente ne retire pas la nouvelle reprise d’un ancien refus", async () => {
+  const { storage } = browser();
+  const a = input();
+  const result = deferred();
+  let sent = 0;
+  const writer = page(storage, async () =>
+    ++sent === 1
+      ? { kind: "rejected", status: 503, message: "occupé" }
+      : result.promise,
+  );
+  await writer.run(a);
+  let injected = false;
+  let pending: Promise<unknown> | undefined;
+  const reader: KeyValueStorage = {
+    get length() {
+      return storage.length;
+    },
+    key: (i) => storage.key(i),
+    getItem(k) {
+      const old = storage.getItem(k);
+      if (!injected && old?.includes('"kind":"refused"')) {
+        injected = true;
+        pending = writer.run(a);
+      }
+      return old;
+    },
+    setItem: (k, v) => storage.setItem(k, v),
+    removeItem: (k) => storage.removeItem(k),
+  };
+  page(reader, undefined, { capacity: 1, ttlMs: 0 }).collect([]);
+  const during = page(storage).snapshot();
+  result.resolve(unknown);
+  if (pending) await pending;
+  expect(injected).toBe(true);
+  expect(sent).toBe(2);
+  expect(during).toMatchObject([
+    { command: a.command, fact: { kind: "queued" } },
+  ]);
+});
