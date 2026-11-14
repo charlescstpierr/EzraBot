@@ -34,7 +34,13 @@ export type CommandRunner = {
   tools(command: ToolCommand): Promise<ToolsOutcome>;
 };
 export type Route =
-  | { page: "chat"; botId: string; messageId?: string }
+  | {
+      page: "chat";
+      botId: string;
+      messageId?: string;
+      /** A saved document version picked in the reader, to prepare a service action from it in this chat. */
+      source?: { workId: string; versionId: string };
+    }
   | { page: "document"; workId: string; versionId?: string }
   | { page: "missions"; missionId?: string }
   | { page: "projects" }

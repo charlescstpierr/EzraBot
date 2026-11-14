@@ -29,10 +29,19 @@ import {
 } from "./pending";
 import "./style.css";
 
+/** A saved document version the person picked in the reader, to prepare a service action from it with the next message. */
+export type SourceChoice = {
+  ref: { workId: string; versionId: string };
+  label: ReactNode;
+  /** Why nothing can be prepared with this bot now, or null. */
+  blocked: string | null;
+  clear(): void;
+};
 type Props = {
   port: Port;
   botId: string;
   focusMessageId?: string;
+  source?: SourceChoice;
   drafts: DraftBook;
   slots: {
     task(message: MessageView): ReactNode;
@@ -57,7 +66,7 @@ export function ChatPage(props: Props) {
     <Thread key={`${props.port.view.spaceId}:${props.botId}`} {...props} />
   );
 }
-function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
+function Thread({ port, botId, focusMessageId, source, drafts, slots }: Props) {
   const scope = { kind: "prompt", botId } as const;
   const key = `mimobot:${port.view.spaceId}:${botId}`;
   const pendingKey = `${key}:pending`;
@@ -179,14 +188,33 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
       const raw = current.current;
       const trimmed = trimForSend(raw.text, raw.mentions ?? []);
       if (!trimmed.text) return;
-      const command = CommandSchema.safeParse({
-        type: canUseServices && useServices ? "message.send" : "message.say",
-        requestId: uid(),
-        botId,
-        text: trimmed.text,
-        attachments: raw.files,
-        mentions: trimmed.spans,
-      });
+      if (source && (source.blocked || trimmed.spans.length)) {
+        setError(
+          source.blocked ??
+            "Retirez les @ : une action depuis une version se prépare avec ce personnage seulement.",
+        );
+        return;
+      }
+      const command = CommandSchema.safeParse(
+        source
+          ? {
+              type: "message.send",
+              requestId: uid(),
+              botId,
+              text: trimmed.text,
+              attachments: raw.files,
+              source: source.ref,
+            }
+          : {
+              type:
+                canUseServices && useServices ? "message.send" : "message.say",
+              requestId: uid(),
+              botId,
+              text: trimmed.text,
+              attachments: raw.files,
+              mentions: trimmed.spans,
+            },
+      );
       if (!command.success || !isSendable(command.data)) {
         setError(
           "Le message ou les pièces jointes dépassent les limites autorisées.",
@@ -214,6 +242,8 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
         }
         remember(null);
         captureRef.current = null;
+        if (saved.command.type === "message.send" && saved.command.source)
+          source?.clear();
       } else {
         setError(
           outcome.kind === "refused"
@@ -479,7 +509,24 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
         {pending && !busy && (
           <p role="status">
             Un envoi attend sa confirmation. Réessayez avec la même commande.
+            {pending.command.type === "message.send" &&
+              pending.command.source &&
+              " Il cite la version de document choisie."}
           </p>
+        )}
+        {source && !pending && (
+          <div className="ez-chat-source" role="status">
+            <p>
+              <strong>Version source</strong> {source.label}
+            </p>
+            <small>
+              {source.blocked ??
+                `Seule cette version enregistrée sera transmise à ${bot?.name ?? "ce personnage"}. Précisez votre demande : l’action exacte attendra votre approbation.`}
+            </small>
+            <button type="button" onClick={source.clear}>
+              Retirer la version source
+            </button>
+          </div>
         )}
         <ul className="ez-chat-files">
           {content.files.map((file, i) => (
@@ -587,7 +634,7 @@ function Thread({ port, botId, focusMessageId, drafts, slots }: Props) {
             </button>
           </div>
         )}
-        {canUseServices && (
+        {canUseServices && !source && (
           <label className="ez-chat-services">
             <input
               type="checkbox"

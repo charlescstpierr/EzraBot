@@ -9,6 +9,7 @@ import type {
   ToolProposalView,
 } from "../../server/src/tools-protocol";
 import { toolsRequest, uid } from "../api";
+import { SourceLine } from "../documents/source";
 import type { Port, ToolsOutcome } from "../port";
 import "./style.css";
 
@@ -730,6 +731,14 @@ function ToolCard({
             {proposal.toolSlug} · version {proposal.version}
           </dd>
         </div>
+        {proposal.source && (
+          <div>
+            <dt>Source</dt>
+            <dd>
+              <SourceLine port={port} source={proposal.source} />
+            </dd>
+          </div>
+        )}
       </dl>
       <p className="ez-tools-arguments-title">Contenu exact</p>
       <pre className="ez-tools-arguments">
@@ -820,7 +829,16 @@ export function ToolCards({
   port: Port;
   message: MessageView;
 }) {
-  if (message.role !== "assistant") return null;
+  if (message.role !== "assistant") {
+    const source = port.view.tools.sources.find(
+      (candidate) => candidate.messageId === message.id,
+    );
+    return source ? (
+      <p className="ez-source-note">
+        Version source : <SourceLine port={port} source={source} />
+      </p>
+    ) : null;
+  }
   const proposals = port.view.tools.proposals.filter(
     (proposal) => proposal.messageId === message.id,
   );
