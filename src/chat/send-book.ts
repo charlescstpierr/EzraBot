@@ -30,7 +30,7 @@ export type SendAttempt =
 
 const PREFIX = "mino.send-book.v1|";
 const rank = (fact: SendFact) =>
-  ({ queued: 0, unknown: 1, refused: 2, accepted: 3 })[fact.kind];
+  ({ refused: 0, queued: 1, unknown: 2, accepted: 3 })[fact.kind];
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null;
 const copy = <T>(v: T): T => structuredClone(v);
@@ -241,12 +241,22 @@ export function openSendBook(options: {
     const latest = merged().find(
       (r) => r.command.requestId === row.command.requestId,
     );
-    const highest =
-      latest && rank(latest.fact) > rank(row.fact) ? latest.fact : row.fact;
-    row.fact = copy(rank(fact) > rank(highest) ? fact : highest);
+    const accepted = [fact, row.fact, latest?.fact].find(
+      (value) => value?.kind === "accepted",
+    );
+    row.fact = copy(
+      accepted ?? (row.fact.kind === "unknown" ? row.fact : fact),
+    );
     // Purging during transport must not resurrect the deleted scope when its response arrives.
     if (!isGone(row.command.botId)) persist(row);
-    return { kind: "settled", outcome, entry: copy(row) };
+    return {
+      kind: "settled",
+      outcome,
+      entry: copy(
+        merged().find((r) => r.command.requestId === row.command.requestId) ??
+          row,
+      ),
+    };
   }
   return {
     writerId,
@@ -294,7 +304,14 @@ export function openSendBook(options: {
         spaceId: options.spaceId,
         writerId,
         savedAt: previous?.savedAt ?? now(),
-        fact: copy(previous?.fact ?? { kind: "queued" }),
+        fact: copy(
+          previous?.fact.kind === "accepted" ||
+            previous?.fact.kind === "unknown"
+            ? previous.fact
+            : previous?.fact.kind === "queued"
+              ? { kind: "unknown" }
+              : { kind: "queued" },
+        ),
         durability: {
           frozen: previous?.durability.frozen ?? false,
           fact: false,
@@ -340,7 +357,7 @@ export function openSendBook(options: {
         }
       }
     },
-    /** The marker also blocks a late response or stale tab from restoring a deleted bot. */
+    /** The gone marker blocks a late response or stale tab from restoring a deleted bot. */
     purge(botIds: readonly string[]): void {
       if (!botIds.length) return;
       for (const bot of botIds) {

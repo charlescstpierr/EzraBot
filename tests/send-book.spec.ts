@@ -220,7 +220,7 @@ test("une panne après départ ne transforme pas une acceptation en refus", asyn
   ]);
 });
 
-test("un transport levé garde l’identité incertaine et un refus reste un fait distinct", async () => {
+test("un transport levé garde l’identité incertaine malgré le refus d’un rejeu", async () => {
   const { storage } = browser();
   const a = input();
   await page(storage, async () => {
@@ -235,8 +235,19 @@ test("un transport levé garde l’identité incertaine et un refus reste un fai
     message: "refus",
   })).run(a);
   expect(page(storage).snapshot()).toMatchObject([
-    { fact: { kind: "refused", reason: "rejected" } },
+    { fact: { kind: "unknown" } },
   ]);
+  const b = input("Autre demande refusée");
+  await page(storage, async () => ({
+    kind: "rejected",
+    status: 403,
+    message: "refus",
+  })).run(b);
+  expect(
+    page(storage)
+      .snapshot()
+      .find((row) => row.command.requestId === b.command.requestId),
+  ).toMatchObject({ fact: { kind: "refused", reason: "rejected" } });
 });
 
 test("les snapshots et le runner ne peuvent pas modifier la commande figée", async () => {
@@ -398,7 +409,7 @@ test("les reçus terminés d’un ancien chargement libèrent la capacité", asy
   expect((await reloaded.run(c)).kind).toBe("settled");
 });
 
-test("les refus définitifs d’un ancien chargement libèrent aussi la capacité", async () => {
+test("les envois refusés sans reprise d’un ancien chargement libèrent la capacité", async () => {
   const { storage } = browser();
   let time = 0;
   const options = { now: () => time, capacity: 1, ttlMs: 10 };
