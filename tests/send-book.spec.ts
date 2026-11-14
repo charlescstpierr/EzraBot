@@ -70,16 +70,17 @@ test("deux écrivains gardent deux demandes du même bot après rechargement", a
     second = page(storage);
   expect(first.writerId).not.toBe(second.writerId);
   await Promise.all([first.run(a), second.run(b)]);
+  expect(page(storage).snapshot()).toHaveLength(2);
   expect(
     page(storage)
       .snapshot()
       .map((r) => r.command),
-  ).toEqual([a.command, b.command]);
+  ).toEqual(expect.arrayContaining([a.command, b.command]));
   expect(
     page(storage)
       .snapshot()
       .map((r) => r.raw.text),
-  ).toEqual([a.raw.text, b.raw.text]);
+  ).toEqual(expect.arrayContaining([a.raw.text, b.raw.text]));
 });
 
 test("le gel est durable avant le départ, sans renvoi automatique au rechargement", async () => {
