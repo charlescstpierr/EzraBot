@@ -37,7 +37,7 @@ const store = openStore({ path: join(dir, 'chat.sqlite'), mascots: loadMascots(j
 const devices = openDevices({ path: join(dir, 'devices.sqlite'), spaceId: store.view().spaceId, publicUrl: 'https://localhost:4499' });
 const admission = createBrowserAdmission(devices);
 const worker = createWorker({ store, engines: { chat: chatEngine, doc: chatEngine } });
-const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir });
+const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir, admission: store.admission });
 const fixture = join(build, 'dist/test/fixtures/fake-agent-server.js');
 const makeEngine = scenario => createAgentEngine({ command: process.execPath, args: [fixture, scenario], tmpDir: join(dir, 'agent-tmp'), clientVersion: 'verify-pc' });
 let underlying = makeEngine('hang');

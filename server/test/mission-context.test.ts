@@ -10,6 +10,7 @@ import { loadMascots } from '../src/domain.js';
 import { buildMissionChatContext } from '../src/mission-context.js';
 import { openMissions } from '../src/missions.js';
 import { openStore } from '../src/store.js';
+import { admissionIn } from './fixtures/admission.js';
 
 const source = (extra: Partial<ContextSource>): ContextSource => ({ bot: { name: 'Mino', title: '', instructions: '', replyStyle: 'normal', contextSize: 'standard' }, memories: [], exchanges: [], request: { text: 'Où en est ma mission ?', attachments: [] }, ...extra });
 
@@ -57,7 +58,7 @@ test('registry projection and origin binding survive reopen; identical confirmat
   const base = mkdtempSync(join(tmpdir(), 'mino-chat-registry-'));
   const project = join(base, 'project'), data = join(base, 'data');
   mkdirSync(project); mkdirSync(data);
-  const options = { path: join(data, 'missions.sqlite'), minoRoot: join(base, 'app'), dataDir: data };
+  const options = { path: join(data, 'missions.sqlite'), minoRoot: join(base, 'app'), dataDir: data, admission: admissionIn(data) };
   let missions = openMissions(options);
   const deps = { bot: () => null, origin: () => ({ text: 'Demande exacte' }) };
   const send = (command: Record<string, unknown>) => missions.dispatch({ requestId: randomUUID(), ...command }, deps);

@@ -128,6 +128,7 @@ input.on('line', line => {
     return;
   }
   const params = message.params ?? {};
+  if (process.env.MINO_TEST_RPC_PROBE) appendFileSync(process.env.MINO_TEST_RPC_PROBE, message.method + '\n');
   if (closingCwd) writeFileSync(join(closingCwd, 'request-during-close.txt'), String(message.method));
   const reply = (result: unknown) => send({ id: message.id, result });
   switch (message.method) {

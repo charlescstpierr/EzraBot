@@ -66,7 +66,7 @@ async function start() {
   const worker = createWorker({ store, engines: { chat, doc: engine() } });
   let agents, missions, agentEngine, agentWorker;
   if (agentModules) {
-    missions = agentModules[0].openMissions({path:join(dir,'missions.sqlite'),minoRoot:root,dataDir:dir});
+    missions = agentModules[0].openMissions({path:join(dir,'missions.sqlite'),minoRoot:root,dataDir:dir,admission:store.admission});
     agentEngine = agentModules[1].createAgentEngine({command:process.execPath,args:[join(agentBuild,'dist/test/fixtures/fake-agent-server.js'),'edit'],tmpDir:join(dir,'agent-tmp'),clientVersion:'verify-fusion'});
     agentWorker = agentModules[2].createAgentWorker({missions,engine:agentEngine});
     agents = agentModules[3].createAgentRoutes({missions,worker:agentWorker,engine:agentEngine,longPollMs:500});

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AgentCommandSchema, type CheckView, type LeadIdentity, type ObservedView } from '../src/agent-protocol.js';
 import { createAgentEngine } from '../src/agent-engine.js';
 import { createAgentWorker } from '../src/agent-worker.js';
+import { admissionIn } from './fixtures/admission.js';
 import { openMissions, type AttemptClaim, type CoordinationDeps } from '../src/missions.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-agent-server.js', import.meta.url));
@@ -41,7 +42,7 @@ const decision = (fields: Record<string, unknown>) => JSON.stringify({
 });
 
 function registry(b = box(), file = 'missions.sqlite') {
-  const missions = openMissions({ path: join(b.dataDir, file), minoRoot: b.minoRoot, dataDir: b.dataDir, home: b.home });
+  const missions = openMissions({ path: join(b.dataDir, file), minoRoot: b.minoRoot, dataDir: b.dataDir, home: b.home, admission: admissionIn(b.dataDir) });
   let n = 0;
   const say = (command: Record<string, unknown>, d: CoordinationDeps | null = deps) => missions.dispatch({ requestId: `req-coord-${++n}-xxxx`, ...command }, d);
   const project = say({ type: 'project.add', path: b.project, checkCommand: 'true' });
@@ -262,7 +263,7 @@ test('a restart during a lead turn leaves an unknown result, no decision and no 
   const rootId = first.coordinated();
   first.claim();
   first.close();
-  const second = openMissions({ path: join(b.dataDir, 'm.sqlite'), minoRoot: b.minoRoot, dataDir: b.dataDir, home: b.home });
+  const second = openMissions({ path: join(b.dataDir, 'm.sqlite'), minoRoot: b.minoRoot, dataDir: b.dataDir, home: b.home, admission: admissionIn(b.dataDir) });
   try {
     assert.equal(second.recoverInterrupted(), 1);
     const root = second.detail(rootId);
@@ -366,7 +367,7 @@ test('through the engine, only the lead turn receives an outputSchema, and each 
     JSON.parse(decision({ title: 'README', goal: 'Documente slugify.' })),
     JSON.parse(decision({ kind: 'finish', summary: 'Fait.', limits: 'Aucune.', evidence: [{ childId: '$child1', attemptId: '$cite1' }, { childId: '$child2', attemptId: '$cite2' }] })),
   ]));
-  const missions = openMissions({ path: join(b.dataDir, 'm.sqlite'), minoRoot: b.minoRoot, dataDir: b.dataDir, home: b.home });
+  const missions = openMissions({ path: join(b.dataDir, 'm.sqlite'), minoRoot: b.minoRoot, dataDir: b.dataDir, home: b.home, admission: admissionIn(b.dataDir) });
   const engine = createAgentEngine({ command: process.execPath, args: [fixture, `coord@${dir}`], tmpDir: join(b.dataDir, 'agent-tmp'), clientVersion: 'test', interruptGraceMs: 300 });
   const worker = createAgentWorker({ missions, engine });
   try {

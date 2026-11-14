@@ -11,6 +11,7 @@ import {
 import { clip, type AgentEventInput, type AgentRunOutcome, type AgentSandbox } from './agent-engine.js';
 import { judge, LEAD_OUTPUT_SCHEMA, leadPrompt, leadRules, parseDecision, type DossierChild, type LeadDecision, type Tree } from './coordination.js';
 import { checkProjectPath, parseCheckCommand } from './project-guard.js';
+import type { Admission, Departure, Evidence } from './admission.js';
 
 /** Allowed attempt transitions. Everything else is refused, which keeps late or duplicate writes harmless. */
 const TRANSITIONS: Record<AttemptState, readonly AttemptState[]> = {
@@ -164,8 +165,17 @@ function observedLines(observed: ObservedView | null): string {
   return observed.status.length ? observed.status.slice(0, 60).join('\n') : 'Aucun fichier modifié par rapport au dernier commit.';
 }
 
-export function openMissions(options: { path: string; minoRoot: string; dataDir: string; now?: () => string; home?: string }) {
+const CAPABILITY = 'codex.mission';
+/** A lead's decision or a finished step queued the attempt; anything else was asked by the person. */
+const QUEUED_BY_LEAD = /^(decision|child):/;
+
+export function openMissions(options: {
+  path: string; minoRoot: string; dataDir: string; now?: () => string; home?: string;
+  /** The ceilings and permits shared with the chat, kept in the chat store's database. A model turn is reserved there before it starts here. */
+  admission: Admission;
+}) {
   const now = options.now ?? (() => new Date().toISOString());
+  const gate = options.admission;
   const db = new DatabaseSync(options.path);
   try {
     db.exec('PRAGMA locking_mode=EXCLUSIVE');
@@ -496,6 +506,20 @@ export function openMissions(options: { path: string; minoRoot: string; dataDir:
   function wake(root: Row, trigger: string, note: string | null = null): string | null {
     if (get('SELECT 1 AS x FROM attempts WHERE mission_id=? AND trigger=?', s(root, 'id'), trigger)) return null;
     return enqueue(root, 'lead', note, { trigger });
+  }
+
+  /**
+   * What this registry can say about a reserved turn after a restart. A turn is bound only after `turn/start` was sent,
+   * so an attempt that ended without one never left. Null: the attempt runs now and settles itself.
+   */
+  function departureOf(attemptId: string): Evidence | null {
+    const row = get('SELECT state, turn_id FROM attempts WHERE id=?', attemptId);
+    if (!row) return 'unknown';
+    const state = pick(row, 'state', ATTEMPT_STATES);
+    if (state === 'queued') return 'not_departed';
+    if (ACTIVE.has(state)) return null;
+    if (sn(row, 'turn_id') === null && state !== 'completed') return 'not_departed';
+    return state === 'interrupted' ? 'unknown' : 'ended';
   }
 
   function addEvent(missionId: string, attemptId: string, kind: AgentEventKind, data: Record<string, unknown>): void {
@@ -982,6 +1006,18 @@ export function openMissions(options: { path: string; minoRoot: string; dataDir:
               continue;
             }
           }
+          if (kind !== 'final') {
+            const reserved = gate.reserve({
+              capability: CAPABILITY,
+              source: { kind: QUEUED_BY_LEAD.test(sn(attempt, 'trigger') ?? '') ? 'lead' : 'human', id: s(mission, 'id') },
+              target: { kind: 'mission', id: s(attempt, 'id'), revision: String(n(attempt, 'goal_rev')) },
+            });
+            if (!reserved.ok) {
+              setState(s(attempt, 'id'), 'failed', { errorCode: 'admission_refused', errorMessage: `Tentative non démarrée : ${reserved.message}` });
+              refused = true;
+              continue;
+            }
+          }
           const sandbox = pick(attempt, 'sandbox', ['workspace-write', 'read-only'] as const);
           const checkCommand = sandbox === 'workspace-write' ? json(project, 'check_command', argvSchema) : null;
           const input = kind === 'lead' ? dossierFor(mission, attempt, project) : kind === 'final' ? null : promptFor(mission, attempt, project);
@@ -1007,6 +1043,17 @@ export function openMissions(options: { path: string; minoRoot: string; dataDir:
     },
     stopRequested(attemptId: string): boolean {
       return get('SELECT state FROM attempts WHERE id=?', attemptId)?.state === 'stopping';
+    },
+    /**
+     * The permit of this attempt's model turn, for the engine to take in the same tick as `turn/start`.
+     * Refused when a stop was asked, when the goal changed since the attempt was queued, and when the permit was already used.
+     */
+    depart(claim: AttemptClaim): Departure {
+      const row = get('SELECT a.state, m.goal_rev FROM attempts a JOIN missions m ON m.id=a.mission_id WHERE a.id=?', claim.attemptId);
+      if (!row || !this.owns(claim) || s(row, 'state') !== 'running') {
+        return { ok: false, reason: 'Cette tentative a été arrêtée avant son départ.' };
+      }
+      return gate.depart(CAPABILITY, { kind: 'mission', id: claim.attemptId, revision: String(n(row, 'goal_rev')) });
     },
     setBaseline(claim: AttemptClaim, lines: string[] | null): void {
       if (!this.owns(claim)) return;
@@ -1044,6 +1091,7 @@ export function openMissions(options: { path: string; minoRoot: string; dataDir:
     },
     /** Records how the Codex turn ended. A completed turn goes to verification, not yet to a result. */
     finish(claim: AttemptClaim, outcome: AgentRunOutcome): AttemptState | null {
+      gate.settle(CAPABILITY, { kind: 'mission', id: claim.attemptId }, outcome.kind === 'interrupted' ? 'unknown' : 'ended');
       if (!this.owns(claim)) return null;
       const result = tx((): AttemptState | null => {
         if (outcome.kind === 'completed') {
@@ -1100,6 +1148,7 @@ export function openMissions(options: { path: string; minoRoot: string; dataDir:
       const count = run(`UPDATE attempts SET state='interrupted', ended_at=?, error_code='unknown_result',
         error_message='Mino s’est arrêté pendant cette tentative. Le résultat est inconnu : vérifiez les changements observés, puis reprenez explicitement.'
         WHERE state IN ('running','verifying','stopping') AND (generation IS NULL OR generation<>?)`, now(), generation);
+      gate.reconcileMissions(departureOf);
       if (count) changed();
       return count;
     },

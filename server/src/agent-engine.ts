@@ -7,6 +7,7 @@ import type { CatalogModel } from './protocol.js';
 import { AGENT_LIMITS, type AgentEngineStatus, type Usage } from './agent-protocol.js';
 import { census, reap, type Census, type Liveness, type Proc } from './process-tree.js';
 import { childEnv } from './child-env.js';
+import type { Departure } from './admission.js';
 
 /**
  * Executor sessions on the official `codex app-server`.
@@ -54,6 +55,8 @@ export type AgentRunInput = {
   /** Constrains the final message of the turn; sent to Codex only when set. */
   outputSchema?: object | null;
   signal: AbortSignal;
+  /** The one-use permit of this turn, taken in the same tick as `turn/start`. A refusal ends the run and nothing is sent. */
+  depart(): Departure;
   onThread(threadId: string, model: string, effort: string | null): void;
   onTurn(turnId: string): void;
   onEvent(event: AgentEventInput): void;
@@ -85,6 +88,7 @@ export const AGENT_ERRORS = {
   timeout: 'La tentative a dépassé la durée maximale. Mino a demandé son arrêt.',
   usage_limit: 'La limite d’utilisation de votre compte est atteinte.',
   unauthorized: 'La session Codex n’est plus valide. Relancez « codex login ».',
+  admission_refused: 'Mino n’a pas admis cette tentative.',
   tools_alive: 'Des outils lancés par une tentative précédente tournent encore ou n’ont pas pu être vérifiés. Mino ne relance pas Codex tant qu’ils ne sont pas confirmés arrêtés.',
 } as const;
 export type AgentErrorCode = keyof typeof AGENT_ERRORS;
@@ -667,6 +671,11 @@ export function createAgentEngine(options: AgentEngineOptions): AgentEngine {
       };
       input.signal.addEventListener('abort', onAbort);
 
+      const departure = input.depart();
+      if (!departure.ok) {
+        finish(fail('admission_refused', false, departure.reason));
+        return;
+      }
       const delivered = conn.alive;
       conn.request('turn/start', {
         threadId,

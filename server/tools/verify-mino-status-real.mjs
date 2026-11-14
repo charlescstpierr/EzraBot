@@ -11,8 +11,8 @@ const [{ openMissions }, { openStore }, { loadMascots }, { buildMissionChatConte
 const base = mkdtempSync(join(tmpdir(), 'mino-status-real-'));
 const project = join(base, 'project'), data = join(base, 'data'), cwd = join(base, 'codex');
 for (const dir of [project, data, cwd]) mkdirSync(dir);
-const missions = openMissions({ path: join(data, 'missions.sqlite'), minoRoot: build, dataDir: data });
 const store = openStore({ path: join(data, 'chat.sqlite'), mascots: loadMascots(join(build, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions) });
+const missions = openMissions({ path: join(data, 'missions.sqlite'), minoRoot: build, dataDir: data, admission: store.admission });
 const engine = createCodexEngine({ command: 'codex', workDir: cwd, clientVersion: 'verify-mino-status' });
 const send = command => missions.dispatch({ requestId: randomUUID(), ...command });
 const evidence = { modelCalls: 1, executorCalls: 0, missionRecord: 'controlled SQLite seed', privateDataUsed: false };

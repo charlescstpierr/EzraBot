@@ -56,7 +56,7 @@ const store = openStore({ path: join(dir, 'mino.sqlite'), mascots: loadMascots(j
 const devices = openDevices({ path: join(dir, 'devices.sqlite'), spaceId: store.view().spaceId, publicUrl: base });
 const admission = createBrowserAdmission(devices);
 const worker = createWorker({ store, engines: { chat: chatEngine(), doc: chatEngine() } });
-const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir });
+const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir, admission: store.admission });
 const coordDir = join(dir, 'coord');
 mkdirSync(coordDir);
 const decision = fields => ({ kind: 'delegate', why: 'Étape séparable.', childId: null, title: null, goal: null, note: null, question: null, summary: null, limits: null, evidence: [], ...fields });

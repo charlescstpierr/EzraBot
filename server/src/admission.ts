@@ -132,8 +132,12 @@ export type Admission = {
   settle(capability: string, target: Pick<Target, 'kind' | 'id'>, end: 'ended' | 'unknown'): ReservationState | null;
   /** After a restart, for targets recorded in this database: an unused permit is released, a used one stays unknown. */
   recover(): { released: number; unknown: number };
-  /** After a restart, for mission targets: only the missions registry can say whether a call left or ended. */
-  reconcileMissions(evidence: (attemptId: string) => Evidence): { released: number; settled: number; unknown: number };
+  /**
+   * After a restart, for mission targets: only the missions registry can say whether a call left or ended.
+   * An unused permit is released when the registry says the turn never left, a used one is settled when it says the turn ended.
+   * Every other case stays unknown and keeps its slot. Null leaves a turn that runs now untouched.
+   */
+  reconcileMissions(evidence: (attemptId: string) => Evidence | null): { released: number; settled: number; unknown: number };
   usage(): BudgetUsage[];
 };
 
@@ -238,6 +242,7 @@ export function createAdmission(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'tr
         for (const row of all(`SELECT id, state, target_id FROM reservations WHERE target_kind = 'mission' AND state IN ('reserved','started')`)) {
           const state = stateOf(row);
           const seen = evidence(str(row, 'target_id'));
+          if (seen === null) continue;
           const next = state === 'reserved' && seen === 'not_departed' ? 'released' : state === 'started' && seen === 'ended' ? 'settled' : 'unknown';
           counts[next] += close(str(row, 'id'), state, next);
         }

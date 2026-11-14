@@ -18,6 +18,7 @@ import { buildMissionChatContext } from './mission-context.js';
 import { takeProviderKey } from './child-env.js';
 import { createComposioProvider, createComposioSdk } from './composio.js';
 import { createActionDesk } from './tool-desk.js';
+import { BudgetConfigError, policyFromEnv } from './admission.js';
 
 const VERSION = '0.1.0';
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -38,15 +39,25 @@ const dataDir = resolve(process.env.MINO_DATA_DIR ?? join(root, 'data'));
 const workDir = join(dataDir, 'codex-cwd');
 mkdirSync(workDir, { recursive: true });
 
+const policy = (() => {
+  try {
+    return policyFromEnv(process.env.MINO_BUDGETS);
+  } catch (error) {
+    if (error instanceof BudgetConfigError) fail(error.message);
+    throw error;
+  }
+})();
+
 function open(): Store {
   try {
-    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null });
+    return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions), serviceTools: providerKey !== null, policy });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
     throw error;
   }
 }
 const store = open();
+log({ event: 'budgets', usage: store.admission.usage() });
 if (store.view().erasure === 'incomplete') log({ event: 'erasure', state: 'incomplete' });
 const recovered = store.recoverInterrupted();
 if (recovered) log({ event: 'recovery', interruptedAttempts: recovered });
@@ -54,7 +65,7 @@ if (recovered) log({ event: 'recovery', interruptedAttempts: recovered });
 const engineOptions = { command: process.env.MINO_CODEX_BIN ?? 'codex', workDir, clientVersion: VERSION };
 const missions = (() => {
   try {
-    return openMissions({ path: join(dataDir, 'missions.sqlite'), minoRoot: root, dataDir });
+    return openMissions({ path: join(dataDir, 'missions.sqlite'), minoRoot: root, dataDir, admission: store.admission });
   } catch (error) {
     if (error instanceof MissionsLockedError) fail(error.message);
     throw error;

@@ -11,6 +11,7 @@ import { createAgentRoutes } from '../src/agent-http.js';
 import { createAgentWorker } from '../src/agent-worker.js';
 import { openMissions, titleOf } from '../src/missions.js';
 import { checkProjectPath, parseCheckCommand } from '../src/project-guard.js';
+import { admissionIn } from './fixtures/admission.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-agent-server.js', import.meta.url));
 
@@ -36,7 +37,7 @@ const ended = (status: string) => !['queued', 'running', 'stopping'].includes(st
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function harness(scenario: string, box = sandbox(), dbName = 'missions.sqlite', requestTimeoutMs?: number, extra: Partial<AgentEngineOptions> = {}) {
-  const missions = openMissions({ path: join(box.dataDir, dbName), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home });
+  const missions = openMissions({ path: join(box.dataDir, dbName), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home, admission: admissionIn(box.dataDir) });
   const engine = createAgentEngine({ command: process.execPath, args: [fixture, scenario], tmpDir: join(box.dataDir, 'agent-tmp'), clientVersion: 'test', interruptGraceMs: 300, ...(requestTimeoutMs ? { requestTimeoutMs } : {}), ...extra });
   const worker = createAgentWorker({ missions, engine });
   let n = 0;
@@ -209,14 +210,14 @@ test('a server stop mid-attempt survives restart as an unknown result, never res
 test('a crash while the registry marks an attempt running is recovered as interrupted on the next open', () => {
   const box = sandbox();
   try {
-    const one = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home });
+    const one = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home, admission: admissionIn(box.dataDir) });
     const p = one.dispatch({ type: 'project.add', requestId: 'req-crash-1', path: box.project });
     assert.ok(p.ok);
     const m = one.dispatch({ type: 'mission.create', requestId: 'req-crash-2', projectId: p.id, goal: 'X', model: null, effort: null });
     assert.ok(m.ok);
     assert.ok(one.claimNext());
     one.close();
-    const two = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home });
+    const two = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home, admission: admissionIn(box.dataDir) });
     assert.equal(two.recoverInterrupted(), 1);
     assert.equal(two.detail(m.id)?.status, 'interrupted');
     assert.equal(two.claimNext(), null);
@@ -338,7 +339,7 @@ test('late turn notifications cannot release an ambiguous run before its connect
   try {
     const run = h.engine.run({
       cwd: h.box.project, sandbox: 'workspace-write', threadId: null, model: null, effort: null,
-      developerInstructions: '', input: 'Travail', signal: new AbortController().signal,
+      developerInstructions: '', input: 'Travail', signal: new AbortController().signal, depart: () => ({ ok: true }),
       onThread() {}, onTurn() {}, onEvent() {}, onActivity() {}, onUsage() {},
     });
     for (let i = 0; i < 400 && !existsSync(join(h.box.project, 'connection-closing.txt')); i += 1) await pause(5);
@@ -445,7 +446,7 @@ test('a running check can be stopped and the stop is confirmed; an unconfirmed s
 test('a crash during the check leaves an unknown result that never restarts on its own', () => {
   const box = sandbox();
   try {
-    const one = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home });
+    const one = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home, admission: admissionIn(box.dataDir) });
     const p = one.dispatch({ type: 'project.add', requestId: 'req-crash-check-1', path: box.project, checkCommand: 'npm test' });
     assert.ok(p.ok);
     const m = one.dispatch({ type: 'mission.create', requestId: 'req-crash-check-2', projectId: p.id, goal: 'X', model: null, effort: null });
@@ -454,7 +455,7 @@ test('a crash during the check leaves an unknown result that never restarts on i
     assert.ok(claim);
     assert.equal(one.finish(claim, { kind: 'completed', finalText: 'fait', threadId: 't', turnId: 'u' }), 'verifying');
     one.close();
-    const two = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home });
+    const two = openMissions({ path: join(box.dataDir, 'm.sqlite'), minoRoot: box.minoRoot, dataDir: box.dataDir, home: box.home, admission: admissionIn(box.dataDir) });
     assert.equal(two.recoverInterrupted(), 1);
     const after = two.detail(m.id);
     assert.equal(after?.status, 'interrupted');
