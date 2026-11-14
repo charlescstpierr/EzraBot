@@ -8,8 +8,6 @@ import { SEND_EMAIL, createFakeProvider, type FakeProvider } from './fixtures/fa
 import { startFakeHoncho, type FakeHoncho } from './fixtures/fake-honcho.js';
 import { BOT, startMemory } from './fixtures/memory-app.js';
 
-// The real store, worker, memory desk, action desk and HTTP server on a real SQLite file. Honcho, the App Server and the
-// action provider are the fakes of this directory: every project, account, request and send here is synthetic.
 
 type App = Awaited<ReturnType<typeof startMemory>>;
 
@@ -23,7 +21,6 @@ async function started(extra: { path?: string } = {}, shared?: { honcho: FakeHon
   return { app, honcho, provider };
 }
 
-/** Links one synthetic account through the real routes and gives its send action to these characters. */
 async function grant(app: App, botIds: readonly string[] = [BOT]): Promise<void> {
   const link = z.object({ linkId: z.string() }).parse(await (await app.post('/api/tools/link', { serviceId: 'ac_synthetique_gmail', alias: 'Courriel de test' })).json());
   assert.equal((await app.post(`/api/tools/links/${link.linkId}/check`, {})).status, 200);
@@ -35,7 +32,6 @@ async function grant(app: App, botIds: readonly string[] = [BOT]): Promise<void>
   }
 }
 
-/** One request of the person whose turn proposes a send. Returns the open proposal and the request it came from. */
 async function proposed(app: App, text: string, botId = BOT): Promise<{ proposal: ToolProposalView; messageId: string }> {
   const workId = await app.say(text, botId);
   const view = await app.until(v => v.tools.proposals.some(p => p.workId === workId), `a proposal for « ${text} »`);
@@ -49,7 +45,6 @@ async function proposed(app: App, text: string, botId = BOT): Promise<{ proposal
 const approve = (app: App, proposal: ToolProposalView) =>
   app.post('/api/tools/commands', { type: 'tools.approve', requestId: randomUUID(), proposalId: proposal.id, fingerprint: proposal.fingerprint });
 
-/** The approval is committed as the route does, but the desk is not woken: the instant between the decision and the send. */
 function approveQuietly(app: App, provider: FakeProvider, proposal: ToolProposalView): void {
   const account = provider.accounts.get(proposal.accountId);
   assert(account);

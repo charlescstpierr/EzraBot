@@ -20,7 +20,6 @@ export type WorkerEvent =
   | { event: 'job.finished'; lane: Lane; workId: string; attempt: number; outcome: string; recorded: boolean }
   | { event: 'worker.error' };
 
-/** Plans in a row that may name another call before the chat call leaves without recall. */
 const RECALL_PLANS = 3;
 
 /** Received text is written at most this often per call, plus a last write when the call ends. */
@@ -113,10 +112,6 @@ export function createWorker(options: {
       log({ event: 'job.finished', lane: name, workId: claim.workId, attempt: claim.n, outcome: outcome.kind, recorded: recorded.kind === 'recorded' });
     }
 
-    /**
-     * The recall is searched before the claim, outside any transaction, for the one call the store would take now.
-     * When the store then takes another call, the search is planned again for that one.
-     */
     async function claimNext(): Promise<Claim | null> {
       const memory = name === 'chat' ? options.memory : undefined;
       if (!memory) return store.claimNext(name);
@@ -144,7 +139,6 @@ export function createWorker(options: {
         again = true;
         return;
       }
-      // A claim can wait on a recall, so a kick may land after the last check of a drain and before it is cleared: it starts the next drain.
       draining = drain().catch(fatal).finally(() => {
         draining = null;
         if (again) kick();

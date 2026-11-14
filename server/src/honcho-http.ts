@@ -37,6 +37,27 @@ const peersInput = z.array(z.object({
   peerId: name, observeMe: z.boolean(), observeOthers: z.boolean(),
 })).min(1).max(100).refine((peers) => new Set(peers.map((p) => p.peerId)).size === peers.length);
 
+const transportConfigSchema = z.object({
+  baseUrl: z.url(), apiKey: z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/),
+  timeoutMs: z.number().int().min(1).max(120_000),
+  maxResponseBytes: z.number().int().min(1).max(4_194_304),
+  allowLoopbackHttpForTests: z.boolean().optional(),
+});
+type HonchoTransportConfig = z.input<typeof transportConfigSchema>;
+
+export function parseHonchoTransportConfig(config: HonchoTransportConfig): HonchoTransportConfig {
+  const parsed = transportConfigSchema.safeParse(config);
+  if (!parsed.success) throw new Error('Configuration Honcho invalide.');
+  const url = new URL(parsed.data.baseUrl);
+  const loopback = ['127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.username || url.password || url.search || url.hash
+    || /[?#]/.test(parsed.data.baseUrl)
+    || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback && parsed.data.allowLoopbackHttpForTests))) {
+    throw new Error('Configuration Honcho invalide.');
+  }
+  return { ...parsed.data, baseUrl: url.href };
+}
+
 export class HonchoHttpClient {
   readonly #base: string;
   readonly #key: string;
@@ -44,29 +65,15 @@ export class HonchoHttpClient {
   readonly #timeoutMs: number;
   readonly #maxResponseBytes: number;
 
-  constructor(config: {
-    baseUrl: string; apiKey: string; workspaceId: string; timeoutMs: number;
-    maxResponseBytes: number; allowLoopbackHttpForTests?: boolean;
-  }) {
-    const parsed = z.object({
-      baseUrl: z.url(), apiKey: z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/),
-      workspaceId: name, timeoutMs: z.number().int().min(1).max(120_000),
-      maxResponseBytes: z.number().int().min(1).max(4_194_304),
-      allowLoopbackHttpForTests: z.boolean().optional(),
-    }).safeParse(config);
-    if (!parsed.success) throw new Error('Configuration Honcho invalide.');
-    const url = new URL(parsed.data.baseUrl);
-    const loopback = ['127.0.0.1', '[::1]'].includes(url.hostname);
-    if (url.username || url.password || url.search || url.hash
-      || /[?#]/.test(parsed.data.baseUrl)
-      || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback && parsed.data.allowLoopbackHttpForTests))) {
-      throw new Error('Configuration Honcho invalide.');
-    }
-    this.#base = url.href.replace(/\/$/, '');
-    this.#key = parsed.data.apiKey;
-    this.#workspaceId = parsed.data.workspaceId;
-    this.#timeoutMs = parsed.data.timeoutMs;
-    this.#maxResponseBytes = parsed.data.maxResponseBytes;
+  constructor(config: HonchoTransportConfig & { workspaceId: string }) {
+    const parsed = parseHonchoTransportConfig(config);
+    const workspace = name.safeParse(config.workspaceId);
+    if (!workspace.success) throw new Error('Configuration Honcho invalide.');
+    this.#base = parsed.baseUrl.replace(/\/$/, '');
+    this.#key = parsed.apiKey;
+    this.#workspaceId = workspace.data;
+    this.#timeoutMs = parsed.timeoutMs;
+    this.#maxResponseBytes = parsed.maxResponseBytes;
   }
 
   /** `created` is false when the workspace already existed: the route is a get-or-create that answers 201 only for a new one. */

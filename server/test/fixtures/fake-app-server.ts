@@ -260,7 +260,6 @@ function startTurn(params: Record<string, unknown>) {
       case 'stream-cut':
         return streamed(threadId, turnId, STREAMED.slice(0, 80) + '"}', 6, 10, () => complete(threadId, turnId, 'completed'));
       case 'gated': {
-        // Answers only once the file named by MINO_TEST_GATE exists, so a test can act while the turn is open.
         const gate = process.env.MINO_TEST_GATE ?? '';
         const timer = setInterval(() => {
           if (activeTurn?.turnId !== turnId) return clearInterval(timer);

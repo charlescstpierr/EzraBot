@@ -22,7 +22,6 @@ import { EXPORT_STATES, RECALL_STATES, REQUEST_KINDS, SESSIONS, SOURCE_KINDS, ty
 import { int, oneOf, str, strOrNull, type Row } from './sql-rows.js';
 import type { LedgerKit } from './tool-ledger.js';
 
-/** The only peer EzraBot provisions. It is never observed: no derived conclusion is asked for and none is read. */
 export const MEMORY_PEER = 'person';
 const SEARCH_LIMIT = 20;
 const QUERY_CHARS = 2000;
@@ -159,7 +158,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
   const note = (scopeId: string, category: string | null) => {
     touched += run('UPDATE memory_scopes SET note = ? WHERE id = ? AND note IS NOT ?', category, scopeId, category);
   };
-  /** The source of a request of the person in this project, while it is still authorized. A request written before the consent has none. */
   const sharedRequest = (scope: Row, messageId: string): boolean =>
     get(`SELECT 1 AS x FROM memory_sources WHERE message_id = ? AND scope_id = ? AND state = 'authorized'`, messageId, str(scope, 'id')) !== undefined;
 
@@ -182,7 +180,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     return workspaceId;
   }
 
-  /** Closes a request that never left and frees its slot. */
   function voidRequest(request: Row): void {
     const id = str(request, 'id');
     run(`UPDATE memory_requests SET state = 'voided', closed_at = ? WHERE id = ? AND state = 'reserved'`, now(), id);
@@ -190,7 +187,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     run('UPDATE memory_exports SET request_id = NULL WHERE request_id = ?', id);
   }
 
-  /** A correction, an exclusion, a forget and a reset all start a new generation: every request still waiting was reserved for the old one. */
   function advance(scope: Row): number {
     const generation = int(scope, 'generation') + 1;
     run('UPDATE memory_scopes SET generation = ? WHERE id = ?', generation, str(scope, 'id'));
@@ -198,7 +194,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     return generation;
   }
 
-  /** Withdraws source rows for good, then retires every attempt whose text contained one, directly or through a reply it received. */
   function withdraw(sourceIds: readonly string[], to: 'excluded' | 'forgotten' | { replacedBy: string }): void {
     for (const sourceId of sourceIds) {
       const source = get('SELECT declaration_id FROM memory_sources WHERE id = ?', sourceId) ?? {};
@@ -260,7 +255,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
       case 'memory.enable': {
         if (scopeOf(botId)) throw new MemoryRefusal('invalid_transition', 'Ce personnage a déjà un projet de mémoire Honcho.');
         const scopeId = newId('mp');
-        // The workspace row points at its scope, so the scope exists first and gets its workspace name in the same transaction.
         run(`INSERT INTO memory_scopes(id, bot_id, label, state, workspace_id, consented_at) VALUES (?, ?, ?, 'preparing', '', ?)`, scopeId, botId, command.label, now());
         run('UPDATE memory_scopes SET workspace_id = ? WHERE id = ?', newWorkspace(scopeId), scopeId);
         return { kind: 'scope', botId, state: 'preparing' };
@@ -357,7 +351,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
           return { ok: true, replayed: true, result: MemoryResultSchema.parse(JSON.parse(prior.result)) };
         }
         const result = execute(command);
-        // In this same transaction: an action prepared from a source withdrawn here is closed before the command is recorded.
         onMoved();
         receipts.save(requestId, command.type, print, JSON.stringify(result));
         return { ok: true, replayed: false, result };
@@ -370,7 +363,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     }
   }
 
-  /** Reserves one request. A refusal of admission leaves no request: the scope shows why nothing left. */
   function reserve(scope: Row, workspaceId: string, kind: RequestKind, about: { sourceId?: string; session?: string; workId?: string; origin?: string }): string | null {
     const requestId = newId('mr');
     const generation = int(scope, 'generation');
@@ -415,14 +407,12 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     if (state === 'withdrawal_pending') {
       const target = WITHDRAW_TARGETS.find(session => !withdrawn(scope, session));
       if (target !== undefined) return reserve(scope, str(scope, 'workspace_id'), 'withdraw', target === null ? {} : { session: target });
-      // Every withdrawal ended, the last one maybe across a restart: the scope closes for good.
       closeWithdrawal(scope);
       touched += 1;
     }
     return null;
   }
 
-  /** Even three acknowledgements prove no purge: the scope stays closed, and only a new empty workspace reopens it. */
   function closeWithdrawal(scope: Row): void {
     run(`UPDATE memory_scopes SET state = 'withdrawal_unverified', note = 'purge_unverified' WHERE id = ?`, str(scope, 'id'));
     run(`UPDATE memory_workspaces SET state = 'retired' WHERE id = ? AND state = 'confirmed'`, str(scope, 'workspace_id'));
@@ -446,7 +436,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
   const authorizedSource = (sourceId: string | null): Row | undefined =>
     sourceId === null ? undefined : get(`SELECT * FROM memory_sources WHERE id = ? AND state = 'authorized'`, sourceId);
 
-  /** The permit of one reserved request, built from what SQLite says now. Undefined when a guard fails. */
   function permitFor(request: Row, scope: Row): SendPermit | undefined {
     const requestId = str(request, 'id');
     const workspaceId = str(request, 'workspace_id');
@@ -468,7 +457,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     if (state !== 'active' || workspaceId !== str(scope, 'workspace_id')) return undefined;
     const workId = strOrNull(request, 'work_id');
     if (kind === 'search' && workId !== null) {
-      // The query is the text of the request: it leaves only for a request that is itself a consented source.
       const work = get(`SELECT m.id, m.text FROM works w JOIN messages m ON m.id = w.request_message_id WHERE w.id = ? AND w.state = 'pending'`, workId);
       return work && sharedRequest(scope, str(work, 'id')) ? { ...base, kind, query: clip(str(work, 'text'), QUERY_CHARS), limit: SEARCH_LIMIT, session: null } : undefined;
     }
@@ -493,7 +481,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
       if (!request) return null;
       const scope = scopeById(str(request, 'scope_id'));
       const permit = scope && int(scope, 'generation') === int(request, 'generation') ? permitFor(request, scope) : undefined;
-      // An original the transport would refuse never leaves: its export fails here instead of being reserved again for ever.
       if (permit?.kind === 'ingest' && (permit.text.includes('\u0000') || permit.text.length > 100_000)) {
         voidRequest(request);
         run(`UPDATE memory_exports SET state = 'failed' WHERE source_id = ? AND workspace_id = ?`, strOrNull(request, 'source_id'), permit.workspaceId);
@@ -508,7 +495,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     });
   }
 
-  /** A session is confirmed, or a reset got its workspace: the scope opens on this workspace and every current source waits for its export. */
   function activate(scope: Row, workspaceId: string): void {
     const scopeId = str(scope, 'id');
     if (stateOf(scope) === 'reset_pending') {
@@ -572,7 +558,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
       if (settlement.kind === 'workspace' || settlement.kind === 'session') {
         const waiting = (stateOf(scope) === 'preparing' && str(scope, 'workspace_id') === workspaceId)
           || (stateOf(scope) === 'reset_pending' && strOrNull(scope, 'next_workspace_id') === workspaceId);
-        // A workspace that already existed is not a new one: it is refused like a failure and its name is never tried again.
         const confirmed = settlement.kind === 'workspace' ? settlement.result.kind === 'ok' && settlement.result.value.created : settlement.result.kind === 'ok';
         if (!waiting || !confirmed) {
           run(`UPDATE memory_workspaces SET state = 'failed' WHERE id = ? AND state IN ('pending','confirmed')`, workspaceId);
@@ -647,7 +632,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     const absent = (state: 'unavailable' | 'suspended', category: string | null) => ({ part: { state, items: [], omitted: 0 }, recalled: [], category });
     const state = stateOf(scope);
     if (state !== 'active') return state === 'preparing' ? absent('unavailable', 'preparing') : absent('suspended', null);
-    // A request written before the consent, an automatic one or a withdrawn one was never shared: its text is not sent as a query.
     if (!sharedRequest(scope, candidate.requestMessageId)) return absent('unavailable', 'request_not_shared');
     if (given === undefined) return absent('unavailable', 'not_planned');
     if (given.kind === 'forced') return absent('unavailable', 'replan');
@@ -665,7 +649,6 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
       if (hit.peer !== MEMORY_PEER) continue;
       const mapped = get(`SELECT source_id FROM memory_exports WHERE workspace_id = ? AND session = ? AND remote_id = ? AND state = 'verified'`, workspaceId, hit.session, hit.remoteId);
       let row = mapped ? get('SELECT * FROM memory_sources WHERE id = ? AND scope_id = ?', str(mapped, 'source_id'), scopeId) : undefined;
-      // A corrected declaration is replaced by its current version, when that version was verified in its turn.
       while (row && str(row, 'state') === 'corrected') row = get('SELECT * FROM memory_sources WHERE id = ?', str(row, 'replaced_by'));
       const source = row;
       if (!source || str(source, 'state') !== 'authorized' || !verified(str(source, 'id')) || strOrNull(source, 'message_id') === candidate.requestMessageId) continue;

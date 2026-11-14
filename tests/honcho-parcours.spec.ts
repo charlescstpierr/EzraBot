@@ -7,8 +7,6 @@ import {
 } from "@playwright/test";
 import type { PcView } from "../server/src/tools-protocol";
 
-// Real isolated store, worker, memory desk and HTTP server. Honcho and the App Server are fakes started by
-// scripts/test-server.mjs: every project, declaration, request and workspace on these pages is synthetic.
 
 const HONCHO = "http://127.0.0.1:4397";
 const EVIDENCE = "test-results/honcho-parcours";
@@ -34,7 +32,6 @@ async function command(
 const scopeOf = async (request: APIRequestContext, botId: string) =>
   (await pcView(request)).memory.scopes.find((scope) => scope.botId === botId);
 
-/** Gives a character a Honcho project through the real PC route and waits for its workspace. */
 async function enable(
   request: APIRequestContext,
   botId: string,
@@ -101,7 +98,6 @@ async function openThread(page: Page, name: string) {
   ).toBeEnabled();
 }
 
-/** Sends one request and waits for the reply of the fake engine under it. */
 async function ask(page: Page, text: string) {
   const replies = page.locator(".ez-chat-assistant");
   const before = await replies.count();
@@ -111,7 +107,6 @@ async function ask(page: Page, text: string) {
   return replies.nth(before);
 }
 
-// Tall enough for a whole memory section of a character page, so each picture and video shows it in one piece.
 const SIZE = { width: 1280, height: 1500 };
 test.use({ viewport: SIZE, video: { mode: "on", size: SIZE } });
 

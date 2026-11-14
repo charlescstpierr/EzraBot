@@ -234,7 +234,6 @@ export function createHttpServer(options: HttpOptions): Server {
       const outcome = parsed.success ? store.memory.apply(parsed.data)
         : { ok: false as const, code: 'invalid_command' as const, message: 'Cette commande est incomplète ou invalide.' };
       options.log?.({ event: 'command', type: parsed.success ? parsed.data.type : 'unknown', ok: outcome.ok, ...(outcome.ok ? {} : { code: outcome.code }) });
-      // A correction, an exclusion or a forget stops the call that was composed before it.
       if (outcome.ok) worker.sync();
       return sendJson(res, outcome.ok ? 200 : MEMORY_STATUS[outcome.code] ?? 409, { ...outcome, view: appView() });
     }

@@ -1,8 +1,6 @@
 // Isolated browser QA: synthetic SQLite data, deliberately unavailable engine, no provider calls.
 // With MINO_QA_TOOLS=1 the chat lane runs the real engine against the fake App Server process,
 // and connected services use the fake provider: every account, action and result is synthetic.
-// With MINO_QA_HONCHO=1 the chat lane also runs against the fake App Server, and the memory desk
-// talks to a fake Honcho on a loopback port: no real workspace, key or message exists.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,7 +23,6 @@ const port = Number(process.env.MINO_QA_PORT ?? 4399);
 const withTools = process.env.MINO_QA_TOOLS === "1";
 const honcho =
   process.env.MINO_QA_HONCHO === "1" ? await startFakeHoncho() : null;
-// A request that names this word gets a 503 from the fake search, to show a turn answered without memory.
 if (honcho)
   honcho.intercept = (request) =>
     request.path.endsWith("/search") &&

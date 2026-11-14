@@ -851,7 +851,6 @@ export function openStore(options: StoreOptions): Store {
       run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
     },
   };
-  // The tools ask the memory guard only when an action is decided or sent, never while they are built: `memory` exists by then.
   const tools = createToolLedger(kit, receipts, admission, sources, connections, { holds: attemptId => memory.holds(attemptId) });
   const memory = createMemoryLedger(kit, receipts, admission, options.memory ?? null, tools.memoryMoved);
   const HONCHO_OWNS_MEMORY = 'Ce personnage utilise la mémoire Honcho. Ses déclarations se gèrent sur l’ordinateur, dans sa page. Rien n’a été enregistré.';
@@ -1593,13 +1592,8 @@ export function openStore(options: StoreOptions): Store {
   };
   const originKind = (messageId: string): Row => get('SELECT kind AS origin_kind FROM origins WHERE message_id = ?', messageId) ?? {};
 
-  /** One past exchange with the identities of what its text contains, so the attempt that receives it can freeze them. */
   type Traced = { exchange: Exchange; requestMessageId: string; attemptIds: string[] };
 
-  /**
-   * A request the person excluded or forgot never comes back. Neither does the work of a call composed with a source
-   * withdrawn since, with its replies and its deliverable.
-   */
   function threadExchanges(threadBotId: string, beforeSeq: number): Traced[] {
     return all(`SELECT request.*, o.kind AS origin_kind FROM messages request JOIN origins o ON o.message_id = request.id
       WHERE request.role='user' AND request.bot_id=? AND request.seq < ?
@@ -1679,7 +1673,6 @@ export function openStore(options: StoreOptions): Store {
       lane, frozen?.step ?? null, frozen?.taskRevision ?? null, frozen?.baseVersionId ?? null, frozen?.eventsThrough ?? null,
       frozen?.handoffId ?? null, frozen?.continued ? 1 : 0, purpose.kind === 'receipt' ? purpose.executionId : null,
     );
-    // The text keeps the newest exchanges, plus the exchange of the last deliverable even when that one is older.
     const lastDeliverable = prepared.exchanges.findLastIndex(traced => traced.exchange.deliverable !== null);
     const sent = prepared.exchanges.filter((_, index) => index >= composed.plan.exchanges.omitted || index === lastDeliverable);
     memory.freeze(attemptId, {
@@ -1693,7 +1686,6 @@ export function openStore(options: StoreOptions): Store {
     return { lane, workId: prepared.workId, attemptId, n, botId: prepared.botId, choice, turn: composed.turn, toolGrants, purpose };
   }
 
-  /** Once a character has a Honcho project its local memories are never sent again: Honcho is its only long memory. */
   const memoriesOf = (botId: string) => memory.scoped(botId) ? []
     : all('SELECT id, text FROM memories WHERE bot_id = ? ORDER BY seq', botId).map(row => ({ id: str(row, 'id'), text: str(row, 'text') }));
   const requestAttachments = (messageId: string) =>
@@ -1718,7 +1710,6 @@ export function openStore(options: StoreOptions): Store {
     return claim;
   }
 
-  /** The chat request the next claim would take, when no receipt waits for its report. */
   const peekChat = (): Row | undefined => get(
     `SELECT w.id AS work_id, w.bot_id, m.bot_id AS thread_bot_id, m.seq, m.id AS message_id, m.text, o.kind AS origin_kind
      FROM works w JOIN messages m ON m.id = w.request_message_id JOIN origins o ON o.message_id = m.id
@@ -1849,7 +1840,6 @@ export function openStore(options: StoreOptions): Store {
       for (;;) {
         const candidate = lane === 'chat' ? claimChat(recall) : claimDoc();
         if (!candidate || candidate === 'replan') return candidate;
-        // A request, a handoff or a document withdrawn while it waited is never sent: its call ends here, before any reservation.
         if (!memory.holds(candidate.attemptId).ok) {
           refused = true;
           finishAttempt(candidate, engineFailure('memory_changed'));
@@ -1938,10 +1928,6 @@ export function openStore(options: StoreOptions): Store {
     return result;
   }
 
-  /**
-   * The last guard before anything is published. A call composed with a source withdrawn since, or for an older generation
-   * of its project, records a failure: no message, version, proposal, handoff or offer, whatever the engine answered.
-   */
   function finishAttempt(claim: Claim, given: EngineOutcome): FinishResult {
     const attempt = get('SELECT * FROM attempts WHERE id = ?', claim.attemptId);
     const work = get('SELECT * FROM works WHERE id = ?', claim.workId);

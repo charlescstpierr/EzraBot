@@ -515,7 +515,6 @@ const STALE_LABELS: Record<StaleReason, string> = {
 const MEMORY_CHANGED =
   "une source de la mémoire de cette conversation a été corrigée, exclue ou oubliée depuis votre demande";
 
-/** `source_changed` closes an action for its cited document or for the memory of its turn: a document that still holds leaves the memory. */
 function staleLabel(proposal: ToolProposalView): string {
   if (!proposal.staleReason) return "elle n’est plus valable";
   return proposal.staleReason === "source_changed" &&

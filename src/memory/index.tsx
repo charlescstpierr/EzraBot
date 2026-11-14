@@ -15,10 +15,8 @@ import { getProvenance, uid } from "../api";
 import type { Port } from "../port";
 import "./style.css";
 
-/** The identity of one command: a new request for this character. */
 type Identity = { requestId: string; botId: string };
 
-/** One memory command at a time. An unconfirmed one keeps its identity, so trying again never applies it twice. */
 function useMemoryCommand(port: Port, botId: string) {
   const lock = useRef(false),
     held = useRef<{ command: MemoryCommand; done?: () => void } | null>(null);
@@ -117,7 +115,6 @@ const SYNC: Record<SyncState, string> = {
 const plural = (n: number, one: string, many: string) =>
   `${n} ${n > 1 ? many : one}`;
 
-/** What the person reads before the switch. Every limit of the Honcho memory is said here, once, in plain words. */
 function Limits() {
   return (
     <ul className="ez-memory-limits">

@@ -7,8 +7,6 @@ import {
 } from "@playwright/test";
 import type { PcView, ToolsReplyOf } from "../server/src/tools-protocol";
 
-// Real isolated store, worker, memory desk, action desk and HTTP server. Honcho, the provider and the App Server are fakes
-// started by scripts/test-server.mjs: every project, account, request and action on this page is synthetic.
 
 const BOTH = "http://127.0.0.1:4396";
 const EVIDENCE = "test-results/memoire-action-parcours";
@@ -30,7 +28,6 @@ async function command(
   return response.json();
 }
 
-/** A new character with a Honcho project and the right to send one synthetic email. */
 async function characterWithMemoryAndRight(
   request: APIRequestContext,
   name: string,

@@ -1,5 +1,5 @@
 import type { HonchoConfig } from './child-env.js';
-import { HonchoHttpClient } from './honcho-http.js';
+import { HonchoHttpClient, parseHonchoTransportConfig } from './honcho-http.js';
 import type { RecallOutcome, RecallPlan, SendPermit, Settlement } from './memory-ledger.js';
 import type { Store } from './store.js';
 
@@ -14,7 +14,6 @@ export type MemoryDesk = {
 export type MemoryEvent = { event: 'memory'; action: SendPermit['kind']; ok: boolean; code?: string };
 
 const MAX_RESPONSE_BYTES = 1_048_576;
-/** Consecutive requests refused at their departure before a drain gives up, so a guard that keeps failing cannot spin. */
 const MAX_DRY_PERMITS = 3;
 
 /**
@@ -32,13 +31,11 @@ export function createMemoryDesk(options: {
   const ledger = options.store.memory;
   const log = options.log ?? (() => {});
   const { baseUrl, apiKey, timeoutMs } = options.config;
-  /** A request keeps the workspace it was reserved for: a late one can never reach a newer workspace. */
-  const clientFor = (workspaceId: string) => new HonchoHttpClient({
-    baseUrl, apiKey, workspaceId, timeoutMs, maxResponseBytes: MAX_RESPONSE_BYTES,
+  const clientConfig = parseHonchoTransportConfig({
+    baseUrl, apiKey, timeoutMs, maxResponseBytes: MAX_RESPONSE_BYTES,
     ...(options.allowLoopbackHttpForTests ? { allowLoopbackHttpForTests: true } : {}),
   });
-  // Throws at start, before any request, when the address or the key cannot be used.
-  clientFor('configuration');
+  const clientFor = (workspaceId: string) => new HonchoHttpClient({ ...clientConfig, workspaceId });
   let stopping = false;
   let closed = false;
   let draining: Promise<void> | null = null;
@@ -61,7 +58,6 @@ export function createMemoryDesk(options: {
     }
   }
 
-  /** Null when the request did not leave. */
   async function exchange(requestId: string): Promise<Settlement | null> {
     const permit = ledger.begin(requestId);
     if (!permit) return null;
@@ -89,7 +85,6 @@ export function createMemoryDesk(options: {
       again = true;
       return;
     }
-    // A change of the store wakes the desk from inside the call that made it: the drain starts once that call has returned.
     draining = Promise.resolve().then(drain).catch(() => {}).finally(() => {
       draining = null;
       if (again) kick();
@@ -101,7 +96,6 @@ export function createMemoryDesk(options: {
     async recall(plan) {
       if (stopping) return { kind: 'unavailable', workId: plan.workId, category: 'provider' };
       const settlement = await exchange(plan.requestId);
-      // A search that did not leave was planned for a state that moved: the caller plans again.
       if (!settlement) return { kind: 'none' };
       return settlement.result.kind === 'ok' ? { kind: 'found', workId: plan.workId, requestId: plan.requestId }
         : { kind: 'unavailable', workId: plan.workId, category: 'provider' };

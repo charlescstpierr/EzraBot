@@ -75,7 +75,6 @@ export async function startMemory(options: Options) {
   const port = await freePort();
   const actions = options.provider ? createActionDesk({ store, provider: options.provider, port, wake: () => worker.kick(), closeGraceMs: 50 }) : null;
   const worker = createWorker({ store, engines: { chat, doc }, ...(desk ? { memory: desk } : {}), ...(actions ? { tools: actions } : {}) });
-  // As the server does once it listens: what a restart left waiting is looked at again.
   desk?.kick();
   const server: Server = createHttpServer({ store, worker, engine: chat, port, root, csrfToken: CSRF, longPollMs: 50, ...(actions ? { actions } : {}) });
   await new Promise<void>(r => server.listen(port, '127.0.0.1', r));

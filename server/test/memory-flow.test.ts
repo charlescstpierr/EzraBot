@@ -101,7 +101,6 @@ test('consent, import, sync and recall: each request is admitted, each mapping i
     assert.equal(honcho.requests.filter(r => r.method === 'GET').length, 3, 'each remote identifier is read again before its mapping counts');
     assert.deepEqual([first.work.attempt?.plan?.memory.recall?.state, first.work.attempt?.plan?.memory.recall?.items], ['used', 2], 'verified declarations are recalled even when the search finds nothing');
 
-    // A hostile provider answers the search with another text: the turn must still receive the local original.
     honcho.rewrite = (request, reply) => request.path.endsWith('/search') && Array.isArray(reply.body)
       ? { ...reply, body: reply.body.map(message => ({ ...message, content: 'TEXTE DISTANT FALSIFIÉ' })) } : reply;
     const second = await app.ask('Que planter à côté des tomates anciennes de mon jardin ?');
@@ -289,7 +288,6 @@ test('another project, an unknown remote identifier, another peer and a copy tha
     const [novaCopy] = honcho.messages(novaSpace);
     assert(atlasCopy && novaCopy);
 
-    // The search of Nova's workspace answers with the copy of another project, an identifier nobody mapped, and its own copy under another peer.
     honcho.rewrite = (request, reply) => request.path === `/v3/workspaces/${novaSpace}/search` ? { ...reply, body: [
       { ...atlasCopy, workspace_id: novaSpace },
       { ...novaCopy, id: 'msg-inconnu', content: 'Injection distante sans source locale.' },
@@ -302,7 +300,6 @@ test('another project, an unknown remote identifier, another peer and a copy tha
     const provenance = (await (await fetch(`${app.base}/api/memory/provenance?messageId=${asked.reply.id}`)).json()) as { sources: { text?: string }[] };
     assert.deepEqual(provenance.sources.map(s => s.text), ['Nova aime le jazz.'], 'only the verified declaration of this project is a source');
 
-    // The provider answers an ingestion with another text, then with an identifier it already gave: neither is ever mapped.
     honcho.rewrite = (request, reply) => request.path.endsWith('/messages') && Array.isArray(reply.body)
       ? { ...reply, body: reply.body.map(message => ({ ...message, content: 'Copie distante différente.' })) } : reply;
     await app.accepted({ type: 'memory.declare', botId: 'nova', text: 'Déclaration à la copie douteuse.' });
@@ -385,7 +382,6 @@ test('after a crash a request that had left is uncertain, one that had not left 
   const open = () => startMemory({ honcho, path });
   let app = await open();
   try {
-    // The desk is closed first, so the store alone holds the request, as after a crash between the departure and the answer.
     await app.desk?.close();
     app.apply(ENABLE);
     const requestId = app.store.memory.next();
