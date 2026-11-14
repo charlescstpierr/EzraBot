@@ -313,3 +313,19 @@ test('approval survives a sleeping browser while unapproved admission still expi
     assert.equal((await f.call('/m/view', undefined, f.web(second.cookie))).status, 401);
   } finally { await f.close(); }
 });
+
+test('paired creation refuses an unavailable explicit model without creating a bot', async () => {
+  const f = await fixture();
+  try {
+    const { cookie, session } = await f.claim();
+    f.approve(session.session.deviceId);
+    const command = { type: 'bot.create', requestId: 'device-create-model', name: 'Mobile modèle', title: '', shape: 'sprout', color: '#8de343' };
+    const count = f.store.view().bots.length;
+    const refused = await f.call('/m/commands', { ...command, model: 'fake-sol' }, f.web(cookie));
+    assert.equal(refused.status, 409);
+    assert.equal(f.store.view().bots.length, count);
+    assert.equal((await f.call('/m/commands', command, f.web(cookie))).status, 200);
+    assert.equal(f.store.view().bots.length, count + 1);
+    assert.deepEqual(f.store.view().bots.find(b => b.name === command.name)?.choice, { model: null, effort: null, speed: 'standard' });
+  } finally { await f.close(); }
+});

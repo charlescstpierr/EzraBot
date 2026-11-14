@@ -405,11 +405,11 @@ test("un échec sans version reste visible, se reprend dans sa limite et s’ann
   if (sent.kind !== "message") throw new Error("message not recorded");
   const reply = page.locator(`[data-work-id="${sent.workId}"]`);
   (await lab.chat.next()).finish(lab.failure("timeout"));
-  await expect(reply.locator(".ez-doc-status")).toHaveText("Échec");
+  await expect(reply.locator(".ez-doc-status")).toHaveCount(0);
   await expect(reply.locator(".ez-doc-error")).toHaveText(
     "Codex n’a pas répondu à temps. L’appel est arrêté.",
   );
-  await expect(reply).toContainText("Aucune version enregistrée.");
+  await expect(reply).not.toContainText("Aucune version enregistrée.");
   await reply.getByRole("button", { name: "Relancer" }).click();
   const retried = await lab.chat.next();
   expect(lab.posted.at(-1)).toMatchObject({
@@ -417,7 +417,7 @@ test("un échec sans version reste visible, se reprend dans sa limite et s’ann
     workId: sent.workId,
   });
   await reply.getByRole("button", { name: "Arrêter" }).click();
-  await expect(reply.locator(".ez-doc-status")).toHaveText("Annulé");
+  await expect(reply).toContainText("Arrêté à votre demande.");
   expect(lab.posted.at(-1)).toMatchObject({
     type: "work.cancel",
     workId: sent.workId,

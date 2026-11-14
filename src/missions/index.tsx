@@ -204,7 +204,9 @@ export function MissionList({ port }: { port: Port }) {
       <header>
         <div>
           <h1>Missions</h1>
-          <p>Un objectif, un dossier et les décisions de Mino.</p>
+          <p>
+            Les travaux confiés à vos personnages dans un dossier de projet.
+          </p>
         </div>
         <button onClick={() => setCreating(true)}>Nouvelle mission</button>
       </header>
@@ -228,7 +230,10 @@ export function MissionList({ port }: { port: Port }) {
             </p>
           )}
           {!port.agents.missions.length && (
-            <p>Aucune mission. Préparez un objectif pour commencer.</p>
+            <p>
+              Aucune mission. Ajoutez un dossier dans Projets, puis confiez un
+              objectif à un personnage.
+            </p>
           )}
           <div className="missions-list">
             {port.agents.missions

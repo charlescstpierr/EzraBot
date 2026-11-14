@@ -306,3 +306,23 @@ test('diagnostics expose only allowlisted metadata and keep late usage on the co
     assert(!JSON.stringify(after).includes('SECRET_'));
   } finally {await app.stop();}
 });
+
+test('creation validates an explicit model but legacy creation works offline', async () => {
+  const app = await start();
+  const command = { type: 'bot.create', requestId: 'create-model-001', name: 'Modèle choisi', title: '', shape: 'sprout', color: '#8de343', model: 'fake' };
+  try {
+    const before = (await app.view()).bots.length;
+    const saved = await app.post(command);
+    assert.equal(saved.status, 200);
+    assert.equal((await app.post(command)).status, 200);
+    assert.equal((await app.view()).bots.length, before + 1);
+    assert.deepEqual((await app.view()).bots.find(b => b.name === command.name)?.choice, { model: 'fake', effort: null, speed: 'standard' });
+    assert.equal((await app.post({ ...command, requestId: 'create-model-002', model: 'absent' })).status, 422);
+    app.engine.catalog = async () => ({ state: 'unavailable', message: 'Offline' });
+    assert.equal((await app.post({ ...command, requestId: 'create-model-003' })).status, 422);
+    assert.equal((await app.view()).bots.length, before + 1);
+    const { model, ...legacy } = command;
+    assert.equal((await app.post({ ...legacy, requestId: 'create-model-004' })).status, 200);
+    assert.equal((await app.post({ ...legacy, model: null, requestId: 'create-model-005' })).status, 200);
+  } finally { await app.stop(); }
+});

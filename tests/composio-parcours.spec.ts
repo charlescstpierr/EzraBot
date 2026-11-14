@@ -142,9 +142,10 @@ test("parcours complet : relier un compte, donner un droit, proposer, approuver 
   await preferences.getByRole("button", { name: "Fermer" }).click();
 
   await page.getByRole("button", { name: "Personnages", exact: true }).click();
+  await page.getByRole("button", { name: "Modifier Nova" }).click();
   await page
-    .locator(".character-tabs")
-    .getByRole("button", { name: "Nova" })
+    .getByRole("dialog")
+    .getByRole("button", { name: "Mémoire et réglages" })
     .click();
   const rights = page.getByRole("region", { name: "Services connectés" });
   await expect(rights).toContainText("Nova n’a aucun droit pour le moment.");
@@ -177,9 +178,7 @@ test("parcours complet : relier un compte, donner un droit, proposer, approuver 
     fullPage: true,
   });
 
-  await page
-    .getByRole("button", { name: "Ouvrir son fil", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Discuter", exact: true }).click();
   await expect(
     page.getByRole("checkbox", { name: /Utiliser les services connectés/ }),
   ).toBeChecked();
@@ -372,6 +371,11 @@ test("sans clé Composio, les préférences et la page du personnage l’indique
     .getByRole("button", { name: "Fermer" })
     .click();
   await page.getByRole("button", { name: "Personnages", exact: true }).click();
+  await page.getByRole("button", { name: "Modifier Mino" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Mémoire et réglages" })
+    .click();
   await expect(
     page.getByRole("region", { name: "Services connectés" }),
   ).toContainText("Aucune clé Composio n’est configurée sur ce serveur.");

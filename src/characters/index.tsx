@@ -1,17 +1,20 @@
-import { useRef, useState } from "react";
-import { Plus, Check, Trash2, RefreshCw } from "lucide-react";
-import catalogue from "../../server/assets/mascots.json";
+import { useState } from "react";
+import { Plus, Check, Trash2, Pencil, MessageCircle } from "lucide-react";
 import {
   CONTEXT_SIZES,
   REPLY_STYLES,
   LIMITS,
   type BotView,
-  type Command,
 } from "../../server/src/protocol";
-import type { AppOutcome, Port } from "../port";
+import type { Port } from "../port";
 import { uid } from "../api";
 import { Mascot } from "../Mascot";
 import { ToolGrants } from "../tools";
+import { useAction } from "./action";
+export { BotSheet } from "./sheet";
+export { BotSwitcher } from "./switcher";
+export { ModelPicker } from "./model";
+import { ModelPicker, modelLabel } from "./model";
 import "./style.css";
 const deletionLabels: Record<string, string> = {
   messages: "Messages",
@@ -25,170 +28,43 @@ const deletionLabels: Record<string, string> = {
   keptMentions: "Mentions conservées ailleurs",
   tasks: "Tâches",
 };
-type Accepted = Extract<AppOutcome, { kind: "accepted" }>;
-function useAction(port: Port) {
-  const lock = useRef(false),
-    held = useRef<{
-      command: Command;
-      done?: (result: Accepted) => void;
-    } | null>(null);
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    [uncertain, setUncertain] = useState(false);
-  async function perform(command: Command, done?: (result: Accepted) => void) {
-    if (lock.current) return;
-    const action = held.current ?? { command, done };
-    held.current = action;
-    lock.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await port.run.app(action.command);
-      if (result.kind === "accepted") {
-        held.current = null;
-        setUncertain(false);
-        action.done?.(result);
-      } else {
-        setError(result.message);
-        if (result.kind === "unknown") setUncertain(true);
-        else {
-          held.current = null;
-          setUncertain(false);
-        }
-      }
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  }
-  return {
-    perform,
-    disabled: busy || uncertain,
-    feedback: (
-      <>
-        {error && (
-          <p className="notice" role="alert">
-            {error}
-          </p>
-        )}
-        {uncertain && (
+export function CharacterGallery({ port }: { port: Port }) {
+  return (
+    <ul className="bot-grid" aria-label="Personnages">
+      <li>
+        <button
+          className="bot-card bot-card-new"
+          onClick={() => port.openBot({ mode: "create" })}
+        >
+          <span className="bot-card-plus">
+            <Plus size={22} />
+          </span>
+          <strong>Nouveau personnage</strong>
+        </button>
+      </li>
+      {port.view.bots.map((bot) => (
+        <li key={bot.id} className="bot-card">
           <button
-            className="outline"
-            disabled={busy}
-            onClick={() => {
-              if (held.current) void perform(held.current.command);
-            }}
+            className="bot-card-main"
+            aria-label={`Discuter avec ${bot.name}`}
+            onClick={() => port.go({ page: "chat", botId: bot.id })}
           >
-            Réessayer la même action
-            <RefreshCw size={15} />
+            <Mascot shape={bot.shape} color={bot.color} size={64} />
+            <strong>{bot.name}</strong>
+            {bot.title && <small>{bot.title}</small>}
+            {bot.instructions && <p>{bot.instructions}</p>}
+            <span className="bot-card-model">{modelLabel(port, bot)}</span>
           </button>
-        )}
-      </>
-    ),
-  };
-}
-function Appearance({
-  name,
-  setName,
-  title,
-  setTitle,
-  shape,
-  setShape,
-  color,
-  setColor,
-}: {
-  name: string;
-  setName: (s: string) => void;
-  title: string;
-  setTitle: (s: string) => void;
-  shape: string;
-  setShape: (s: string) => void;
-  color: string;
-  setColor: (s: string) => void;
-}) {
-  return (
-    <>
-      <Mascot shape={shape} color={color} size={84} animated />
-      <label>
-        Son petit nom
-        <input
-          required
-          maxLength={24}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-      <label>
-        Son rôle
-        <input
-          maxLength={60}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </label>
-      <label>
-        Sa forme
-        <select value={shape} onChange={(e) => setShape(e.target.value)}>
-          {catalogue.shapes.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Sa couleur
-        <input
-          type="color"
-          value={color}
-          onChange={(e) => setColor(e.target.value)}
-        />
-      </label>
-    </>
-  );
-}
-export function CharacterCreate({ port }: { port: Port }) {
-  const [name, setName] = useState(""),
-    [title, setTitle] = useState(""),
-    [shape, setShape] = useState("sprout"),
-    [color, setColor] = useState("#8de343");
-  const action = useAction(port);
-  return (
-    <div className="ez-character">
-      <h2>Un nouveau compagnon.</h2>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void action.perform(
-            { type: "bot.create", requestId: uid(), name, title, shape, color },
-            (r) => {
-              if (r.result.kind === "bot")
-                port.go({ page: "characters", botId: r.result.botId });
-            },
-          );
-        }}
-      >
-        <fieldset disabled={action.disabled}>
-          <Appearance
-            {...{
-              name,
-              setName,
-              title,
-              setTitle,
-              shape,
-              setShape,
-              color,
-              setColor,
-            }}
-          />
-          <button className="black">
-            Créer le personnage
-            <Plus size={16} />
+          <button
+            className="icon bot-card-edit"
+            aria-label={`Modifier ${bot.name}`}
+            onClick={() => port.openBot({ mode: "edit", botId: bot.id })}
+          >
+            <Pencil size={16} />
           </button>
-        </fieldset>
-      </form>
-      {action.feedback}
-    </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 export function CharacterPanel({ port, botId }: { port: Port; botId: string }) {
@@ -201,153 +77,56 @@ export function CharacterPanel({ port, botId }: { port: Port; botId: string }) {
           className="outline"
           onClick={() => port.go({ page: "characters" })}
         >
-          Créer un personnage
-          <Plus size={16} />
+          Voir les personnages
         </button>
       </div>
     );
-  return <Profile key={bot.id} port={port} bot={bot} />;
+  return <Settings key={bot.id} port={port} bot={bot} />;
 }
-function Profile({ port, bot }: { port: Port; bot: BotView }) {
-  const [name, setName] = useState(bot.name),
-    [title, setTitle] = useState(bot.title),
-    [shape, setShape] = useState(bot.shape),
-    [color, setColor] = useState(bot.color),
-    [instructions, setInstructions] = useState(bot.instructions),
-    [replyStyle, setReplyStyle] = useState(bot.replyStyle),
-    [contextSize, setContextSize] = useState(bot.contextSize),
-    [memory, setMemory] = useState("");
-  const profile = useAction(port),
-    addMemory = useAction(port),
-    reset = useAction(port);
+function Settings({ port, bot }: { port: Port; bot: BotView }) {
+  const [memory, setMemory] = useState("");
+  const addMemory = useAction(port);
   return (
     <div className="ez-character">
-      <div className="ez-character-heading">
+      <header className="ez-character-hero">
+        <Mascot shape={bot.shape} color={bot.color} size={88} />
         <div>
-          <span className="card-label">VOTRE COMPAGNON</span>
-          <h2>Un compagnon à votre image.</h2>
+          <h2>{bot.name}</h2>
+          {bot.title && <p>{bot.title}</p>}
         </div>
-        <button
-          className="outline"
-          onClick={() => port.go({ page: "chat", botId: bot.id })}
-        >
-          Ouvrir son fil
-        </button>
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void profile.perform({
-            type: "bot.update",
-            requestId: uid(),
-            botId: bot.id,
-            name,
-            title,
-            shape,
-            color,
-            instructions,
-            replyStyle,
-            contextSize,
-          });
-        }}
-      >
-        <fieldset disabled={profile.disabled}>
-          <Appearance
-            {...{
-              name,
-              setName,
-              title,
-              setTitle,
-              shape,
-              setShape,
-              color,
-              setColor,
-            }}
-          />
-          <label>
-            Consignes personnelles
-            <textarea
-              maxLength={LIMITS.botInstructionsChars}
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-            />
-          </label>
-          <div className="ez-character-columns">
-            <label>
-              Style des réponses
-              <select
-                value={replyStyle}
-                onChange={(e) => {
-                  const value = REPLY_STYLES.find((s) => s === e.target.value);
-                  if (value) setReplyStyle(value);
-                }}
-              >
-                {REPLY_STYLES.map((s) => (
-                  <option key={s} value={s}>
-                    {
-                      {
-                        concise: "Court",
-                        normal: "Normal",
-                        detailed: "Détaillé",
-                      }[s]
-                    }
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Contexte relu
-              <select
-                value={contextSize}
-                onChange={(e) => {
-                  const value = CONTEXT_SIZES.find((s) => s === e.target.value);
-                  if (value) setContextSize(value);
-                }}
-              >
-                {CONTEXT_SIZES.map((s) => (
-                  <option key={s} value={s}>
-                    {{ short: "Court", standard: "Standard", long: "Long" }[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <button className="black">
-            Enregistrer le profil
-            <Check size={16} />
+        <div className="ez-character-hero-actions">
+          <button
+            className="black"
+            onClick={() => port.go({ page: "chat", botId: bot.id })}
+          >
+            Discuter
+            <MessageCircle size={16} />
           </button>
-        </fieldset>
-      </form>
-      {profile.feedback}
-      <button
-        className="outline"
-        disabled={reset.disabled}
-        onClick={() =>
-          void reset.perform(
-            {
-              type: "bot.update",
-              requestId: uid(),
-              botId: bot.id,
-              reset: true,
-            },
-            () => {
-              setShape(bot.defaultShape);
-              setColor(bot.defaultColor);
-            },
-          )
-        }
-      >
-        Rétablir la forme et la couleur
-        <RefreshCw size={15} />
-      </button>
-      {reset.feedback}
-      <EngineSettings port={port} bot={bot} />
-      <ToolGrants port={port} bot={bot} />
-      <section>
-        <h3>Sa mémoire</h3>
+          <button
+            className="outline"
+            onClick={() => port.openBot({ mode: "edit", botId: bot.id })}
+          >
+            Modifier le profil
+            <Pencil size={15} />
+          </button>
+        </div>
+      </header>
+      <section aria-labelledby="personality-heading">
+        <h3 id="personality-heading">Personnalité et instructions</h3>
+        {bot.instructions ? (
+          <blockquote>{bot.instructions}</blockquote>
+        ) : (
+          <p>Aucune instruction pour le moment.</p>
+        )}
+      </section>
+      <section aria-labelledby="model-heading" className="ez-character-model">
+        <h3 id="model-heading">Modèle</h3>
+        <ModelPicker port={port} bot={bot} />
+      </section>
+      <section aria-labelledby="memory-heading">
+        <h3 id="memory-heading">Sa mémoire</h3>
         <p>
-          Ces souvenirs appartiennent uniquement à {bot.name}. {bot.memoryChars}{" "}
-          / {LIMITS.memoryTotalChars} caractères.
+          {bot.memoryChars} / {LIMITS.memoryTotalChars} caractères utilisés.
         </p>
         {bot.memories.map((item) => (
           <MemoryEditor
@@ -392,8 +171,81 @@ function Profile({ port, bot }: { port: Port; bot: BotView }) {
         </form>
         {addMemory.feedback}
       </section>
+      <ToolGrants port={port} bot={bot} />
+      <details className="ez-character-advanced">
+        <summary>Réglages avancés</summary>
+        <ReplySettings port={port} bot={bot} />
+      </details>
       <DeleteCharacter port={port} bot={bot} />
     </div>
+  );
+}
+function ReplySettings({ port, bot }: { port: Port; bot: BotView }) {
+  const [replyStyle, setReplyStyle] = useState(bot.replyStyle),
+    [contextSize, setContextSize] = useState(bot.contextSize);
+  const action = useAction(port);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void action.perform({
+          type: "bot.update",
+          requestId: uid(),
+          botId: bot.id,
+          replyStyle,
+          contextSize,
+        });
+      }}
+    >
+      <h3>Réponses</h3>
+      <fieldset disabled={action.disabled}>
+        <div className="ez-character-columns">
+          <label>
+            Style des réponses
+            <select
+              value={replyStyle}
+              onChange={(e) => {
+                const value = REPLY_STYLES.find((s) => s === e.target.value);
+                if (value) setReplyStyle(value);
+              }}
+            >
+              {REPLY_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {
+                    {
+                      concise: "Court",
+                      normal: "Normal",
+                      detailed: "Détaillé",
+                    }[s]
+                  }
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Contexte relu
+            <select
+              value={contextSize}
+              onChange={(e) => {
+                const value = CONTEXT_SIZES.find((s) => s === e.target.value);
+                if (value) setContextSize(value);
+              }}
+            >
+              {CONTEXT_SIZES.map((s) => (
+                <option key={s} value={s}>
+                  {{ short: "Court", standard: "Standard", long: "Long" }[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <button className="outline">
+          Enregistrer les réponses
+          <Check size={16} />
+        </button>
+      </fieldset>
+      {action.feedback}
+    </form>
   );
 }
 function MemoryEditor({
@@ -519,93 +371,6 @@ function MemoryEditor({
       )}
       {action.feedback}
     </div>
-  );
-}
-function EngineSettings({ port, bot }: { port: Port; bot: BotView }) {
-  const [model, setModel] = useState(bot.choice.model ?? ""),
-    [effort, setEffort] = useState(bot.choice.effort ?? ""),
-    [speed, setSpeed] = useState(bot.choice.speed);
-  const action = useAction(port);
-  const engine = port.view.engine,
-    models = engine.state === "ready" ? engine.models : [];
-  const selected =
-    models.find((m) => m.id === model) ?? models.find((m) => m.isDefault);
-  return (
-    <section>
-      <h3>Moteur de réponse</h3>
-      {engine.state !== "ready" ? (
-        <p className="notice">
-          Le catalogue du moteur est indisponible. Aucun réglage n’a été changé.
-        </p>
-      ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void action.perform({
-              type: "bot.configure",
-              requestId: uid(),
-              botId: bot.id,
-              model: model || null,
-              effort: effort || null,
-              speed,
-            });
-          }}
-        >
-          <fieldset disabled={action.disabled}>
-            <label>
-              Modèle
-              <select
-                value={model}
-                onChange={(e) => {
-                  setModel(e.target.value);
-                  setEffort("");
-                  setSpeed("standard");
-                }}
-              >
-                <option value="">Choix par défaut du moteur</option>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Effort
-              <select
-                value={effort}
-                onChange={(e) => setEffort(e.target.value)}
-              >
-                <option value="">Effort par défaut</option>
-                {selected?.efforts.map((e) => (
-                  <option key={e} value={e}>
-                    {e}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Vitesse
-              <select value={speed} onChange={(e) => setSpeed(e.target.value)}>
-                <option value="standard">Standard</option>
-                {selected?.speeds
-                  .filter((s) => s.id !== "standard")
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <button className="outline">
-              Enregistrer le choix du moteur
-              <Check size={16} />
-            </button>
-          </fieldset>
-        </form>
-      )}
-      {action.feedback}
-    </section>
   );
 }
 function DeleteCharacter({ port, bot }: { port: Port; bot: BotView }) {
