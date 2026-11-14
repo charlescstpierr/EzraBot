@@ -12,6 +12,7 @@ import type { AppOutcome, Port } from "../port";
 import { uid } from "../api";
 import { Mascot } from "../Mascot";
 import { ToolGrants } from "../tools";
+import { HonchoMemory } from "../memory";
 import "./style.css";
 const deletionLabels: Record<string, string> = {
   messages: "Messages",
@@ -343,55 +344,58 @@ function Profile({ port, bot }: { port: Port; bot: BotView }) {
       {reset.feedback}
       <EngineSettings port={port} bot={bot} />
       <ToolGrants port={port} bot={bot} />
-      <section>
-        <h3>Sa mémoire</h3>
-        <p>
-          Ces souvenirs appartiennent uniquement à {bot.name}. {bot.memoryChars}{" "}
-          / {LIMITS.memoryTotalChars} caractères.
-        </p>
-        {bot.memories.map((item) => (
-          <MemoryEditor
-            key={item.id}
-            port={port}
-            botId={bot.id}
-            memory={item}
-          />
-        ))}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const captured = memory;
-            void addMemory.perform(
-              {
-                type: "memory.create",
-                requestId: uid(),
-                botId: bot.id,
-                text: memory,
-              },
-              () =>
-                setMemory((current) => (current === captured ? "" : current)),
-            );
-          }}
-        >
-          <fieldset disabled={addMemory.disabled}>
-            <label>
-              Un souvenir à garder
-              <textarea
-                required
-                maxLength={LIMITS.memoryChars}
-                value={memory}
-                onChange={(e) => setMemory(e.target.value)}
-                placeholder="Quelque chose à retenir…"
-              />
-            </label>
-            <button className="outline">
-              Ajouter à sa mémoire
-              <Plus size={16} />
-            </button>
-          </fieldset>
-        </form>
-        {addMemory.feedback}
-      </section>
+      {bot.memoryScope === null && (
+        <section>
+          <h3>Sa mémoire</h3>
+          <p>
+            Ces souvenirs appartiennent uniquement à {bot.name}.{" "}
+            {bot.memoryChars} / {LIMITS.memoryTotalChars} caractères.
+          </p>
+          {bot.memories.map((item) => (
+            <MemoryEditor
+              key={item.id}
+              port={port}
+              botId={bot.id}
+              memory={item}
+            />
+          ))}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const captured = memory;
+              void addMemory.perform(
+                {
+                  type: "memory.create",
+                  requestId: uid(),
+                  botId: bot.id,
+                  text: memory,
+                },
+                () =>
+                  setMemory((current) => (current === captured ? "" : current)),
+              );
+            }}
+          >
+            <fieldset disabled={addMemory.disabled}>
+              <label>
+                Un souvenir à garder
+                <textarea
+                  required
+                  maxLength={LIMITS.memoryChars}
+                  value={memory}
+                  onChange={(e) => setMemory(e.target.value)}
+                  placeholder="Quelque chose à retenir…"
+                />
+              </label>
+              <button className="outline">
+                Ajouter à sa mémoire
+                <Plus size={16} />
+              </button>
+            </fieldset>
+          </form>
+          {addMemory.feedback}
+        </section>
+      )}
+      <HonchoMemory port={port} bot={bot} />
       <DeleteCharacter port={port} bot={bot} />
     </div>
   );

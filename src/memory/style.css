@@ -1,0 +1,80 @@
+.ez-memory h4 {
+  font-size: 14px;
+  font-weight: 550;
+  margin: 26px 0 4px;
+}
+.ez-memory-limits {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #55624a;
+  padding-left: 18px;
+}
+.ez-memory-limits li {
+  margin: 6px 0;
+}
+.ez-character label.ez-memory-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.6;
+}
+.ez-character .ez-memory-check input {
+  width: auto;
+  margin-top: 3px;
+  flex: none;
+}
+.ez-memory-item {
+  border: 1px solid #e6ebdf;
+  border-radius: 9px;
+  padding: 4px 14px 12px;
+  margin: 10px 0;
+}
+.ez-memory-item > p {
+  color: #26301e;
+}
+.ez-memory-item small,
+.ez-memory-trace small {
+  color: #7b8770;
+  font-size: 12px;
+}
+.ez-memory-danger {
+  border-top: 1px solid #e6ebdf;
+  margin-top: 26px;
+}
+.ez-memory-links {
+  list-style: none;
+  padding: 0;
+}
+.ez-memory-trace {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #7b8770;
+}
+.ez-memory-trace button {
+  font-size: 12px;
+  padding: 5px 10px;
+  margin: 4px 6px 0 0;
+  min-height: 0;
+}
+/* The exclusion of a request sits under each message of the person: it stays a quiet text action. */
+.ez-memory-trace .ez-memory-quiet {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #7b8770;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ez-memory-trace ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.ez-memory-trace li {
+  margin: 8px 0;
+}
+.ez-memory-trace li p {
+  margin: 2px 0 4px;
+  color: #26301e;
+  font-size: 13px;
+}

@@ -13,6 +13,14 @@ import {
   type ToolsReply,
   type ToolsReplyOf,
 } from "../server/src/tools-protocol";
+import {
+  MEMORY_REFUSALS,
+  MemoryResultSchema,
+  ProvenanceSchema,
+  type MemoryCommand,
+  type MemoryRefusalCode,
+  type Provenance,
+} from "../server/src/memory-protocol";
 import type {
   AgentsView,
   AgentCommand,
@@ -69,6 +77,23 @@ const agentCodes = {
 } satisfies Record<AgentRefusalCode, true>;
 const isToolCode = (code: unknown): code is ToolRefusalCode =>
   TOOL_REFUSALS.some((known) => known === code);
+const isMemoryCode = (code: unknown): code is MemoryRefusalCode =>
+  MEMORY_REFUSALS.some((known) => known === code);
+/** The sources one reply was composed with, as the server reads them now. */
+export async function getProvenance(
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<Provenance> {
+  const data = await getJson(
+    `/api/memory/provenance?messageId=${encodeURIComponent(messageId)}`,
+    signal,
+  );
+  if (!isRecord(data)) throw Error("Réponse inattendue du service.");
+  const { ok: _ok, ...provenance } = data;
+  const parsed = ProvenanceSchema.safeParse(provenance);
+  if (!parsed.success) throw Error("Réponse inattendue du service.");
+  return parsed.data;
+}
 const csrfToken = () =>
   document.querySelector<HTMLMetaElement>('meta[name="mino-csrf"]')?.content ??
   "";
@@ -119,8 +144,12 @@ export function createRunner(
   csrf: () => string = csrfToken,
 ): CommandRunner {
   async function post(
-    command: Command | AgentCommand | ToolCommand,
-    url: "/api/commands" | "/api/agents/commands" | "/api/tools/commands",
+    command: Command | AgentCommand | ToolCommand | MemoryCommand,
+    url:
+      | "/api/commands"
+      | "/api/agents/commands"
+      | "/api/tools/commands"
+      | "/api/memory/commands",
   ): Promise<
     | { kind: "unknown"; message: string }
     | { kind: "response"; data: Record<string, unknown>; status: number }
@@ -230,6 +259,39 @@ export function createRunner(
         kind: "unknown",
         message:
           "Le service ne confirme pas cette décision. Réessayez la même action : elle ne sera pas appliquée deux fois.",
+      };
+    },
+    async memory(input) {
+      const received = await post(input, "/api/memory/commands");
+      if (received.kind === "unknown") return received;
+      const { data, status } = received;
+      const view = isRecord(data.view) ? (data.view as PcView) : null;
+      if (view) apply.app(view);
+      if (data.ok === true && view) {
+        const result = MemoryResultSchema.safeParse(data.result);
+        if (result.success)
+          return {
+            kind: "accepted",
+            view,
+            result: result.data,
+            replayed: data.replayed === true,
+          };
+      }
+      if (data.ok === false && typeof data.message === "string") {
+        if (view && isMemoryCode(data.code))
+          return {
+            kind: "refused",
+            view,
+            code: data.code,
+            message: data.message,
+          };
+        if (status >= 400)
+          return { kind: "rejected", status, message: data.message };
+      }
+      return {
+        kind: "unknown",
+        message:
+          "Le service ne confirme pas cette commande. Réessayez la même action : elle ne sera pas appliquée deux fois.",
       };
     },
     async agents(input) {

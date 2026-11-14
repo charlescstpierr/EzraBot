@@ -41,6 +41,7 @@ import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
 import { CharacterPanel, CharacterCreate } from "./characters";
 import { ToolCards, ToolConnections } from "./tools";
+import { MemoryTrace } from "./memory";
 import { ResultsPage } from "./results";
 import "./style.css";
 function browserStorage(
@@ -165,6 +166,7 @@ function App() {
       outbox && {
         app: runner.app,
         tools: runner.tools,
+        memory: runner.memory,
         agents: (command) =>
           outbox.run(
             command,
@@ -546,6 +548,9 @@ function App() {
                 <MissionProposal port={port} message={message} />
               ),
               tools: (message) => <ToolCards port={port} message={message} />,
+              memory: (message) => (
+                <MemoryTrace port={port} message={message} />
+              ),
             }}
           />
         ) : (

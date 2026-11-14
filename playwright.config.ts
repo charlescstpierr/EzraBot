@@ -28,5 +28,12 @@ export default defineConfig({
       url: "http://127.0.0.1:4398",
       reuseExistingServer: false,
     },
+    {
+      // Honcho memory with a fake Honcho and a fake App Server. Used by tests/honcho-parcours.spec.ts only.
+      command: "node scripts/test-server.mjs",
+      env: { MINO_QA_PORT: "4397", MINO_QA_HONCHO: "1" },
+      url: "http://127.0.0.1:4397",
+      reuseExistingServer: false,
+    },
   ],
 });

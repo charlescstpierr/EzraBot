@@ -10,6 +10,11 @@ import type {
   ToolResult,
 } from "../server/src/tools-protocol";
 import type {
+  MemoryCommand,
+  MemoryRefusalCode,
+  MemoryResult,
+} from "../server/src/memory-protocol";
+import type {
   AgentCommand,
   AgentRefusalCode,
   AgentsView,
@@ -22,6 +27,7 @@ export type Outcome<V, R, C extends string> =
   | { kind: "unknown"; message: string };
 export type AppOutcome = Outcome<PcView, CommandResult, RefusalCode>;
 export type ToolsOutcome = Outcome<PcView, ToolResult, ToolRefusalCode>;
+export type MemoryOutcome = Outcome<PcView, MemoryResult, MemoryRefusalCode>;
 export type AgentsOutcome = Outcome<
   AgentsView,
   { id: string },
@@ -32,6 +38,8 @@ export type CommandRunner = {
   agents(command: AgentCommand): Promise<AgentsOutcome>;
   /** Connected services: rights and decisions. PC only. */
   tools(command: ToolCommand): Promise<ToolsOutcome>;
+  /** The Honcho project of a character: consent, declarations, exclusion, forget. PC only. */
+  memory(command: MemoryCommand): Promise<MemoryOutcome>;
 };
 export type Route =
   | {

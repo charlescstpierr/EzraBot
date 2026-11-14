@@ -21,6 +21,16 @@ const REPLY_STYLES: Record<ReplyStyle, string> = {
   detailed: "détaillées",
 };
 
+const RECALL_STATES: Record<
+  NonNullable<ContextPlan["memory"]["recall"]>["state"],
+  string
+> = {
+  used: "rappel utilisé",
+  empty: "aucune source rappelée",
+  unavailable: "indisponible",
+  suspended: "suspendue",
+};
+
 const tokens = (counts: TokenCounts) =>
   `${count(counts.input)} en entrée dont ${count(counts.cachedInput)} lus en cache et ${count(counts.cacheWriteInput)} écrits en cache, ${count(counts.output)} en sortie dont ${count(counts.reasoningOutput)} de raisonnement, ${count(counts.total)} au total`;
 
@@ -47,7 +57,9 @@ function planFacts(plan: ContextPlan): Fact[] {
     ],
     [
       "Souvenirs",
-      `${count(plan.memory.count)}, ${plural(plan.memory.chars, "caractère", "caractères")}${plan.memory.overBudget ? ", budget dépassé" : ""}`,
+      plan.memory.recall
+        ? `Honcho : ${RECALL_STATES[plan.memory.recall.state]}, ${count(plan.memory.recall.items)} envoyés (${plural(plan.memory.recall.chars, "caractère", "caractères")}), ${count(plan.memory.recall.omitted)} non inclus`
+        : `${count(plan.memory.count)}, ${plural(plan.memory.chars, "caractère", "caractères")}${plan.memory.overBudget ? ", budget dépassé" : ""}`,
     ],
     [
       "Pièces jointes",
