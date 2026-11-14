@@ -77,7 +77,10 @@ export type Engine = {
   status(): EngineStatus;
   catalog(): Promise<EngineStatus>;
   run(input: RunInput): Promise<EngineOutcome>;
-  /** Usage notifications for any thread on the connection, including ones that arrive after a turn ended. */
+  /**
+   * Usage notifications for any thread on the connection, including ones that arrive after a turn ended.
+   * Usage received while a turn starts is reported after `onTurn`, so a listener knows the accepted turn first.
+   */
   onUsage(listener: (observation: UsageObservation) => void): () => void;
   close(): Promise<void>;
 };
@@ -344,11 +347,30 @@ export function createCodexEngine(options: EngineOptions): Engine {
   let models: CatalogModel[] = [];
   let active = false;
   const usageListeners = new Set<(observation: UsageObservation) => void>();
+  /**
+   * Usage received while a `turn/start` waits for its answer. One read can carry that answer and the usage after it,
+   * and that usage gets here before the continuation that reports the turn. A store that saw another turn's usage first
+   * refuses the real counters. The continuation releases the usage itself: a later microtask would race the caller of `run`.
+   */
+  let heldUsage: UsageObservation[] | null = null;
+  const reportUsage = (observation: UsageObservation) => {
+    for (const listener of usageListeners) listener(observation);
+  };
+  /** Holds usage back until the returned function runs. It reports what this hold kept, in arrival order, and leaves a later call's hold in place. */
+  const holdUsage = (): (() => void) => {
+    const held: UsageObservation[] = [];
+    heldUsage = held;
+    return () => {
+      if (heldUsage === held) heldUsage = null;
+      held.forEach(reportUsage);
+    };
+  };
   const observe = (method: string, params: unknown) => {
     if (method !== 'thread/tokenUsage/updated') return;
     const parsed = TokenUsageUpdatedSchema.safeParse(params);
     if (!parsed.success) return;
-    for (const listener of usageListeners) listener(parsed.data);
+    if (heldUsage) heldUsage.push(parsed.data);
+    else reportUsage(parsed.data);
   };
 
   async function start(): Promise<{ connection: Connection; models: CatalogModel[] }> {
@@ -607,6 +629,7 @@ export function createCodexEngine(options: EngineOptions): Engine {
         finish(engineFailure('admission_refused', departure.reason));
         return;
       }
+      const releaseUsage = holdUsage();
       conn.request('turn/start', {
         threadId,
         input: [{ type: 'text', text: turn.input }],
@@ -617,19 +640,26 @@ export function createCodexEngine(options: EngineOptions): Engine {
         approvalPolicy: 'untrusted',
         outputSchema: turn.outputSchema,
       }, requestTimeout).then(result => {
-        const parsed = TurnStartSchema.safeParse(result);
-        if (!parsed.success) {
-          finish(engineFailure('rpc_refused'));
-          return;
+        try {
+          const parsed = TurnStartSchema.safeParse(result);
+          if (!parsed.success) {
+            finish(engineFailure('rpc_refused'));
+            return;
+          }
+          if (turnId !== null && turnId !== parsed.data.turn.id) {
+            stop(engineFailure('rpc_refused', 'Codex a annoncé deux tours différents. Mino a arrêté l’appel.'));
+            return;
+          }
+          onTurn(parsed.data.turn.id);
+          knowTurn(parsed.data.turn.id);
+          if (aborting) interrupt();
+        } finally {
+          releaseUsage();
         }
-        if (turnId !== null && turnId !== parsed.data.turn.id) {
-          stop(engineFailure('rpc_refused', 'Codex a annoncé deux tours différents. Mino a arrêté l’appel.'));
-          return;
-        }
-        onTurn(parsed.data.turn.id);
-        knowTurn(parsed.data.turn.id);
-        if (aborting) interrupt();
-      }, () => finish(aborting ?? engineFailure(conn.alive ? 'rpc_refused' : 'engine_exited')));
+      }, () => {
+        finish(aborting ?? engineFailure(conn.alive ? 'rpc_refused' : 'engine_exited'));
+        releaseUsage();
+      });
       if (signal.aborted) onAbort();
     });
   }
