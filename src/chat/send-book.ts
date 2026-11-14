@@ -309,38 +309,40 @@ export function openSendBook(options: {
       active.set(f.command.requestId, promise);
       return promise;
     },
-    /** Only a complete server-view proof of terminal, unprotected work may make an accepted pointer collectible.
-     * Readers never collect another writer. Unknown/queued entries survive every cap and TTL.
-     */
+    /** Accepted sends need server-view proof of terminal, unprotected work. Unresolved rows survive every cap and TTL. */
     collect(terminalUnprotectedRequestIds: readonly string[]): void {
       const eligible = new Set(terminalUnprotectedRequestIds);
-      const all = merged();
-      let count = all.length;
+      const groups = new Map<string, BookEntry[]>();
       for (const row of rows().sort((a, b) => a.savedAt - b.savedAt)) {
+        const id = row.command.requestId;
+        const group = groups.get(id);
+        if (group) group.push(row);
+        else groups.set(id, [row]);
+      }
+      let count = groups.size;
+      for (const [id, group] of groups) {
+        const accepted = group.every((row) => row.fact.kind === "accepted");
+        const refused = group.every((row) => row.fact.kind === "refused");
         if (
-          row.writerId !== writerId ||
-          row.fact.kind !== "accepted" ||
-          !eligible.has(row.command.requestId) ||
-          rows().some(
-            (other) =>
-              other.command.requestId === row.command.requestId &&
-              other.fact.kind !== "accepted",
-          ) ||
-          active.has(row.command.requestId) ||
-          (now() - row.savedAt < ttl && count < capacity)
+          (!accepted && !refused) ||
+          (accepted && !eligible.has(id)) ||
+          new Set(group.map((row) => JSON.stringify(row.command))).size !== 1 ||
+          active.has(id) ||
+          (group.some((row) => now() - row.savedAt < ttl) && count < capacity)
         )
           continue;
         try {
-          storage?.removeItem(key(row));
-          own.delete(row.command.requestId);
+          for (const row of group) storage?.removeItem(key(row));
+          own.delete(id);
           count--;
         } catch {
           status = "storage-error";
         }
       }
     },
-    /** Deletion is the sole cross-writer write. The marker also blocks a late response or stale tab. */
+    /** The marker also blocks a late response or stale tab from restoring a deleted bot. */
     purge(botIds: readonly string[]): void {
+      if (!botIds.length) return;
       for (const bot of botIds) {
         gone.add(bot);
         try {
@@ -350,29 +352,31 @@ export function openSendBook(options: {
           status = "storage-error";
         }
       }
-      for (const row of rowsIncludingGone()) {
-        if (!botIds.includes(row.command.botId)) continue;
-        own.delete(row.command.requestId);
+      for (const row of own.values())
+        if (botIds.includes(row.command.botId))
+          own.delete(row.command.requestId);
+      for (const k of keys()) {
+        if (!k.startsWith(prefix) || k.startsWith(`${prefix}gone|`)) continue;
         try {
-          storage?.removeItem(key(row));
+          const raw = storage?.getItem(k);
+          let botId: string | undefined;
+          try {
+            const value: unknown = raw ? JSON.parse(raw) : null;
+            if (
+              record(value) &&
+              record(value.command) &&
+              typeof value.command.botId === "string"
+            )
+              botId = value.command.botId;
+          } catch {
+            // Unreadable rows cannot identify a surviving bot and must not retain private text.
+          }
+          if (botId === undefined || botIds.includes(botId))
+            storage?.removeItem(k);
         } catch {
           status = "storage-error";
         }
       }
     },
   };
-  function rowsIncludingGone(): Row[] {
-    const found: Row[] = [...own.values()];
-    for (const k of keys())
-      if (k.startsWith(prefix)) {
-        try {
-          const raw = storage?.getItem(k);
-          const row = raw ? parse(raw) : null;
-          if (row && key(row) === k) found.push(row);
-        } catch {
-          status = "storage-error";
-        }
-      }
-    return found;
-  }
 }

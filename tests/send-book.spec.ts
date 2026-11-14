@@ -442,3 +442,44 @@ test("la purge retire le texte d’un ancien format sans toucher un autre bot ou
     page(storage, undefined, { spaceId: "space-b" }).snapshot(),
   ).toHaveLength(1);
 });
+
+test("la collecte retire ensemble les copies acceptées de plusieurs écrivains", async () => {
+  const { storage } = browser();
+  const a = input();
+  const options = { now: () => 0, ttlMs: 0, capacity: 1 };
+  await page(storage, async () => accepted("a"), options).run(a);
+  await page(storage, async () => accepted("a"), options).run(a);
+  expect(storage.length).toBe(2);
+  const reader = page(storage, undefined, options);
+  reader.collect([a.command.requestId]);
+  expect(reader.snapshot()).toEqual([]);
+  expect(storage.length).toBe(0);
+});
+
+test("un refus ne fait pas collecter une copie encore inconnue", async () => {
+  const { storage } = browser();
+  const a = input();
+  await page(storage).run(a);
+  await page(storage, async () => ({
+    kind: "rejected",
+    status: 403,
+    message: "refus",
+  })).run(a);
+  const reader = page(storage, undefined, { ttlMs: 0 });
+  reader.collect([a.command.requestId]);
+  expect(storage.length).toBe(2);
+  expect(reader.snapshot()).toMatchObject([{ command: a.command }]);
+});
+
+test("une purge vide ne touche rien et une purge nommée retire les octets inclassables du seul espace", () => {
+  const { storage, state } = browser();
+  const ownKey = "mino.send-book.v1|space-a|broken|broken";
+  const otherKey = "mino.send-book.v1|space-b|broken|broken";
+  state.items.set(ownKey, "{texte privé incomplet");
+  state.items.set(otherKey, "{texte privé incomplet");
+  page(storage).purge([]);
+  expect(state.items.get(ownKey)).toBe("{texte privé incomplet");
+  page(storage).purge(["nova"]);
+  expect(state.items.has(ownKey)).toBe(false);
+  expect(state.items.get(otherKey)).toBe("{texte privé incomplet");
+});
