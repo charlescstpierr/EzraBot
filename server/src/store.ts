@@ -80,6 +80,8 @@ import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type Aut
 import { createMemoryLedger, type Candidate, type MemoryLedger, type RecallOutcome, type RecallPlan } from './memory-ledger.js';
 import { MEMORY_MIGRATION, MEMORY_PURGE_ORDER } from './memory-schema.js';
 import { ROUTINE_MIGRATION, ROUTINE_PURGE_ORDER, createRoutines, type MissionOrigin } from './routines.js';
+import { EVENT_MIGRATION, createEvents, type ReceiveOutcome } from './events.js';
+import type { VerifiedDelivery } from './event-ingress.js';
 
 export type Claim = {
   lane: Lane;
@@ -125,6 +127,10 @@ export type Store = {
    * with another content it is refused. A person's message goes through `dispatch`, which creates its work the same way.
    */
   admit(input: unknown): AdmitOutcome;
+  /** Decides one authenticated event once, in one transaction, before its delivery is acknowledged. */
+  receiveEvent(delivery: VerifiedDelivery): ReceiveOutcome;
+  /** False once this attempt's memory sources changed or, for an event, once its subscription moved: it must neither leave nor publish. */
+  holds(attemptId: string): boolean;
   view(): StoreView;
   diagnostics(): StoreDiagnostics;
   claimNextJob(): Claim | null;
@@ -640,6 +646,7 @@ CREATE TRIGGER works_admitted BEFORE INSERT ON works
   { sql: CONNECTION_MIGRATION },
   { sql: MEMORY_MIGRATION },
   { sql: ROUTINE_MIGRATION },
+  { sql: EVENT_MIGRATION },
 ];
 const SQLITE_COMPANIONS = ['', '-wal', '-shm', '-journal'] as const;
 export const managedBackupPaths = (path: string): string[] =>
@@ -721,6 +728,8 @@ export type StoreOptions = {
   memory?: { workspacePrefix: string };
   /** Missions opened from a reply, from the missions registry. Without it no mission can hold a routine back. */
   missions?: () => readonly MissionOrigin[];
+  /** The event transport this server receives. Without it no subscription can be activated and no event request leaves. */
+  events?: { transport: string };
 };
 
 export function openStore(options: StoreOptions): Store {
@@ -864,25 +873,46 @@ export function openStore(options: StoreOptions): Store {
   };
   const tools = createToolLedger(kit, receipts, admission, sources, connections, { holds: attemptId => memory.holds(attemptId) });
   const memory = createMemoryLedger(kit, receipts, admission, options.memory ?? null, tools.memoryMoved);
+  /** Admits inside the caller's transaction. A refusal undoes only what this admission wrote. */
+  function admitNested(request: WorkRequest): { ok: true; messageId: string; workId: string } | { ok: false; message: string } {
+    run('SAVEPOINT nested_admission');
+    try {
+      const admitted = admitWork(request);
+      run('RELEASE nested_admission');
+      return { ok: true, messageId: admitted.messageId, workId: admitted.workId };
+    } catch (error) {
+      run('ROLLBACK TO nested_admission');
+      run('RELEASE nested_admission');
+      if (error instanceof Refusal) return { ok: false, message: error.message };
+      throw error;
+    }
+  }
+  const refuse = (code: RefusalCode, message: string): never => {
+    throw new Refusal(code, message);
+  };
   const routines = createRoutines(kit, {
-    admit({ botId, text, routineId, date }) {
-      run('SAVEPOINT routine_admission');
-      try {
-        const admitted = admitWork({ botId, text, attachments: [], origin: { kind: 'routine', routineId, occurrence: date } });
-        run('RELEASE routine_admission');
-        return { ok: true, messageId: admitted.messageId, workId: admitted.workId };
-      } catch (error) {
-        run('ROLLBACK TO routine_admission');
-        run('RELEASE routine_admission');
-        if (error instanceof Refusal) return { ok: false, message: error.message };
-        throw error;
-      }
-    },
-    refuse(code, message) {
-      throw new Refusal(code, message);
-    },
+    admit: ({ botId, text, routineId, date }) => admitNested({ botId, text, attachments: [], origin: { kind: 'routine', routineId, occurrence: date } }),
+    refuse,
     missions: () => options.missions?.() ?? [],
   });
+  const events = createEvents(kit, {
+    admit: ({ botId, text, subscriptionId, webhookId }) => admitNested({ botId, text, attachments: [], origin: { kind: 'event', subscriptionId, eventKey: webhookId } }),
+    refuse,
+    cancelPending(messageIds) {
+      run(`UPDATE works SET state = 'cancelled', updated_at = ? WHERE state = 'pending' AND task_id IS NULL AND request_message_id IN (${messageIds})`, now());
+    },
+    transport: options.events?.transport ?? null,
+  });
+  const requestOf = (attemptId: string): string | null => {
+    const row = get('SELECT w.request_message_id FROM attempts a JOIN works w ON w.id = a.work_id WHERE a.id = ?', attemptId);
+    return row ? str(row, 'request_message_id') : null;
+  };
+  /** Why this attempt may no longer leave or publish, from the memory ledger first, then from its event subscription. */
+  const holdOf = (attemptId: string): 'memory_changed' | 'source_moved' | null => {
+    if (!memory.holds(attemptId).ok) return 'memory_changed';
+    const request = requestOf(attemptId);
+    return request !== null && !events.holdsRequest(request).ok ? 'source_moved' : null;
+  };
   const HONCHO_OWNS_MEMORY = 'Ce personnage utilise la mémoire Honcho. Ses déclarations se gèrent sur l’ordinateur, dans sa page. Rien n’a été enregistré.';
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
@@ -1171,6 +1201,9 @@ export function openStore(options: StoreOptions): Store {
         const next = nextOf(work);
         if (next.kind !== 'document') requireBot(str(work, 'bot_id'), 'Ce bot a été supprimé : ce travail ne peut pas être relancé.');
         if (next.kind !== 'retry') throw new Refusal('invalid_transition', next.reason);
+        if (!events.holdsRequest(str(work, 'request_message_id')).ok) {
+          throw new Refusal('invalid_transition', 'L’abonnement de cet événement a été mis en pause, révoqué ou modifié depuis. Rien n’est relancé. Écrivez une nouvelle demande si besoin.');
+        }
         setWorkState(work, 'pending');
         return { kind: 'work', workId: command.workId, state: 'pending' };
       }
@@ -1282,6 +1315,13 @@ export function openStore(options: StoreOptions): Store {
       case 'routine.resume':
       case 'routine.delete':
         return routines.apply(command);
+      case 'subscription.create':
+      case 'subscription.update':
+      case 'subscription.activate':
+      case 'subscription.pause':
+      case 'subscription.resume':
+      case 'subscription.revoke':
+        return events.apply(command);
       case 'memory.delete': {
         requireMemory(command.botId, command.memoryId);
         run('DELETE FROM memories WHERE id = ?', command.memoryId);
@@ -1368,6 +1408,7 @@ export function openStore(options: StoreOptions): Store {
   function admit(input: unknown): AdmitOutcome {
     const parsed = AdmitSchema.safeParse(input);
     if (!parsed.success) return { ok: false, code: 'invalid_command', message: 'Cette demande automatique est incomplète ou invalide.' };
+    if (parsed.data.origin.kind === 'event') return { ok: false, code: 'invalid_command', message: 'Un événement entre seulement par sa réception signée, avec son reçu. Rien n’a été créé.' };
     try {
       const admitted = transaction(() => admitWork({ ...parsed.data, attachments: [] }));
       if (!admitted.duplicate) changed();
@@ -1398,7 +1439,7 @@ export function openStore(options: StoreOptions): Store {
       messages: int(row, 'messages'), files: int(row, 'files'), deliverables: int(row, 'deliverables'),
       publications: int(row, 'publications'), memories: int(row, 'memories') + memory.declarationCount(botId), waiting: int(row, 'waiting'),
       keptReplies: int(row, 'keptReplies'), keptDeliverables: int(row, 'keptDeliverables'), keptMentions: int(row, 'keptMentions'),
-      tasks: int(row, 'tasks'), routines: routines.count(botId),
+      tasks: int(row, 'tasks'), routines: routines.count(botId), subscriptions: events.count(botId),
     };
   }
 
@@ -1457,6 +1498,7 @@ export function openStore(options: StoreOptions): Store {
     tools.markPurge(botId, targetsOf('works'));
     memory.markPurge(botId, targetsOf('attempts'));
     routines.markPurge(botId);
+    events.markPurge(botId, targetsOf('messages'));
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
     run(`UPDATE commands SET fingerprint = '',
@@ -1486,7 +1528,8 @@ export function openStore(options: StoreOptions): Store {
       WHERE work_id IN (SELECT id FROM works WHERE bot_id = ?)`, botId);
     const witnessed = get(`SELECT 1 AS x WHERE EXISTS (SELECT 1 FROM messages WHERE bot_id = ?1)
       OR EXISTS (SELECT 1 FROM works WHERE bot_id = ?1) OR EXISTS (SELECT 1 FROM message_mentions WHERE bot_id = ?1)
-      OR EXISTS (SELECT 1 FROM tasks WHERE reviewer_bot_id = ?1 OR author_bot_id = ?1)`, botId);
+      OR EXISTS (SELECT 1 FROM tasks WHERE reviewer_bot_id = ?1 OR author_bot_id = ?1)
+      OR EXISTS (SELECT 1 FROM event_subscriptions WHERE bot_id = ?1)`, botId);
     if (witnessed) {
       const position = int(get('SELECT MIN(0, COALESCE(MIN(position), 0)) - 1 AS n FROM bots') ?? {}, 'n');
       const at = now();
@@ -1501,7 +1544,8 @@ export function openStore(options: StoreOptions): Store {
       AND NOT EXISTS(SELECT 1 FROM messages WHERE bot_id = b.id)
       AND NOT EXISTS(SELECT 1 FROM works WHERE bot_id = b.id)
       AND NOT EXISTS(SELECT 1 FROM message_mentions WHERE bot_id = b.id)
-      AND NOT EXISTS(SELECT 1 FROM tasks WHERE reviewer_bot_id = b.id OR author_bot_id = b.id)`);
+      AND NOT EXISTS(SELECT 1 FROM tasks WHERE reviewer_bot_id = b.id OR author_bot_id = b.id)
+      AND NOT EXISTS(SELECT 1 FROM event_subscriptions WHERE bot_id = b.id)`);
     const orphanCount = int(get(`SELECT COUNT(*) AS n FROM bots WHERE deleted_at IS NOT NULL AND id IN (${targetsOf('bots')})`) ?? {}, 'n');
     if (run(`DELETE FROM bots WHERE deleted_at IS NOT NULL AND id IN (${targetsOf('bots')})`) !== orphanCount) throw new Error('Suppression incomplète: anciens témoins');
     run('DELETE FROM purge_target');
@@ -1698,14 +1742,15 @@ export function openStore(options: StoreOptions): Store {
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
   } | null, purpose: Claim['purpose'] = { kind: 'request' }): Claim {
-    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && prepared.source.chosen?.holds !== false
+    const fromEvent = prepared.source.request.trigger === 'event';
+    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && !fromEvent && prepared.source.chosen?.holds !== false
       ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
       exchanges: prepared.exchanges,
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
       ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
-      ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? { connections: true as const } : {}),
+      ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' && !fromEvent ? { connections: true as const } : {}),
     };
     const composed = composeContext(source);
     const bot = prepared.bot;
@@ -1770,7 +1815,7 @@ export function openStore(options: StoreOptions): Store {
     const plan = transaction((): RecallPlan => {
       if (get(`SELECT id FROM attempts WHERE state = 'running' AND lane = 'chat'`) || tools.nextReport()) return { kind: 'none' };
       const next = peekChat();
-      return next ? memory.plan(candidateOf(next)) : { kind: 'none' };
+      return next && str(next, 'origin_kind') !== 'event' ? memory.plan(candidateOf(next)) : { kind: 'none' };
     });
     if (plan.kind === 'unavailable') changed();
     return plan;
@@ -1783,7 +1828,8 @@ export function openStore(options: StoreOptions): Store {
     if (!next) return null;
     const workId = str(next, 'work_id');
     const botId = str(next, 'bot_id');
-    const recalled = memory.recall(candidateOf(next), recall);
+    const fromEvent = str(next, 'origin_kind') === 'event';
+    const recalled = fromEvent ? null : memory.recall(candidateOf(next), recall);
     if (recalled === 'replan') return 'replan';
     const bot = requireBot(botId);
     const memories = memoriesOf(botId);
@@ -1807,7 +1853,7 @@ export function openStore(options: StoreOptions): Store {
         request: { text: str(next, 'text'), ...triggerOf(next), attachments: requestAttachments(str(next, 'message_id')) },
         ...(source ? { chosen: { title: source.title, n: source.versionN, headN: source.headN, body: sources.body(source), holds: sources.holds(source) } } : {}),
         ...(ongoing.length ? { ongoing } : {}),
-        ...(botId === MINO_ID && str(next, 'thread_bot_id') === MINO_ID ? { orchestrator: true } : {}),
+        ...(botId === MINO_ID && str(next, 'thread_bot_id') === MINO_ID && !fromEvent ? { orchestrator: true } : {}),
       },
     }, null);
     setWorkState(requireWork(workId), 'running');
@@ -1883,12 +1929,20 @@ export function openStore(options: StoreOptions): Store {
     let refused = false;
     const claim = transaction((): Claim | 'replan' | null => {
       if (get(`SELECT id FROM attempts WHERE state = 'running' AND lane = ?`, lane)) return null;
+      if (lane === 'chat') {
+        for (const pending of all(`SELECT w.* FROM works w JOIN origins o ON o.message_id = w.request_message_id WHERE w.state = 'pending' AND o.kind = 'event'`)) {
+          if (events.holdsRequest(str(pending, 'request_message_id')).ok) continue;
+          setWorkState(pending, 'cancelled');
+          refused = true;
+        }
+      }
       for (;;) {
         const candidate = lane === 'chat' ? claimChat(recall) : claimDoc();
         if (!candidate || candidate === 'replan') return candidate;
-        if (!memory.holds(candidate.attemptId).ok) {
+        const moved = holdOf(candidate.attemptId);
+        if (moved) {
           refused = true;
-          finishAttempt(candidate, engineFailure('memory_changed'));
+          finishAttempt(candidate, engineFailure(moved));
           tools.syncDrafts();
           continue;
         }
@@ -1911,7 +1965,8 @@ export function openStore(options: StoreOptions): Store {
 
   function depart(claim: Claim): Departure {
     return transaction((): Departure => {
-      if (!memory.holds(claim.attemptId).ok) return { ok: false, reason: ENGINE_ERRORS.memory_changed };
+      const moved = holdOf(claim.attemptId);
+      if (moved) return { ok: false, reason: ENGINE_ERRORS[moved] };
       const row = get(`SELECT a.state, w.state AS work_state, t.revision FROM attempts a JOIN works w ON w.id = a.work_id
         LEFT JOIN tasks t ON t.id = w.task_id WHERE a.id = ?`, claim.attemptId);
       if (!row || str(row, 'state') !== 'running' || str(row, 'work_state') !== 'running') {
@@ -1922,7 +1977,7 @@ export function openStore(options: StoreOptions): Store {
   }
 
   function recordProgress(claim: Claim, text: AgentText): void {
-    if (claim.lane !== 'doc' || !memory.holds(claim.attemptId).ok) return;
+    if (claim.lane !== 'doc' || holdOf(claim.attemptId)) return;
     if (!get('SELECT 1 AS x FROM attempts WHERE id = ? AND thread_id = ? AND turn_id = ?', claim.attemptId, text.threadId, text.turnId)) return;
     const decoded = decodeReplyProgress(text.text);
     const prior = get('SELECT * FROM attempt_progress WHERE attempt_id = ? AND item_id = ?', claim.attemptId, text.itemId);
@@ -1983,9 +2038,9 @@ export function openStore(options: StoreOptions): Store {
       || str(attempt, 'state') !== 'running' || workState(work) !== 'running' || str(latest, 'id') !== claim.attemptId) {
       return { kind: 'stale' };
     }
-    const held = memory.holds(claim.attemptId).ok;
-    const outcome = held ? given : engineFailure('memory_changed');
-    if (!held) run(`UPDATE attempt_progress SET reply = '', title = NULL, body = NULL, readable = 0 WHERE attempt_id = ?`, claim.attemptId);
+    const moved = holdOf(claim.attemptId);
+    const outcome = moved ? engineFailure(moved) : given;
+    if (moved) run(`UPDATE attempt_progress SET reply = '', title = NULL, body = NULL, readable = 0 WHERE attempt_id = ?`, claim.attemptId);
     if (work.task_id !== null) return finishTaskStep(claim, outcome, attempt, work);
     /** Set for a turn that reports a receipt: it records a message and nothing else, and the work returns to its earlier state. */
     const reportOf = strOrNull(attempt, 'tool_execution_id');
@@ -1998,10 +2053,11 @@ export function openStore(options: StoreOptions): Store {
         );
         const threadBot = str(get('SELECT bot_id FROM messages WHERE id = ?', str(work, 'request_message_id')) ?? {}, 'bot_id');
         // Only Mino, in its own thread, may propose a mission; any other bot's proposal is dropped.
-        const handoff = reportOf === null && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
+        const fromEvent = str(originKind(str(work, 'request_message_id')), 'origin_kind') === 'event';
+        const handoff = reportOf === null && !fromEvent && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
         run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at, handoff) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
           newId('m'), str(work, 'bot_id'), outcome.reply.reply, claim.attemptId, at, handoff ? JSON.stringify(handoff) : null);
-        if (options.serviceTools && reportOf === null && outcome.reply.connection) {
+        if (options.serviceTools && reportOf === null && !fromEvent && outcome.reply.connection) {
           connections.offer({ botId: str(work, 'bot_id'), workId: claim.workId, attemptId: claim.attemptId }, outcome.reply.connection.service);
         }
         if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'done') };
@@ -2158,9 +2214,10 @@ export function openStore(options: StoreOptions): Store {
   function triggerView(row: Row): MessageView['trigger'] {
     const kind = oneOfOrNull(row, 'origin_kind', ORIGIN_KINDS);
     if (kind === null || kind === 'human') return null;
-    if (kind !== 'routine') return { kind };
-    const [routineId = '', date = ''] = str(row, 'origin_occurrence').split('/');
-    return { kind, routineId, date };
+    const [first = '', second = ''] = str(row, 'origin_occurrence').split('/');
+    if (kind === 'routine') return { kind, routineId: first, date: second };
+    if (kind === 'event') return { kind, subscriptionId: first };
+    return { kind };
   }
 
   function view(): StoreView {
@@ -2306,7 +2363,7 @@ export function openStore(options: StoreOptions): Store {
       workIds: ledger.flatMap(row => z.array(z.string()).parse(JSON.parse(str(row, 'work_ids')))),
     };
     const erasure = erasurePending() ? 'incomplete' as const : 'complete' as const;
-    return { rev, spaceId, activeBotId, bots, retiredBotIds, purged, erasure, messages, works, tasks: taskViews(versionN), carnet, routines: routines.views() };
+    return { rev, spaceId, activeBotId, bots, retiredBotIds, purged, erasure, messages, works, tasks: taskViews(versionN), carnet, routines: routines.views(), events: events.view() };
   }
 
   function taskViews(versionN: ReadonlyMap<string, number>): TaskView[] {
@@ -2394,6 +2451,8 @@ export function openStore(options: StoreOptions): Store {
     },
     dispatch,
     admit,
+    receiveEvent: delivery => events.receive(delivery),
+    holds: attemptId => holdOf(attemptId) === null,
     view,
     diagnostics,
     claimNextJob: () => claimNext('chat'),

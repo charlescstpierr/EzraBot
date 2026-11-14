@@ -8,7 +8,7 @@ export type Worker = {
   /** Works whose engine run has not returned yet, in either lane, cancelled or not. */
   readonly activeWorkIds: readonly string[];
   kick(): void;
-  /** Stops any running call the store no longer marks running or whose memory sources changed, then looks for new work. */
+  /** Stops any running call the store no longer marks running, or that no longer holds its memory sources or event subscription, then looks for new work. */
   sync(): void;
   cancel(workId: string): void;
   idle(): Promise<void>;
@@ -174,7 +174,7 @@ export function createWorker(options: {
     sync() {
       for (const runner of runners) {
         const active = runner.active;
-        if (active && (!store.attemptRunning(active.attemptId) || !store.memory.holds(active.attemptId).ok)) active.controller.abort();
+        if (active && (!store.attemptRunning(active.attemptId) || !store.holds(active.attemptId))) active.controller.abort();
       }
       kickAll();
     },

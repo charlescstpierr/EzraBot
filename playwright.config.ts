@@ -30,7 +30,7 @@ export default defineConfig({
     },
     {
       command: "node scripts/test-server.mjs",
-      env: { MINO_QA_PORT: "4397", MINO_QA_HONCHO: "1" },
+      env: { MINO_QA_PORT: "4397", MINO_QA_HONCHO: "1", MINO_QA_EVENTS: "1" },
       url: "http://127.0.0.1:4397",
       reuseExistingServer: false,
     },

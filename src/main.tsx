@@ -45,6 +45,7 @@ import { ToolCards, ToolConnections } from "./tools";
 import { MemoryTrace } from "./memory";
 import { ResultsPage } from "./results";
 import { RoutinesPage } from "./routines";
+import { EventsPage } from "./events";
 import "./style.css";
 function browserStorage(
   kind: "localStorage" | "sessionStorage",
@@ -346,7 +347,12 @@ function App() {
           {nav.map(({ id, label, Icon }) => (
             <button
               key={id}
-              className={route.page === id ? "nav-item selected" : "nav-item"}
+              className={
+                route.page === id ||
+                (id === "routines" && route.page === "events")
+                  ? "nav-item selected"
+                  : "nav-item"
+              }
               onClick={() => {
                 if (id === "chat") openHome();
                 else if (id === "missions") go({ page: "missions" });
@@ -463,7 +469,9 @@ function App() {
               <strong>
                 {route.page === "document"
                   ? "Document"
-                  : nav.find((n) => n.id === route.page)?.label}
+                  : route.page === "events"
+                    ? "Événements de service"
+                    : nav.find((n) => n.id === route.page)?.label}
               </strong>
             )}
           </div>
@@ -571,6 +579,8 @@ function App() {
               <ResultsPage port={port} unavailable={Boolean(offline)} />
             ) : route.page === "routines" ? (
               <RoutinesPage port={port} routineId={route.routineId} />
+            ) : route.page === "events" ? (
+              <EventsPage port={port} subscriptionId={route.subscriptionId} />
             ) : route.page === "projects" ? (
               <ProjectsPage port={port} />
             ) : route.page === "missions" ? (

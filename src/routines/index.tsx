@@ -481,6 +481,10 @@ export function RoutinesPage({
     <div className="content-page ez-routines">
       <div className="eyebrow">ROUTINES SUR CET ORDINATEUR</div>
       <h1>Une demande, à heure fixe.</h1>
+      <button className="outline" onClick={() => port.go({ page: "events" })}>
+        Événements de service : une demande quand un service l’annonce
+        <ArrowRight size={16} />
+      </button>
       <ul className="ez-routine-rules">
         {RULES.map((rule) => (
           <li key={rule}>{rule}</li>

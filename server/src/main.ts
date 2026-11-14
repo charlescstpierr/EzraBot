@@ -23,6 +23,7 @@ import { createComposioProvider, createComposioSdk } from './composio.js';
 import { createActionDesk } from './tool-desk.js';
 import { BudgetConfigError, policyFromEnv } from './admission.js';
 import { ROUTINE_LIMITS } from './protocol.js';
+import { EventIngressConfigError, createEventIngress, takeEventIngressConfig } from './event-ingress.js';
 
 const VERSION = '0.1.0';
 const startedAt = new Date().toISOString();
@@ -46,8 +47,17 @@ const honcho = (() => {
     throw error;
   }
 })();
+const eventConfig = (() => {
+  try {
+    return takeEventIngressConfig(process.env);
+  } catch (error) {
+    if (error instanceof EventIngressConfigError) fail(error.message);
+    throw error;
+  }
+})();
 const port = Number(process.env.MINO_PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) fail('MINO_PORT doit être un numéro de port entre 1024 et 65535.');
+if (eventConfig && eventConfig.port === port) fail('Utilisez pour MINO_EVENTS_PORT un port distinct de MINO_PORT.');
 const dataDir = resolve(process.env.MINO_DATA_DIR ?? join(root, 'data'));
 const workDir = join(dataDir, 'codex-cwd');
 mkdirSync(workDir, { recursive: true });
@@ -66,7 +76,8 @@ function open(): Store {
   try {
     return openStore({ path: join(dataDir, 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')), missionContext: () => buildMissionChatContext(missions),
       missions: () => missionOrigins(missions),
-      serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}) });
+      serviceTools: providerKey !== null, policy, ...(honcho ? { memory: { workspacePrefix: honcho.workspacePrefix } } : {}),
+      ...(eventConfig ? { events: { transport: eventConfig.transport } } : {}) });
   } catch (error) {
     if (error instanceof StoreLockedError) fail(error.message);
     throw error;
@@ -121,7 +132,7 @@ if (deviceUrl) {
     const url = new URL(deviceUrl);
     if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) fail('MINO_DEVICE_URL doit contenir uniquement une origine HTTPS.');
     const devicePort = Number(url.port || 443);
-    if (!Number.isInteger(devicePort) || devicePort < 1024 || devicePort > 65535 || devicePort === port) fail('Utilisez pour MINO_DEVICE_URL un port distinct entre 1024 et 65535.');
+    if (!Number.isInteger(devicePort) || devicePort < 1024 || devicePort > 65535 || devicePort === port || devicePort === eventConfig?.port) fail('Utilisez pour MINO_DEVICE_URL un port distinct entre 1024 et 65535.');
     devices = openDevices({ path: join(dataDir, 'devices.sqlite'), spaceId: store.view().spaceId, publicUrl: url.origin });
     const browserClientDir = process.env.MINO_BROWSER_CLIENT_DIR;
     if (browserClientDir) browserAdmission = createBrowserAdmission(devices);
@@ -140,6 +151,10 @@ const server = createHttpServer({
   actions: desk,
   csrfToken: randomBytes(32).toString('hex'),
 });
+
+const ingress = eventConfig
+  ? createEventIngress({ config: eventConfig, ownerId: store.tools.ownerId, receive: delivery => store.receiveEvent(delivery), wake: () => worker.kick(), log })
+  : undefined;
 
 function tickRoutines(): void {
   try {
@@ -160,6 +175,10 @@ server.listen(port, '127.0.0.1', () => {
   memoryDesk?.kick();
   tickRoutines();
   routineClock = setInterval(tickRoutines, ROUTINE_LIMITS.tickSeconds * 1000);
+  if (ingress && eventConfig) {
+    ingress.on('error', () => fail(`La réception d’événements n’a pas pu démarrer sur ${eventConfig.bind}:${eventConfig.port}.`));
+    ingress.listen(eventConfig.port, eventConfig.bind, () => log({ event: 'events-ready', transport: eventConfig.transport, bind: eventConfig.bind, port: eventConfig.port }));
+  }
 });
 
 let stopping = false;
@@ -167,6 +186,8 @@ async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
   clearInterval(routineClock);
+  ingress?.closeAllConnections();
+  ingress?.close();
   server.closeAllConnections();
   server.close();
   deviceServer?.closeAllConnections();
