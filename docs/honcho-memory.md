@@ -40,6 +40,8 @@ MINO_BUDGETS='{"honcho":{"callsPerDay":300}}' npm start
 
 Sans budget `honcho`, l'admission refuse chaque requête et la page le dit. Les plafonds Codex et Composio ne changent pas.
 
+Pour régler ce plafond : ouvrir un projet coûte trois appels. Une demande dans la conversation en coûte trois aussi : une recherche, une ingestion et une relecture. Une déclaration en coûte deux.
+
 ## Chemin d'une demande
 
 1. Vous envoyez une demande. Si la conversation a un projet ouvert, le store enregistre ce message comme source dans la même transaction.

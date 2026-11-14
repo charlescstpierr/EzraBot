@@ -10,38 +10,50 @@ import { BOT, PREFIX, startMemory } from './fixtures/memory-app.js';
 const ENABLE = { type: 'memory.enable', label: 'Projet synthétique', acknowledged: true };
 
 test('without a Honcho configuration, without a budget or with a budget of zero, nothing is enabled silently and no request leaves', async () => {
-  const honcho = await startFakeHoncho();
   const off = await startMemory({ honcho: null });
   try {
     assert.deepEqual((await off.view()).memory.status, { state: 'off' });
     const refused = await off.memory(ENABLE);
     assert.deepEqual([refused.status, refused.body.code], [503, 'memory_unavailable']);
+    const body = JSON.stringify({ ...ENABLE, requestId: randomUUID(), botId: BOT });
+    const headers = { 'content-type': 'application/json', origin: off.base, 'x-mino-csrf': 'c'.repeat(64) };
+    for (const forged of [{ ...headers, origin: 'http://ailleurs.invalid' }, { ...headers, 'x-mino-csrf': 'x'.repeat(64) }]) {
+      assert.equal((await fetch(`${off.base}/api/memory/commands`, { method: 'POST', headers: forged, body })).status, 403, 'a memory command needs the origin and the token of the PC page');
+    }
+    assert.equal((await fetch(`${off.base}/api/memory/commands`)).status, 404);
+    assert.equal((await fetch(`${off.base}/api/memory/provenance?messageId=inconnu`)).status, 404);
     assert.deepEqual((await off.view()).memory.scopes, []);
     assert.equal((await off.ask('Bonjour sans mémoire distante')).work.state, 'done');
   } finally {
     await off.stop();
   }
-  for (const budget of [null, 0]) {
-    const app = await startMemory({ honcho, budget });
-    try {
-      const status = (await app.view()).memory.status;
-      assert.deepEqual(status, { state: 'ready', budget: budget === null ? null : { calls: 0, callsPerDay: 0 } });
-      await app.accepted(ENABLE);
-      await app.quiet();
-      const scope = app.scopeOf(await app.view());
-      assert.deepEqual([scope.state, scope.note], ['preparing', 'budget'], 'the consent is recorded locally and the refusal is visible');
-      const answered = await app.ask('Une demande pendant la préparation');
-      assert.deepEqual([answered.work.state, answered.work.attempt?.plan?.memory.recall?.state], ['done', 'unavailable']);
-      assert.equal(app.store.admission.usage().find(u => u.budget === 'honcho')?.calls ?? 0, 0);
-    } finally {
-      await app.stop();
-    }
+  const honcho = await startFakeHoncho();
+  try {
+    for (const budget of [null, 0]) await withoutBudget(honcho, budget);
+    assert.equal(honcho.requests.length, 0, 'the fake Honcho never received a request');
+  } finally {
+    await honcho.close();
   }
-  assert.equal(honcho.requests.length, 0, 'the fake Honcho never received a request');
   assert.equal(Object.keys(DEFAULT_POLICY.capabilities).some(name => name.startsWith('honcho')), false, 'the default policy declares no Honcho capability');
   assert.deepEqual(DEFAULT_POLICY.budgets, { codex: { callsPerDay: 1000 }, composio: { callsPerDay: 200 } }, 'the Codex and Composio ceilings are unchanged');
-  await honcho.close();
 });
+
+async function withoutBudget(honcho: Awaited<ReturnType<typeof startFakeHoncho>>, budget: number | null): Promise<void> {
+  const app = await startMemory({ honcho, budget });
+  try {
+    const status = (await app.view()).memory.status;
+    assert.deepEqual(status, { state: 'ready', budget: budget === null ? null : { calls: 0, callsPerDay: 0 } });
+    await app.accepted(ENABLE);
+    await app.quiet();
+    const scope = app.scopeOf(await app.view());
+    assert.deepEqual([scope.state, scope.note], ['preparing', 'budget'], 'the consent is recorded locally and the refusal is visible');
+    const answered = await app.ask('Une demande pendant la préparation');
+    assert.deepEqual([answered.work.state, answered.work.attempt?.plan?.memory.recall?.state], ['done', 'unavailable']);
+    assert.equal(app.store.admission.usage().find(u => u.budget === 'honcho')?.calls ?? 0, 0);
+  } finally {
+    await app.stop();
+  }
+}
 
 test('consent, import, sync and recall: each request is admitted, each mapping is read again, and the turn receives local originals with an exact provenance', async () => {
   const honcho = await startFakeHoncho();
@@ -201,6 +213,7 @@ test('a turn in flight is stopped when a source it used is corrected: nothing is
   try {
     await app.enable();
     await app.accepted({ type: 'memory.declare', text: 'Préfère le thé vert.' });
+    await app.accepted({ type: 'memory.declare', text: 'Dîne toujours à 19 heures.' });
     await app.synced();
     const workId = await app.say('Que boire ce soir ?');
     await app.until(v => v.works.find(w => w.id === workId)?.attempt?.turnId != null, 'the App Server accepted the turn');
@@ -216,6 +229,7 @@ test('a turn in flight is stopped when a source it used is corrected: nothing is
     assert.equal((await app.post('/api/commands', { type: 'work.retry', requestId: randomUUID(), workId })).status, 200);
     await app.until(v => v.works.find(w => w.id === workId)?.state === 'done', 'the retry answers');
     assert.match(app.turn().input, /Préfère le café serré\./);
+    assert.match(app.turn().input, /Dîne toujours à 19 heures\./, 'a correction leaves the other verified declarations usable');
     assert.doesNotMatch(app.turn().input, /thé vert/);
   } finally {
     await app.stop();
@@ -484,6 +498,9 @@ test('when the search fails or the budget is spent the turn answers with no memo
     assert.equal(app.scopeOf(await app.view()).state, 'active');
     honcho.intercept = null;
     assert.equal((await app.ask('Et vers Prague ?')).work.attempt?.plan?.memory.recall?.state, 'used');
+  } catch (error) {
+    await honcho.close();
+    throw error;
   } finally {
     await app.stop();
   }

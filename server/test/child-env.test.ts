@@ -10,8 +10,11 @@ import { createCodexEngine } from '../src/engine.js';
 
 const SYNTHETIC_KEY = 'synthetic-test-key-not-a-secret';
 
-test('a child environment keeps ordinary variables and drops every Composio variable', () => {
-  const env = childEnv({ PATH: '/bin', HOME: '/home/x', COMPOSIO_API_KEY: SYNTHETIC_KEY, COMPOSIO_BASE_URL: 'https://example.invalid', composio_user_api_key: 'x' });
+test('a child environment keeps ordinary variables and drops every Composio and Honcho variable', () => {
+  const env = childEnv({
+    PATH: '/bin', HOME: '/home/x', COMPOSIO_API_KEY: SYNTHETIC_KEY, COMPOSIO_BASE_URL: 'https://example.invalid', composio_user_api_key: 'x',
+    HONCHO_API_KEY: SYNTHETIC_KEY, HONCHO_BASE_URL: 'https://example.invalid', honcho_workspace_prefix: 'x',
+  });
   assert.deepEqual(env, { PATH: '/bin', HOME: '/home/x' });
 });
 
@@ -23,11 +26,13 @@ test('the provider key is read once, trimmed, and removed from the server enviro
   assert.equal(takeProviderKey({ COMPOSIO_API_KEY: '   ' }), null);
 });
 
-test('neither the chat engine child nor the mission executor child inherits a Composio variable', async () => {
+test('neither the chat engine child nor the mission executor child inherits a Composio or a Honcho variable', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mino-child-env-'));
   const saved = { ...process.env };
   process.env.COMPOSIO_API_KEY = SYNTHETIC_KEY;
   process.env.COMPOSIO_BASE_URL = 'https://example.invalid';
+  process.env.HONCHO_API_KEY = SYNTHETIC_KEY;
+  process.env.HONCHO_BASE_URL = 'https://example.invalid';
   try {
     process.env.MINO_TEST_ENV_PROBE = join(dir, 'chat.json');
     const chat = createCodexEngine({ command: process.execPath, args: [fileURLToPath(new URL('./fixtures/fake-app-server.js', import.meta.url)), 'reply'], workDir: dir, clientVersion: 'test', requestTimeoutMs: 2000 });

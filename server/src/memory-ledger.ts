@@ -10,7 +10,6 @@ import {
   MemoryResultSchema,
   SCOPE_STATES,
   type MemoryCommand,
-  type MemoryCommandOf,
   type MemoryOutcome,
   type MemoryRefusalCode,
   type MemoryResult,

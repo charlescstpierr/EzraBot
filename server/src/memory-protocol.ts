@@ -7,7 +7,6 @@ const declaration = z.string().trim().min(1).max(LIMITS.memoryChars);
 const label = z.string().trim().min(1).max(60);
 
 export const SCOPE_STATES = ['preparing', 'active', 'withdrawal_pending', 'withdrawal_unverified', 'reset_pending'] as const;
-export type ScopeState = (typeof SCOPE_STATES)[number];
 
 /** PC only. Every command names the character: its project is never deduced from anything else. */
 export const MemoryCommandSchema = z.discriminatedUnion('type', [
@@ -31,7 +30,6 @@ export const MemoryCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('memory.resume'), requestId, botId: id }),
 ]);
 export type MemoryCommand = z.infer<typeof MemoryCommandSchema>;
-export type MemoryCommandOf<T extends MemoryCommand['type']> = Extract<MemoryCommand, { type: T }>;
 export const MEMORY_COMMAND_TYPES = MemoryCommandSchema.options.map(option => option.shape.type.value);
 
 export const MemoryResultSchema = z.discriminatedUnion('kind', [
