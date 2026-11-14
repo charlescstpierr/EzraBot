@@ -91,7 +91,7 @@ export function WorkContinuity({ port, work }: { port: Port; work: WorkView }) {
       proposal.execution?.id === (fact.kind === "execution" ? fact.id : null),
   );
   return (
-    <div className="ez-doc-facts" data-continuity-work={work.id}>
+    <div className="ez-doc-continuity" data-continuity-work={work.id}>
       <p>
         Dernière tentative {work.attempt?.n ?? 0} · {statuses[work.state]}. Même
         travail dans ce fil.
