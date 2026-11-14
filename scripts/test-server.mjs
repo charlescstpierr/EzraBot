@@ -64,6 +64,7 @@ const missions = openMissions({
   path: join(data, "missions.sqlite"),
   minoRoot: root,
   dataDir: data,
+  admission: store.admission,
 });
 const agents = createAgentRoutes({
   missions,

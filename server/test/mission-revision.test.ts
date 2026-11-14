@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { openMissions } from "../src/missions.js";
+import { admissionIn } from "./fixtures/admission.js";
 
 test("the agents view revision advances across process restarts", (t) => {
   const base = mkdtempSync(join(tmpdir(), "ezrabot-revision-"));
@@ -18,6 +19,7 @@ test("the agents view revision advances across process restarts", (t) => {
     minoRoot: join(base, "service"),
     dataDir,
     home,
+    admission: admissionIn(dataDir),
   };
   const first = openMissions(options);
   const added = first.dispatch({
@@ -52,6 +54,7 @@ test("the first upgrade of a legacy database advances past an open browser revis
     minoRoot: join(base, "service"),
     dataDir,
     home: join(base, "home"),
+    admission: admissionIn(dataDir),
   };
   const initial = openMissions(options);
   assert(

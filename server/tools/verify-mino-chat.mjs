@@ -46,6 +46,7 @@ const chatStatus = { state: 'ready', account: 'chatgpt', models: [{ id: 'control
 const chatEngine = () => ({ status: () => chatStatus, catalog: async () => chatStatus, close: async () => {}, onUsage: () => () => {}, run: async input => {
   const threadId = 'controlled-chat-thread', turnId = 'controlled-chat-turn';
   input.onThread(threadId); input.onTurn(turnId); input.onStage('writing');
+  const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
   return { kind: 'succeeded', reply: { reply: 'Je peux confier cette demande sur ton ordinateur.', deliverable: null, handoff: { goal: 'Ajoute une fonction slugify avec tests, puis documente-la dans le README.', coordinated: true, why: 'Des étapes peuvent être séparées.' } }, used: { model: 'controlled', effort: 'low', speed: 'standard' }, threadId, turnId };
 }  });
 const fixture = join(build, 'dist/test/fixtures/fake-agent-server.js');
@@ -53,7 +54,7 @@ const store = openStore({ path: join(dir, 'mino.sqlite'), mascots: loadMascots(j
 const devices = openDevices({ path: join(dir, 'devices.sqlite'), spaceId: store.view().spaceId, publicUrl: base });
 const admission = createBrowserAdmission(devices);
 const worker = createWorker({ store, engines: { chat: chatEngine(), doc: chatEngine() } });
-const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir });
+const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir, admission: store.admission });
 const coordDir = join(dir, 'coord');
 mkdirSync(coordDir);
 const decision = fields => ({ kind: 'delegate', why: 'Étape séparable.', childId: null, title: null, goal: null, note: null, question: null, summary: null, limits: null, evidence: [], ...fields });

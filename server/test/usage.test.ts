@@ -68,7 +68,7 @@ test('the engine reports parsed usage for its thread before it starts the turn, 
     const outcome = await engine.run({
       turn: { baseInstructions: 'x', input: 'y', outputSchema: OUTPUT_SCHEMA },
       choice: { model: null, effort: null, speed: 'standard' }, signal: new AbortController().signal,
-      onStage: () => {}, onThread: id => events.push(`thread:${id}`), onTurn: id => events.push(`turn:${id}`),
+      depart: () => ({ ok: true }), onStage: () => {}, onThread: id => events.push(`thread:${id}`), onTurn: id => events.push(`turn:${id}`),
     });
     assert.equal(outcome.kind, 'succeeded');
     if (outcome.kind !== 'succeeded') return;

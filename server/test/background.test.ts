@@ -41,6 +41,8 @@ function scripted(name: string): Engine & { inputs: string[]; next: ((input: Run
       input.onThread(ids.threadId);
       input.onTurn(ids.turnId);
       input.onStage('writing');
+      const departure = input.depart();
+      if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
       const script = engine.next.shift();
       if (!script) return { kind: 'failed', code: 'turn_failed', message: 'no script' };
       return script(input, ids);

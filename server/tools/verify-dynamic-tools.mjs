@@ -25,7 +25,7 @@ try {
   });
   const result = await engine.run({
     turn, choice: { model: null, effort: null, speed: 'standard' }, signal: new AbortController().signal,
-    onStage: () => {}, onThread: () => {}, onTurn: () => {},
+    depart: () => ({ ok: true }), onStage: () => {}, onThread: () => {}, onTurn: () => {},
     tools: {
       specs: [{ name, description: 'Sonde locale sans Composio ni effet externe. Retourne seulement un accusé synthétique.', inputSchema: { type: 'object', properties: { seed: { type: 'string', enum: [seed] } }, required: ['seed'], additionalProperties: false } }],
       call: async call => {

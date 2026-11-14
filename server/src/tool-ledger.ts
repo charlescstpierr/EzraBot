@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Ajv } from 'ajv';
+import type { Admission } from './admission.js';
 import type { ReceiptContext } from './context.js';
 import type { ToolCall, ToolReply } from './engine.js';
 import type { WorkState } from './protocol.js';
@@ -325,10 +326,12 @@ const LINK_STATE: Record<AccountStatus, 'pending' | 'active' | 'failed'> = {
 const REPORTABLE = ['completed', 'failed', 'blocked', 'unknown'] as const;
 const WORK_STATES_AFTER_TURN = ['review', 'done'] as const;
 
+const CAPABILITY = 'composio.action';
+
 export function createToolLedger(kit: LedgerKit, receipts: {
   find(requestId: string): { type: string; fingerprint: string; result: string } | null;
   save(requestId: string, type: string, fingerprint: string, result: string): void;
-}): ToolLedger {
+}, admission: Admission): ToolLedger {
   const { get, all, run, now, newId } = kit;
 
   kit.transaction(() => {
@@ -573,6 +576,12 @@ export function createToolLedger(kit: LedgerKit, receipts: {
         voidApproved('id = ?', category, executionId);
         return null;
       }
+      const target = { kind: 'service', id: executionId, revision: str(row, 'fingerprint') } as const;
+      const reserved = admission.reserve({ capability: CAPABILITY, source: { kind: 'human', id: str(row, 'id') }, target });
+      if (!reserved.ok || !admission.depart(CAPABILITY, target).ok) {
+        voidApproved('id = ?', 'budget', executionId);
+        return null;
+      }
       run(`UPDATE tool_executions SET state = 'dispatching', updated_at = ? WHERE id = ? AND state = 'approved'`, now(), executionId);
       return { executionId, pin, arguments: args };
     });
@@ -584,6 +593,7 @@ export function createToolLedger(kit: LedgerKit, receipts: {
     kit.transaction(() => {
       const row = get(`SELECT p.work_id, p.bot_id FROM tool_executions e JOIN tool_proposals p ON p.id = e.proposal_id WHERE e.id = ? AND e.state = 'dispatching'`, permit.executionId);
       if (!row) return;
+      admission.settle(CAPABILITY, { kind: 'service', id: permit.executionId }, result.kind === 'unknown' ? 'unknown' : 'ended');
       const at = now();
       if (result.kind === 'not_sent') {
         run(`UPDATE tool_executions SET state = 'voided', category = ?, updated_at = ? WHERE id = ?`, result.reason, at, permit.executionId);

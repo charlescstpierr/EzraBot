@@ -27,6 +27,7 @@ const chatEngine = {
   run: async input => {
     const n = ++chatN; const threadId = `controlled-chat-${n}`, turnId = `controlled-turn-${n}`;
     input.onThread(threadId); input.onTurn(turnId); input.onStage('writing');
+    const departure = input.depart(); if (!departure.ok) return { kind: 'failed', code: 'admission_refused', message: departure.reason };
     return { kind: 'succeeded', reply: { reply: 'Je peux confier cette demande et la suivre ici.', deliverable: null,
       handoff: { goal: `Travail ${n} : ajoute slugify avec tests, puis documente-la dans le README.`, coordinated: true, why: 'Je peux organiser les étapes dans ce dossier.' } },
       used: { model: 'controlled', effort: 'low', speed: 'standard' }, threadId, turnId };
@@ -36,7 +37,7 @@ const store = openStore({ path: join(dir, 'chat.sqlite'), mascots: loadMascots(j
 const devices = openDevices({ path: join(dir, 'devices.sqlite'), spaceId: store.view().spaceId, publicUrl: 'https://localhost:4499' });
 const admission = createBrowserAdmission(devices);
 const worker = createWorker({ store, engines: { chat: chatEngine, doc: chatEngine } });
-const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir });
+const missions = openMissions({ path: join(dir, 'missions.sqlite'), minoRoot: build, dataDir: dir, admission: store.admission });
 const fixture = join(build, 'dist/test/fixtures/fake-agent-server.js');
 const makeEngine = scenario => createAgentEngine({ command: process.execPath, args: [fixture, scenario], tmpDir: join(dir, 'agent-tmp'), clientVersion: 'verify-pc' });
 let underlying = makeEngine('hang');

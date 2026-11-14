@@ -35,7 +35,7 @@ function engineFor(scenario: string, overrides: { command?: string; turnTimeoutM
 async function runOnce(scenario: string, options: { choice?: BotChoice; signal?: AbortSignal; turnTimeoutMs?: number; command?: string } = {}): Promise<EngineOutcome> {
   const engine = engineFor(scenario, options);
   try {
-    return await engine.run({ turn, choice: options.choice ?? defaultChoice, signal: options.signal ?? new AbortController().signal, onStage: () => {}, onThread: () => {}, onTurn: () => {} });
+    return await engine.run({ turn, choice: options.choice ?? defaultChoice, signal: options.signal ?? new AbortController().signal, depart: () => ({ ok: true }), onStage: () => {}, onThread: () => {}, onTurn: () => {} });
   } finally {
     await engine.close();
   }
@@ -114,7 +114,7 @@ async function observe(scenario: string): Promise<{ outcome: EngineOutcome; seen
   const seen: Seen = { texts: [], turns: [], threads: [] };
   try {
     const outcome = await engine.run({
-      turn, choice: defaultChoice, signal: new AbortController().signal, onStage: () => {},
+      turn, choice: defaultChoice, signal: new AbortController().signal, depart: () => ({ ok: true }), onStage: () => {},
       onThread: id => seen.threads.push(id), onTurn: id => seen.turns.push(id), onText: text => seen.texts.push(text),
     });
     return { outcome, seen };
@@ -181,7 +181,7 @@ test('two engine instances run two turns at the same time, each on its own conne
   const doc = engineFor('stream');
   try {
     const order: string[] = [];
-    const run = (engine: Engine, name: string) => engine.run({ turn, choice: defaultChoice, signal: new AbortController().signal, onStage: () => {}, onThread: () => {}, onTurn: () => {} })
+    const run = (engine: Engine, name: string) => engine.run({ turn, choice: defaultChoice, signal: new AbortController().signal, depart: () => ({ ok: true }), onStage: () => {}, onThread: () => {}, onTurn: () => {} })
       .then(outcome => { order.push(name); return outcome; });
     const [a, b] = await Promise.all([run(doc, 'doc'), run(chat, 'chat')]);
     assert.equal(a.kind, 'succeeded');
@@ -213,7 +213,7 @@ function gateway(answer: (call: ToolCall) => ToolReply | Promise<ToolReply> = ()
 async function runWithTools(scenario: string, tools: TurnTools | undefined, events: string[] = [], dynamicTools = true): Promise<EngineOutcome> {
   const engine = engineFor(scenario, dynamicTools ? { dynamicTools: true } : {});
   try {
-    return await engine.run({ turn, choice: defaultChoice, signal: new AbortController().signal, onStage: () => {}, onThread: () => {}, onTurn: () => events.push('turn'), ...(tools ? { tools } : {}) });
+    return await engine.run({ turn, choice: defaultChoice, signal: new AbortController().signal, depart: () => ({ ok: true }), onStage: () => {}, onThread: () => {}, onTurn: () => events.push('turn'), ...(tools ? { tools } : {}) });
   } finally {
     await engine.close();
   }

@@ -36,6 +36,10 @@ Un personnage peut proposer une action sur un service relié. Vous confirmez cha
 
 Les tests navigateur de cette fonction utilisent un second service temporaire sur 127.0.0.1:4398, avec un faux fournisseur et un faux moteur. Toutes ses données sont synthétiques.
 
+## Plafonds d’appels
+
+Chaque appel Codex et chaque action Composio réserve sa place avant de partir. Par défaut, le serveur admet 1000 appels Codex et 200 actions Composio par jour UTC. Quand un plafond est atteint, l’appel ne part pas et le travail affiche la raison. Pour changer un plafond : `MINO_BUDGETS='{"codex":{"callsPerDay":300}}' npm start`. Voir [docs/admission.md](docs/admission.md) pour les origines des travaux, les états d’une réservation, la reprise après un arrêt et les limites connues.
+
 ## Ce que cette version apporte
 
 - Chat Mino, Markdown sans HTML exécutable, invitations @, fils séparés et retours aux messages récents.

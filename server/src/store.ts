@@ -72,6 +72,8 @@ import { decodeReplyProgress } from './partial-json.js';
 import { canContinue, maxCalls, nextStep, stepActor, taskStatus, type TaskFacts } from './task.js';
 import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
 import { TOOL_MIGRATION, TOOL_PURGE_ORDER, createToolLedger, type GrantSnapshot, type ReportClaim, type ToolLedger } from './tool-ledger.js';
+import { ADMISSION_MIGRATION, DEFAULT_POLICY, createAdmission, type Admission, type Departure, type Target } from './admission.js';
+import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type AutomaticOrigin, type Origin } from './admission-protocol.js';
 
 export type Claim = {
   lane: Lane;
@@ -89,6 +91,10 @@ export type Claim = {
 
 export type FinishResult = { kind: 'recorded'; state: WorkState } | { kind: 'stale' };
 
+export type AdmitOutcome =
+  | { ok: true; kind: 'admitted' | 'duplicate'; messageId: string; workId: string }
+  | { ok: false; code: RefusalCode; message: string };
+
 export type DownloadFile = { filename: string; content: string; mediaType: 'text/markdown' | 'text/html' };
 
 /** What the HTTP layer knows about both lanes at the instant it dispatches, in the same synchronous tick: calls not returned yet. */
@@ -98,7 +104,14 @@ export type Store = {
   readonly rev: number;
   /** Connected services: accounts, rights, proposals and receipts, in this same database. */
   readonly tools: ToolLedger;
+  /** The shared ceilings and one-use permits of every call, in this same database. */
+  readonly admission: Admission;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
+  /**
+   * Creates the work an automatic origin asks for. The same occurrence with the same content returns the first work;
+   * with another content it is refused. A person's message goes through `dispatch`, which creates its work the same way.
+   */
+  admit(input: unknown): AdmitOutcome;
   view(): StoreView;
   diagnostics(): StoreDiagnostics;
   claimNextJob(): Claim | null;
@@ -110,6 +123,11 @@ export type Store = {
   setStage(claim: Claim, stage: RunStage): void;
   bindThread(claim: Claim, threadId: string): void;
   bindTurn(claim: Claim, turnId: string): void;
+  /**
+   * The permit of this claim's call, for the engine to take in the same tick as the request that starts the turn.
+   * Refused when the call was stopped or its goal changed since the claim, and when the permit was already used.
+   */
+  depart(claim: Claim): Departure;
   /** Keeps the latest cumulative snapshot of the attempt bound to this thread and turn, whatever its state. */
   observeUsage(observation: UsageObservation): void;
   finishJob(claim: Claim, outcome: EngineOutcome): FinishResult;
@@ -571,6 +589,30 @@ CREATE TRIGGER doc_proposals_kept BEFORE DELETE ON doc_proposals
 ` },
   { sql: `ALTER TABLE messages ADD COLUMN handoff TEXT CHECK(handoff IS NULL OR json_valid(handoff));` },
   { sql: TOOL_MIGRATION },
+  { sql: `
+CREATE TABLE origins(
+  message_id TEXT PRIMARY KEY REFERENCES messages(id),
+  bot_id TEXT NOT NULL REFERENCES bots(id),
+  kind TEXT NOT NULL CHECK(kind IN (${sqlList(ORIGIN_KINDS)})),
+  occurrence TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(bot_id, kind, occurrence)
+) STRICT;
+INSERT INTO origins(message_id, bot_id, kind, occurrence, fingerprint, created_at)
+  SELECT id, bot_id, 'human', 'legacy:' || id, '', created_at FROM messages WHERE role = 'user';
+CREATE TRIGGER origins_request BEFORE INSERT ON origins
+  WHEN NOT EXISTS(SELECT 1 FROM messages m WHERE m.id = NEW.message_id AND m.role = 'user' AND m.bot_id = NEW.bot_id)
+  BEGIN SELECT RAISE(ABORT, 'an origin belongs to a request of its thread'); END;
+CREATE TRIGGER origins_immutable BEFORE UPDATE ON origins BEGIN SELECT RAISE(ABORT, 'origins are immutable'); END;
+CREATE TRIGGER origins_kept BEFORE DELETE ON origins
+  WHEN NOT EXISTS(SELECT 1 FROM purge_target t WHERE t.tbl = 'origins' AND t.id = OLD.message_id)
+  BEGIN SELECT RAISE(ABORT, 'origins are kept'); END;
+CREATE TRIGGER works_admitted BEFORE INSERT ON works
+  WHEN NOT EXISTS(SELECT 1 FROM origins WHERE message_id = NEW.request_message_id)
+  BEGIN SELECT RAISE(ABORT, 'a work is created through admission, with its origin'); END;
+` },
+  { sql: ADMISSION_MIGRATION },
 ];
 
 /** Migration backups Mino writes next to the database. Each holds the whole space at that time. */
@@ -596,11 +638,14 @@ const PURGE_ORDER = [
   ['works', 'id'],
   ['task_events', 'id'],
   ['tasks', 'id'],
+  ['origins', 'message_id'],
   ['messages', 'id', `role = 'user'`],
   ['memories', 'id'],
 ] as const;
 
 const DELETED_BOT_NAME = 'Bot supprimé';
+/** Who a request is attributed to in an export. Only `human` is the person. */
+const ORIGIN_LABELS: Record<Origin['kind'], string> = { human: 'Vous', routine: 'Routine', event: 'Événement', voice: 'Voix', checkin: 'Bilan' };
 /** The coordinator of the space: only its own thread can propose a mission. */
 const MINO_ID = 'mino';
 
@@ -642,6 +687,8 @@ export type StoreOptions = {
   now?: () => string;
   missionContext?: () => NonNullable<ContextSource['missions']>;
   serviceTools?: boolean;
+  /** The ceilings of this server. Without it, only the calls Mino already made keep a daily ceiling. */
+  policy?: AdmissionPolicy;
 };
 
 export function openStore(options: StoreOptions): Store {
@@ -719,7 +766,9 @@ export function openStore(options: StoreOptions): Store {
     for (const listener of listeners) listener();
   };
 
+  /** A body that runs inside another one joins its transaction: both commit or roll back together. */
   function transaction<T>(body: () => T): T {
+    if (db.isTransaction) return body();
     db.exec('BEGIN IMMEDIATE');
     try {
       const result = body();
@@ -766,8 +815,11 @@ export function openStore(options: StoreOptions): Store {
     return createHmac('sha256', hmacKey).update(stableStringify(signed)).digest('hex');
   };
 
+  const sign = (payload: unknown) => createHmac('sha256', hmacKey).update(stableStringify(payload)).digest('hex');
+  const admission = createAdmission({ get, all, run, transaction, now, newId }, options.policy ?? DEFAULT_POLICY);
+
   const tools = createToolLedger(
-    { get, all, run, transaction, now, newId, changed, sign: payload => createHmac('sha256', hmacKey).update(stableStringify(payload)).digest('hex') },
+    { get, all, run, transaction, now, newId, changed, sign },
     {
       find(requestId) {
         const prior = get('SELECT type, fingerprint, result FROM commands WHERE request_id = ?', requestId);
@@ -777,6 +829,7 @@ export function openStore(options: StoreOptions): Store {
         run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
       },
     },
+    admission,
   );
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
@@ -1167,36 +1220,72 @@ export function openStore(options: StoreOptions): Store {
   }
 
   function sendMessage(command: CommandOf<'message.send'>): CommandResult {
-    requireBot(command.botId);
-    const mentions = checkMentions(command.text, command.mentions ?? []);
+    const { type: _type, requestId, ...content } = command;
+    const { messageId, workId, taskId } = admitWork({ ...content, origin: { kind: 'human', requestId } });
+    return { kind: 'message', messageId, workId, ...(taskId === null ? {} : { taskId }) };
+  }
+
+  type WorkRequest = Omit<CommandOf<'message.send'>, 'type' | 'requestId'> & { origin: Origin };
+
+  /**
+   * The only place that creates a request and its works. One occurrence of an origin creates them once per thread bot:
+   * asked again with the same content it returns the first work, with another content it is refused.
+   */
+  function admitWork(request: WorkRequest): { duplicate: boolean; messageId: string; workId: string; taskId: string | null } {
+    requireBot(request.botId);
+    const mentions = checkMentions(request.text, request.mentions ?? []);
     if (!mentions) throw new Refusal('invalid_command', 'Mentions invalides.');
-    const targets = replyTargets(command.botId, mentions);
+    const { origin, ...content } = request;
+    const occurrence = occurrenceOf(origin);
+    const print = sign(content);
+    const prior = get('SELECT message_id, fingerprint FROM origins WHERE bot_id = ? AND kind = ? AND occurrence = ?', request.botId, origin.kind, occurrence);
+    if (prior) {
+      if (str(prior, 'fingerprint') !== print) throw new Refusal('request_conflict', 'Cette occurrence a déjà créé un travail avec un autre contenu. Rien n’a été créé.');
+      const first = get('SELECT id, task_id FROM works WHERE request_message_id = ? ORDER BY rowid LIMIT 1', str(prior, 'message_id'));
+      if (!first) throw new Error('Travail de l’occurrence absent');
+      return { duplicate: true, messageId: str(prior, 'message_id'), workId: str(first, 'id'), taskId: strOrNull(first, 'task_id') };
+    }
+    const targets = replyTargets(request.botId, mentions);
     targets.forEach(botId => requireBot(botId, 'Un bot mentionné a été supprimé ou n’existe plus. Retirez sa mention avant d’envoyer.'));
-    const reviewerBotId = command.document?.reviewerBotId ?? null;
-    if (command.document) {
+    const reviewerBotId = request.document?.reviewerBotId ?? null;
+    if (request.document) {
       if (mentions.length) throw new Refusal('invalid_command', 'Un document est rédigé par le bot de ce fil. Retirez les @ et choisissez le relecteur dans le mode document.');
-      if (reviewerBotId === command.botId) throw new Refusal('invalid_command', 'Le relecteur doit être un autre bot que l’auteur.');
+      if (reviewerBotId === request.botId) throw new Refusal('invalid_command', 'Le relecteur doit être un autre bot que l’auteur.');
       if (reviewerBotId !== null) requireBot(reviewerBotId, 'Le relecteur choisi a été supprimé ou n’existe plus.');
     }
     const messageId = newId('m');
     const workId = newId('w');
     const at = now();
-    run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at) VALUES (?, ?, 'user', ?, NULL, ?)`, messageId, command.botId, command.text, at);
-    for (const file of command.attachments) {
+    run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at) VALUES (?, ?, 'user', ?, NULL, ?)`, messageId, request.botId, request.text, at);
+    run('INSERT INTO origins(message_id, bot_id, kind, occurrence, fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?)', messageId, request.botId, origin.kind, occurrence, print, at);
+    for (const file of request.attachments) {
       run('INSERT INTO attachments(message_id, name, text) VALUES (?, ?, ?)', messageId, file.name, file.text);
     }
-    if (command.document) {
+    if (request.document) {
       const taskId = newId('t');
       run(`INSERT INTO tasks(id, request_message_id, author_bot_id, reviewer_bot_id, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        taskId, messageId, command.botId, reviewerBotId, reviewerBotId === null ? 'solo' : 'relay', at, at);
+        taskId, messageId, request.botId, reviewerBotId, reviewerBotId === null ? 'solo' : 'relay', at, at);
       run(`INSERT INTO works(id, bot_id, request_message_id, state, title, created_at, updated_at, task_id) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)`,
-        workId, command.botId, messageId, workTitle(command.text), at, at, taskId);
-      return { kind: 'message', messageId, workId, taskId };
+        workId, request.botId, messageId, workTitle(request.text), at, at, taskId);
+      return { duplicate: false, messageId, workId, taskId };
     }
     mentions.forEach((span, position) => run('INSERT INTO message_mentions(message_id, position, bot_id, start, "end") VALUES (?, ?, ?, ?, ?)', messageId, position, span.botId, span.start, span.end));
     targets.forEach((botId, index) => run(`INSERT INTO works(id, bot_id, request_message_id, state, title, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
-      index === 0 ? workId : newId('w'), botId, messageId, workTitle(command.text), at, at));
-    return { kind: 'message', messageId, workId };
+      index === 0 ? workId : newId('w'), botId, messageId, workTitle(request.text), at, at));
+    return { duplicate: false, messageId, workId, taskId: null };
+  }
+
+  function admit(input: unknown): AdmitOutcome {
+    const parsed = AdmitSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, code: 'invalid_command', message: 'Cette demande automatique est incomplète ou invalide.' };
+    try {
+      const admitted = transaction(() => admitWork({ ...parsed.data, attachments: [] }));
+      if (!admitted.duplicate) changed();
+      return { ok: true, kind: admitted.duplicate ? 'duplicate' : 'admitted', messageId: admitted.messageId, workId: admitted.workId };
+    } catch (error) {
+      if (error instanceof Refusal) return { ok: false, code: error.code, message: error.message };
+      throw error;
+    }
   }
 
   /** Same definition for the confirmation shown to the person and for the check made when the deletion runs. */
@@ -1243,6 +1332,7 @@ export function openStore(options: StoreOptions): Store {
     const botId = command.botId;
     run('DELETE FROM purge_target');
     target('messages', `SELECT 'messages', id FROM messages WHERE role = 'user' AND bot_id = ?`, botId);
+    target('origins', `SELECT 'origins', id FROM purge_target WHERE tbl = 'messages'`);
     target('works', `SELECT 'works', id FROM works WHERE request_message_id IN (${targetsOf('messages')})`);
     const related = `${targetsOf('works')} UNION SELECT id FROM works WHERE bot_id = ?`;
     const stopping = context.activeWorkIds.some(workId => get(`SELECT 1 AS x FROM (${related}) WHERE id = ?`, botId, workId));
@@ -1450,8 +1540,15 @@ export function openStore(options: StoreOptions): Store {
     }
   }
 
+  /** Set on a request the person did not type, so the turn reads it as a trigger and never as their instruction. */
+  const triggerOf = (row: Row): { trigger?: AutomaticOrigin['kind'] } => {
+    const kind = oneOf(row, 'origin_kind', ORIGIN_KINDS);
+    return kind === 'human' ? {} : { trigger: kind };
+  };
+  const originKind = (messageId: string): Row => get('SELECT kind AS origin_kind FROM origins WHERE message_id = ?', messageId) ?? {};
+
   function threadExchanges(threadBotId: string, beforeSeq: number): Exchange[] {
-    return all(`SELECT request.* FROM messages request
+    return all(`SELECT request.*, o.kind AS origin_kind FROM messages request JOIN origins o ON o.message_id = request.id
       WHERE request.role='user' AND request.bot_id=? AND request.seq < ?
       AND EXISTS(SELECT 1 FROM works w WHERE w.request_message_id=request.id AND w.state IN ('review','done')) ORDER BY request.seq`,
     threadBotId, beforeSeq).map(request => {
@@ -1460,7 +1557,7 @@ export function openStore(options: StoreOptions): Store {
         JOIN messages reply ON reply.attempt_id=a.id
         WHERE w.request_message_id=? AND w.state IN ('review','done') ORDER BY w.rowid, a.n`, str(request, 'id'));
       const lastVersion = responses.map(row => currentVersion(str(row, 'work_id'))).findLast(v => v !== undefined);
-      return { request: { text: str(request, 'text'), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
+      return { request: { text: str(request, 'text'), ...triggerOf(request), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', str(request, 'id')).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
         replies: responses.map(row => ({ by: str(row, 'name'), text: str(row, 'text') })),
         deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n') } : null };
     });
@@ -1527,7 +1624,7 @@ export function openStore(options: StoreOptions): Store {
         bot: botSource(bot),
         memories,
         exchanges: threadExchanges(report.threadBotId, report.requestSeq),
-        request: { text: report.requestText, attachments: requestAttachments(report.requestMessageId) },
+        request: { text: report.requestText, ...triggerOf(originKind(report.requestMessageId)), attachments: requestAttachments(report.requestMessageId) },
         receipt: report.receipt,
       },
     }, null, { kind: 'receipt', executionId: report.executionId });
@@ -1539,8 +1636,9 @@ export function openStore(options: StoreOptions): Store {
     const report = tools.nextReport();
     if (report) return claimReport(report);
     const next = get(
-      `SELECT w.id AS work_id, w.bot_id, m.bot_id AS thread_bot_id, m.seq, m.id AS message_id, m.text
-       FROM works w JOIN messages m ON m.id = w.request_message_id JOIN bots actor ON actor.id = w.bot_id AND actor.deleted_at IS NULL
+      `SELECT w.id AS work_id, w.bot_id, m.bot_id AS thread_bot_id, m.seq, m.id AS message_id, m.text, o.kind AS origin_kind
+       FROM works w JOIN messages m ON m.id = w.request_message_id JOIN origins o ON o.message_id = m.id
+         JOIN bots actor ON actor.id = w.bot_id AND actor.deleted_at IS NULL
        WHERE w.state = 'pending' AND w.task_id IS NULL ORDER BY m.seq, w.rowid LIMIT 1`,
     );
     if (!next) return null;
@@ -1559,7 +1657,7 @@ export function openStore(options: StoreOptions): Store {
         bot: botSource(bot),
         memories,
         exchanges: threadExchanges(str(next, 'thread_bot_id'), int(next, 'seq')),
-        request: { text: str(next, 'text'), attachments: requestAttachments(str(next, 'message_id')) },
+        request: { text: str(next, 'text'), ...triggerOf(next), attachments: requestAttachments(str(next, 'message_id')) },
         ...(ongoing.length ? { ongoing } : {}),
         ...(botId === MINO_ID && str(next, 'thread_bot_id') === MINO_ID ? { orchestrator: true } : {}),
       },
@@ -1620,13 +1718,48 @@ export function openStore(options: StoreOptions): Store {
     return null;
   }
 
+  const CAPABILITY: Record<Lane, string> = { chat: 'codex.chat', doc: 'codex.document' };
+  /** The call of a claim, as the admission registry names it. A document call is reserved against the goal revision it was composed for. */
+  const targetOf = (claim: Claim, revision: number | null): Target =>
+    revision === null ? { kind: 'chat', id: claim.attemptId } : { kind: 'document', id: claim.attemptId, revision: String(revision) };
+
+  /**
+   * A claim leaves this function with its ceilings reserved. A refused one is recorded as a call that never left,
+   * with the reason, and the search goes on.
+   */
   function claimNext(lane: Lane): Claim | null {
+    let refused = false;
     const claim = transaction((): Claim | null => {
       if (get(`SELECT id FROM attempts WHERE state = 'running' AND lane = ?`, lane)) return null;
-      return lane === 'chat' ? claimChat() : claimDoc();
+      for (;;) {
+        const candidate = lane === 'chat' ? claimChat() : claimDoc();
+        if (!candidate) return null;
+        const facts = get(`SELECT a.task_revision, w.request_message_id, o.kind AS origin_kind FROM attempts a JOIN works w ON w.id = a.work_id
+          JOIN origins o ON o.message_id = w.request_message_id WHERE a.id = ?`, candidate.attemptId) ?? {};
+        const reserved = admission.reserve({
+          capability: CAPABILITY[lane],
+          source: { kind: oneOf(facts, 'origin_kind', ORIGIN_KINDS), id: str(facts, 'request_message_id') },
+          target: targetOf(candidate, facts.task_revision === null ? null : int(facts, 'task_revision')),
+        });
+        if (reserved.ok) return candidate;
+        refused = true;
+        finishAttempt(candidate, engineFailure('admission_refused', reserved.message));
+        tools.syncDrafts();
+      }
     });
-    if (claim) changed();
+    if (claim || refused) changed();
     return claim;
+  }
+
+  function depart(claim: Claim): Departure {
+    return transaction((): Departure => {
+      const row = get(`SELECT a.state, w.state AS work_state, t.revision FROM attempts a JOIN works w ON w.id = a.work_id
+        LEFT JOIN tasks t ON t.id = w.task_id WHERE a.id = ?`, claim.attemptId);
+      if (!row || str(row, 'state') !== 'running' || str(row, 'work_state') !== 'running') {
+        return { ok: false, reason: 'Cet appel a été arrêté avant son départ. Mino ne l’a pas lancé.' };
+      }
+      return admission.depart(CAPABILITY[claim.lane], targetOf(claim, row.revision === null ? null : int(row, 'revision')));
+    });
   }
 
   function recordProgress(claim: Claim, text: AgentText): void {
@@ -1673,6 +1806,7 @@ export function openStore(options: StoreOptions): Store {
 
   function finishJob(claim: Claim, outcome: EngineOutcome): FinishResult {
     const result = transaction((): FinishResult => {
+      admission.settle(CAPABILITY[claim.lane], { kind: claim.lane === 'chat' ? 'chat' : 'document', id: claim.attemptId }, 'ended');
       const finished = finishAttempt(claim, outcome);
       tools.syncDrafts();
       return finished;
@@ -1798,6 +1932,7 @@ export function openStore(options: StoreOptions): Store {
   function recoverInterrupted(): number {
     const recovered = transaction(() => {
       const unknownSends = tools.recover();
+      admission.recover();
       const interrupted = run(
         `UPDATE attempts SET state = 'interrupted', stage = NULL, error_code = 'interrupted', error_text = ?, finished_at = ? WHERE state = 'running'`,
         ENGINE_ERRORS.interrupted, now(),
@@ -2072,7 +2207,9 @@ export function openStore(options: StoreOptions): Store {
   return {
     get rev() { return rev; },
     tools,
+    admission,
     dispatch,
+    admit,
     view,
     diagnostics,
     claimNextJob: () => claimNext('chat'),
@@ -2082,6 +2219,7 @@ export function openStore(options: StoreOptions): Store {
     setStage,
     bindThread,
     bindTurn,
+    depart,
     observeUsage,
     finishJob,
     recoverInterrupted,
@@ -2123,9 +2261,10 @@ export function openStore(options: StoreOptions): Store {
       const snapshot = view();
       const names = new Map([...snapshot.retiredBotIds.map(id => [id, DELETED_BOT_NAME] as const), ...snapshot.bots.map(bot => [bot.id, bot.name] as const)]);
       const lines = ['# Fil Mino', ''];
+      const automatic = new Map(all(`SELECT message_id, kind FROM origins WHERE kind <> 'human'`).map(row => [str(row, 'message_id'), oneOf(row, 'kind', ORIGIN_KINDS)] as const));
       for (const message of snapshot.messages.filter(m => !threadBotId || m.threadBotId === threadBotId)) {
         const bot = names.get(message.botId) ?? 'Bot';
-        lines.push(message.role === 'user' ? `**Vous → ${bot}${message.mentions.length ? ' (' + [...new Set(message.mentions.map(m => names.get(m.botId) ?? m.botId))].map(n => '@' + n).join(', ') + ')' : ''}** · ${message.createdAt}` : `**${bot}** · ${message.createdAt}`, '', message.text, '');
+        lines.push(message.role === 'user' ? `**${ORIGIN_LABELS[automatic.get(message.id) ?? 'human']} → ${bot}${message.mentions.length ? ' (' + [...new Set(message.mentions.map(m => names.get(m.botId) ?? m.botId))].map(n => '@' + n).join(', ') + ')' : ''}** · ${message.createdAt}` : `**${bot}** · ${message.createdAt}`, '', message.text, '');
       }
       return { filename: 'fil-mino.md', content: lines.join('\n'), mediaType: 'text/markdown' };
     },

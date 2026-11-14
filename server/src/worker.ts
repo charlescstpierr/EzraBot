@@ -77,7 +77,8 @@ export function createWorker(options: {
         if (text) guarded(() => store.recordProgress(claim, text));
       };
       const offered = name === 'chat' ? options.tools?.forClaim(claim) : undefined;
-      const outcome = await engine.run({
+      let departed = false;
+      const ran = await engine.run({
         ...(offered ? { tools: offered } : {}),
         turn: claim.turn,
         choice: claim.choice,
@@ -85,6 +86,11 @@ export function createWorker(options: {
         onStage: stage => guarded(() => store.setStage(claim, stage)),
         onThread: threadId => guarded(() => store.bindThread(claim, threadId)),
         onTurn: turnId => guarded(() => store.bindTurn(claim, turnId)),
+        depart: () => {
+          const departure = closed ? { ok: false as const, reason: 'Mino s’arrête. L’appel n’est pas parti.' } : store.depart(claim);
+          departed = departure.ok;
+          return departure;
+        },
         ...(name === 'doc' ? {
           onText: (text: AgentText) => {
             pending = text;
@@ -93,6 +99,7 @@ export function createWorker(options: {
           },
         } : {}),
       }).catch(() => engineFailure('engine_exited'));
+      const outcome = ran.kind === 'succeeded' && !departed ? engineFailure('admission_refused', 'Le moteur a répondu sans prendre son permis de départ. Mino n’a rien enregistré.') : ran;
       flush();
       active = null;
       if (closed) return;

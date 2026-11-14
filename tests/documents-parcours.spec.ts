@@ -90,6 +90,15 @@ function controlledEngine() {
     },
     run: (input) =>
       new Promise<EngineOutcome>((resolve) => {
+        const departure = input.depart();
+        if (!departure.ok) {
+          resolve({
+            kind: "failed",
+            code: "admission_refused",
+            message: departure.reason,
+          });
+          return;
+        }
         input.signal.addEventListener(
           "abort",
           () => resolve({ kind: "cancelled" }),

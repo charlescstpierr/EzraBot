@@ -98,7 +98,8 @@ export function createAgentWorker(options: {
       const before = await observe(claim.cwd, null, controller.signal);
       guarded(() => missions.setBaseline(claim, before.observed.git && !before.observed.error ? before.observed.status : null));
       if (missions.stopRequested(claim.attemptId)) controller.abort();
-      const outcome: Parameters<Missions['finish']>[1] = before.kind === 'unknown'
+      let departed = false;
+      const ran: Parameters<Missions['finish']>[1] = before.kind === 'unknown'
         ? { kind: 'interrupted', message: `Le constat initial n’a pas confirmé sa fin. ${before.message}` }
         // Mino's final check of a coordinated mission has no model turn: it goes straight to the check and the observation.
         : claim.kind === 'final' ? { kind: 'completed', finalText: null, threadId: '', turnId: '' }
@@ -112,12 +113,19 @@ export function createAgentWorker(options: {
           input: claim.input,
           outputSchema: claim.outputSchema,
           signal: controller.signal,
+          depart: () => {
+            const departure = closed ? { ok: false as const, reason: 'Mino s’arrête. La tentative n’est pas partie.' } : missions.depart(claim);
+            departed = departure.ok;
+            return departure;
+          },
           onThread: (threadId, model, effort) => guarded(() => missions.bindThread(claim, threadId, model, effort)),
           onTurn: turnId => guarded(() => missions.bindTurn(claim, turnId)),
           onEvent: event => guarded(() => missions.recordEvent(claim, event)),
           onActivity: (activity, text) => missions.setLive(claim.attemptId, activity, text),
           onUsage: usage => guarded(() => missions.recordUsage(claim, usage)),
         }).catch((): Parameters<Missions['finish']>[1] => ({ kind: 'interrupted', message: 'L’exécutant a rencontré une erreur interne. Le résultat est inconnu.' }));
+      const outcome: typeof ran = ran.kind === 'completed' && claim.kind !== 'final' && !departed
+        ? { kind: 'failed', code: 'admission_refused', message: 'L’exécutant a répondu sans prendre son permis de départ.', effects: true } : ran;
       if (closed && outcome.kind !== 'stopped' && outcome.kind !== 'completed') return;
       let state: ReturnType<Missions['finish']> = null;
       guarded(() => { state = missions.finish(claim, outcome); });
