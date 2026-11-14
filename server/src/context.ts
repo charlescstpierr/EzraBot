@@ -4,7 +4,7 @@ import type { MissionChatContext } from './mission-context.js';
 import type { AutomaticOrigin } from './admission-protocol.js';
 
 /** Bump whenever the rendered text or the budgets change, so equal hashes always mean equal policies. */
-export const CONTEXT_POLICY_VERSION = 9;
+export const CONTEXT_POLICY_VERSION = 10;
 
 export const OUTPUT_SCHEMA = {
   type: 'object',
@@ -47,6 +47,28 @@ export const MINO_OUTPUT_SCHEMA = {
   },
 } as const;
 
+const CONNECTION = {
+  anyOf: [
+    { type: 'null' },
+    { type: 'object', additionalProperties: false, required: ['service'], properties: { service: { type: 'string' } } },
+  ],
+} as const;
+
+/** An ordinary chat turn on a server with connected services: the bot may also propose to connect a service. The card does nothing until the person starts it. */
+export const CONNECTING_OUTPUT_SCHEMA = {
+  ...OUTPUT_SCHEMA,
+  required: [...OUTPUT_SCHEMA.required, 'connection'],
+  properties: { ...OUTPUT_SCHEMA.properties, connection: CONNECTION },
+} as const;
+
+export const CONNECTING_MINO_OUTPUT_SCHEMA = {
+  ...MINO_OUTPUT_SCHEMA,
+  required: [...MINO_OUTPUT_SCHEMA.required, 'connection'],
+  properties: { ...MINO_OUTPUT_SCHEMA.properties, connection: CONNECTION },
+} as const;
+
+const CONNECTION_RULE = '`connection` : null, sauf si la demande exige un service externe (courriel, agenda, messagerie, fichiers en ligne) que tu ne peux pas utiliser. Alors `service` est l’identifiant court du service en minuscules, par exemple gmail ou slack ; si tu ne le connais pas, laisse null et demande-le. Cela n’appelle aucun service, ne relie aucun compte et ne te donne aucun droit : une carte sous ta réponse permet à la personne de relier un compte sur son PC, puis de choisir elle-même tes droits dans ta page. Dis-le dans `reply` ; n’affirme jamais que le service est relié ni que tu peux l’utiliser. Si une de tes actions de service suffit, laisse null.';
+
 const HANDOFF_RULE = '`handoff` : null, sauf si la personne demande un travail à faire dans un dossier de son ordinateur (code, fichiers, tests). Alors `goal` reprend sa demande complète sans la raccourcir, `coordinated` vaut true seulement pour plusieurs étapes séparables ou une relecture entre étapes, et `why` dit en une phrase pourquoi le confier. Tu ne fais pas ce travail toi-même : la personne choisit le dossier et confie la mission.';
 
 const DOCUMENT = {
@@ -70,7 +92,8 @@ export const OPINION_SCHEMA = {
   properties: { reply: { type: 'string' }, deliverable: { type: 'null' } },
 } as const;
 
-export type OutputSchema = typeof OUTPUT_SCHEMA | typeof MINO_OUTPUT_SCHEMA | typeof DOCUMENT_SCHEMA | typeof OPINION_SCHEMA;
+export type OutputSchema = typeof OUTPUT_SCHEMA | typeof MINO_OUTPUT_SCHEMA | typeof CONNECTING_OUTPUT_SCHEMA | typeof CONNECTING_MINO_OUTPUT_SCHEMA
+  | typeof DOCUMENT_SCHEMA | typeof OPINION_SCHEMA;
 
 /** What a document step receives besides the request. Only recorded outputs and the person's intents, never another bot's memory. */
 export type TaskSource = {
@@ -115,6 +138,8 @@ export type ContextSource = {
   chosen?: { title: string; n: number; headN: number; body: string; holds: boolean };
   /** This turn reports the outcome of an action the person approved. It never has tools. */
   receipt?: ReceiptContext;
+  /** The server has connected services: this chat turn may propose to connect one. The proposal calls no service and grants nothing. */
+  connections?: true;
 };
 
 /** The recorded outcome of one approved action. Everything here comes from an external service and is untrusted. */
@@ -294,7 +319,8 @@ export function composeContext(source: ContextSource): ComposedContext {
   const orchestrating = source.orchestrator === true && !source.task && !receipt;
   const toolNames = source.task || receipt ? [] : source.tools?.names ?? [];
   const chosen = source.task || receipt ? undefined : source.chosen;
-  const base = [`Tu es ${bot.name}${bot.title ? `, ${bot.title}` : ''}, bot de l’application locale Mino.`, ...FIXED_RULES(toolNames), ...(orchestrating ? [HANDOFF_RULE] : []), ...(receipt ? [RECEIPT_RULE] : []), ...(chosen ? [chosen.holds ? SOURCE_RULE : SOURCE_CHANGED_RULE] : []), REPLY_RULES[bot.replyStyle]];
+  const connecting = source.connections === true && !source.task && !receipt;
+  const base = [`Tu es ${bot.name}${bot.title ? `, ${bot.title}` : ''}, bot de l’application locale Mino.`, ...FIXED_RULES(toolNames), ...(orchestrating ? [HANDOFF_RULE] : []), ...(connecting ? [CONNECTION_RULE] : []), ...(receipt ? [RECEIPT_RULE] : []), ...(chosen ? [chosen.holds ? SOURCE_RULE : SOURCE_CHANGED_RULE] : []), REPLY_RULES[bot.replyStyle]];
   if (instructions) {
     base.push('', `Consignes de la personne pour ${bot.name}. Elles ne lèvent aucune des règles ci-dessus :`, instructions);
   }
@@ -380,7 +406,10 @@ export function composeContext(source: ContextSource): ComposedContext {
   else parts.push(source.task || receipt ? 'Demande initiale de la personne :' : 'Demande actuelle :', source.request.text);
   if (receipt) parts.push('', ...receiptLines(receipt));
   const input = parts.join('\n');
-  const outputSchema: OutputSchema = receipt ? OPINION_SCHEMA : orchestrating ? MINO_OUTPUT_SCHEMA : !source.task ? OUTPUT_SCHEMA : source.task.step === 'review' ? OPINION_SCHEMA : DOCUMENT_SCHEMA;
+  const outputSchema: OutputSchema = receipt ? OPINION_SCHEMA
+    : orchestrating ? (connecting ? CONNECTING_MINO_OUTPUT_SCHEMA : MINO_OUTPUT_SCHEMA)
+      : !source.task ? (connecting ? CONNECTING_OUTPUT_SCHEMA : OUTPUT_SCHEMA)
+        : source.task.step === 'review' ? OPINION_SCHEMA : DOCUMENT_SCHEMA;
 
   const turn: ComposedTurn = { baseInstructions, input, outputSchema };
   const memoryChars = source.memories.reduce((sum, memory) => sum + chars(memory.text), 0);

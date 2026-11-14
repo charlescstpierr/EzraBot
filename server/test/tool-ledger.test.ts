@@ -74,7 +74,7 @@ test('the tool tables arrive on the oldest and on the current schema with valid 
   for (const path of [legacy, tempPath()]) {
     const store = openStore({ path, mascots, serviceTools: true });
     try {
-      assert.deepEqual(store.tools.view({ state: 'missing_key' }), { status: { state: 'missing_key' }, accounts: [], links: [], grants: {}, proposals: [], sources: [] });
+      assert.deepEqual(store.tools.view({ state: 'missing_key' }), { status: { state: 'missing_key' }, accounts: [], links: [], grants: {}, proposals: [], sources: [], connections: [] });
       assert.deepEqual(store.tools.grantsFor('nova'), []);
     } finally {
       store.close();
@@ -804,7 +804,7 @@ test('a database of the previous version keeps its proposals and receipts throug
   }
   const after = new DatabaseSync(path);
   try {
-    assert.equal(after.prepare('PRAGMA user_version').get()?.user_version, 9);
+    assert.equal(after.prepare('PRAGMA user_version').get()?.user_version, 10);
     assert.deepEqual(after.prepare('PRAGMA foreign_key_check').all(), []);
     const kept = new Set(after.prepare(`SELECT name FROM sqlite_master WHERE type IN ('trigger','index')`).all().map(row => String(row.name)));
     assert.deepEqual(guards.filter(name => !kept.has(name)), [], 'every guard that named the proposals before the rebuild exists after it');

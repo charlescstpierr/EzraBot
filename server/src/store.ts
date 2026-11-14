@@ -73,6 +73,7 @@ import { canContinue, maxCalls, nextStep, stepActor, taskStatus, type TaskFacts 
 import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
 import { TOOL_MIGRATION, TOOL_PURGE_ORDER, TOOL_SOURCE_MIGRATION, createToolLedger, type GrantSnapshot, type ReportClaim, type ToolLedger } from './tool-ledger.js';
 import { SOURCE_MIGRATION, createSources } from './source.js';
+import { CONNECTION_MIGRATION, createConnections } from './connection.js';
 import { ADMISSION_MIGRATION, DEFAULT_POLICY, createAdmission, type Admission, type Departure, type Target } from './admission.js';
 import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type AutomaticOrigin, type Origin } from './admission-protocol.js';
 
@@ -618,6 +619,7 @@ CREATE TRIGGER works_admitted BEFORE INSERT ON works
 ` },
   { sql: ADMISSION_MIGRATION },
   { rebuild: true, sql: SOURCE_MIGRATION + TOOL_SOURCE_MIGRATION },
+  { sql: CONNECTION_MIGRATION },
 ];
 const SQLITE_COMPANIONS = ['', '-wal', '-shm', '-journal'] as const;
 export const managedBackupPaths = (path: string): string[] =>
@@ -626,6 +628,7 @@ export const managedBackupPaths = (path: string): string[] =>
 /** The rows erased with a bot, in an order that never leaves a dangling reference between statements. */
 const PURGE_ORDER = [
   ...TOOL_PURGE_ORDER,
+  ['tool_connections', 'id'],
   ['message_sources', 'message_id'],
   ['publications', 'id'],
   ['decisions', 'id'],
@@ -821,6 +824,7 @@ export function openStore(options: StoreOptions): Store {
   const sign = (payload: unknown) => createHmac('sha256', hmacKey).update(stableStringify(payload)).digest('hex');
   const admission = createAdmission({ get, all, run, transaction, now, newId }, options.policy ?? DEFAULT_POLICY);
   const sources = createSources({ get, all, run, now });
+  const connections = createConnections({ get, all, run, now, newId });
 
   const tools = createToolLedger(
     { get, all, run, transaction, now, newId, changed, sign },
@@ -835,6 +839,7 @@ export function openStore(options: StoreOptions): Store {
     },
     admission,
     sources,
+    connections,
   );
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
@@ -1378,6 +1383,7 @@ export function openStore(options: StoreOptions): Store {
     target('attempt_progress', `SELECT 'attempt_progress', attempt_id || ':' || item_id FROM attempt_progress WHERE attempt_id IN (${targetsOf('attempts')})`);
     target('doc_proposals', `SELECT 'doc_proposals', id FROM doc_proposals WHERE work_id IN (${targetsOf('works')})`);
     target('message_sources', `SELECT 'message_sources', message_id FROM message_sources WHERE message_id IN (${targetsOf('messages')})`);
+    target('tool_connections', `SELECT 'tool_connections', id FROM tool_connections WHERE bot_id = ? OR work_id IN (${targetsOf('works')})`, botId);
     tools.markPurge(botId, targetsOf('works'));
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
@@ -1611,6 +1617,7 @@ export function openStore(options: StoreOptions): Store {
       ...prepared.source,
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
       ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
+      ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? { connections: true as const } : {}),
     };
     const composed = composeContext(source);
     const bot = prepared.bot;
@@ -1861,6 +1868,9 @@ export function openStore(options: StoreOptions): Store {
         const handoff = reportOf === null && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
         run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at, handoff) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
           newId('m'), str(work, 'bot_id'), outcome.reply.reply, claim.attemptId, at, handoff ? JSON.stringify(handoff) : null);
+        if (options.serviceTools && reportOf === null && outcome.reply.connection) {
+          connections.offer({ botId: str(work, 'bot_id'), workId: claim.workId, attemptId: claim.attemptId }, outcome.reply.connection.service);
+        }
         if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'done') };
         const deliverable = outcome.reply.deliverable;
         if (deliverable) {

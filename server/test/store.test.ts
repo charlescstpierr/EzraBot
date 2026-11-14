@@ -649,7 +649,7 @@ test('v1 migration preserves real links, HMAC replay and immutable history, and 
   assert.equal(store.view().carnet[0]?.threadBotId, 'mino');
   store.close();
   db = new DatabaseSync(path);
-  assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 9);
+  assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 10);
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
   const project = (rows: Record<string, unknown>[], like: Record<string, unknown>[]) => rows.map((row, i) => Object.fromEntries(Object.keys(like[i] ?? {}).map(key => [key, row[key]])));
   assert.deepEqual(tables.map((table, i) => project(db.prepare(`SELECT * FROM ${table}`).all(), before[i] ?? [])), before.map(rows => project(rows, rows)));
