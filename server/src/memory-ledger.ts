@@ -144,7 +144,7 @@ const SUSPENDED = 'La mémoire de ce personnage est suspendue. Aucune déclarati
 export function createMemoryLedger(kit: LedgerKit, receipts: {
   find(requestId: string): { type: string; fingerprint: string; result: string } | null;
   save(requestId: string, type: string, fingerprint: string, result: string): void;
-}, admission: Admission, config: { workspacePrefix: string } | null): MemoryInternals {
+}, admission: Admission, config: { workspacePrefix: string } | null, onMoved: () => void): MemoryInternals {
   const { get, all, run, now, newId } = kit;
 
   const scopeOf = (botId: string): Row | undefined => get('SELECT * FROM memory_scopes WHERE bot_id = ?', botId);
@@ -357,6 +357,8 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
           return { ok: true, replayed: true, result: MemoryResultSchema.parse(JSON.parse(prior.result)) };
         }
         const result = execute(command);
+        // In this same transaction: an action prepared from a source withdrawn here is closed before the command is recorded.
+        onMoved();
         receipts.save(requestId, command.type, print, JSON.stringify(result));
         return { ok: true, replayed: false, result };
       });

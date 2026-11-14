@@ -512,6 +512,18 @@ const STALE_LABELS: Record<StaleReason, string> = {
   source_changed: "le document source a changé depuis votre demande",
 };
 
+const MEMORY_CHANGED =
+  "une source de la mémoire de cette conversation a été corrigée, exclue ou oubliée depuis votre demande";
+
+/** `source_changed` closes an action for its cited document or for the memory of its turn: a document that still holds leaves the memory. */
+function staleLabel(proposal: ToolProposalView): string {
+  if (!proposal.staleReason) return "elle n’est plus valable";
+  return proposal.staleReason === "source_changed" &&
+    proposal.source?.state !== "changed"
+    ? MEMORY_CHANGED
+    : STALE_LABELS[proposal.staleReason];
+}
+
 const VOID_LABELS: Record<string, string> = {
   grant_changed: "le droit a été retiré ou remplacé",
   account_inactive: "le compte n’est plus actif",
@@ -519,6 +531,7 @@ const VOID_LABELS: Record<string, string> = {
   bot_deleted: "le personnage a été supprimé",
   work_changed: "le travail a changé",
   source_changed: "le document source a changé depuis votre demande",
+  memory_changed: MEMORY_CHANGED,
   session: "la session du fournisseur n’a pas pu s’ouvrir",
   tool_absent: "le service ne propose plus cet outil",
   version_missing: "le service n’annonce plus de version",
@@ -530,7 +543,7 @@ function outcomeText(proposal: ToolProposalView): string {
     return "En attente de votre décision. Rien n’est envoyé sans elle.";
   if (proposal.state === "refused") return "Refusée. Rien n’a été envoyé.";
   if (proposal.state === "stale")
-    return `Périmée : ${proposal.staleReason ? STALE_LABELS[proposal.staleReason] : "elle n’est plus valable"}. Rien n’a été envoyé.`;
+    return `Périmée : ${staleLabel(proposal)}. Rien n’a été envoyé.`;
   const execution = proposal.execution;
   switch (execution?.state) {
     case "approved":

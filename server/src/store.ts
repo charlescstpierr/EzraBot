@@ -851,8 +851,9 @@ export function openStore(options: StoreOptions): Store {
       run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
     },
   };
-  const tools = createToolLedger(kit, receipts, admission, sources, connections);
-  const memory = createMemoryLedger(kit, receipts, admission, options.memory ?? null);
+  // The tools ask the memory guard only when an action is decided or sent, never while they are built: `memory` exists by then.
+  const tools = createToolLedger(kit, receipts, admission, sources, connections, { holds: attemptId => memory.holds(attemptId) });
+  const memory = createMemoryLedger(kit, receipts, admission, options.memory ?? null, tools.memoryMoved);
   const HONCHO_OWNS_MEMORY = 'Ce personnage utilise la mémoire Honcho. Ses déclarations se gèrent sur l’ordinateur, dans sa page. Rien n’a été enregistré.';
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {

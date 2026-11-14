@@ -87,6 +87,8 @@ Un retrait est transitif. Un appel dont le texte contenait une source retirée e
 
 Un tour en cours est arrêté. Le store enregistre un échec « La mémoire de cette conversation a changé » : aucun message, aucune version, aucune proposition n'est publié. Relancer la demande recompose tout.
 
+Une action préparée par un tour dont la mémoire ne tient plus ne part pas. Dans la transaction du retrait, le registre des actions ferme les propositions encore ouvertes et annule les approbations pas encore envoyées. L'approbation et le dernier contrôle avant l'envoi relisent la mémoire du tour d'origine. Si elle ne tient plus, aucun appel ne part vers le service et le budget des services ne bouge pas. La carte dit qu'une source de la mémoire a été corrigée, exclue ou oubliée. Un envoi déjà parti garde son reçu et n'est jamais rejoué. Une action d'un autre projet, ou d'un tour sans mémoire, ne change pas.
+
 Un accusé 202 ne prouve aucun effacement. Après un oubli, le projet reste fermé (`withdrawal_unverified`). Seul un nouvel espace vide, confirmé par vous, le rouvre. Rien d'ancien n'y est envoyé : ni déclaration, ni historique, ni requête en vol.
 
 ## Pannes et reprise
@@ -102,6 +104,7 @@ Un accusé 202 ne prouve aucun effacement. Après un oubli, le projet reste ferm
 - La mémoire sert dans la conversation du personnage. Les documents, les comptes rendus d'action et les réponses d'un personnage invité partent sans mémoire.
 - Une recherche est payée avant la prise du tour. Si le plafond Codex refuse ensuite le tour, elle est perdue.
 - Une correction ou une exclusion retire aussi du contexte les anciennes réponses composées avec la source. Un travail documentaire dont un appel a été retiré ne reçoit plus de nouvel appel.
+- Une correction, une exclusion, un oubli ou un nouvel espace vide ferme toutes les actions du projet préparées avant et pas encore envoyées, même celles dont le tour n'avait pas reçu la source retirée : la génération du projet a avancé. Demandez de nouveau l'action.
 - Un 201 atteste une création. Il ne prouve pas qu'un fournisseur hostile n'avait aucune donnée sous ce nom.
 - Un personnage dont la mémoire est ouverte ne se supprime pas. Il faut d'abord l'oublier.
 - EzraBot ne demande aucune conclusion dérivée à Honcho. Le pair `person` est créé sans observation.
