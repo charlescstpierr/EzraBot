@@ -90,7 +90,11 @@ function relay(
     },
   };
 }
-const refusal: AppOutcome = { kind: "rejected", status: 503, message: "occupé" };
+const refusal: AppOutcome = {
+  kind: "rejected",
+  status: 503,
+  message: "occupé",
+};
 const holding = (items: Map<string, string>, text: string) =>
   [...items.values()].filter((value) => value.includes(text));
 
@@ -357,7 +361,9 @@ test("capacité et TTL protègent les inconnus et travaux ouverts", async () => 
   book.collect([a.command.requestId]);
   expect(book.snapshot()).toHaveLength(2);
   page(storage).collect([b.command.requestId]);
-  expect(book.snapshot()).toHaveLength(2);
+  expect(book.snapshot()).toMatchObject([
+    { command: a.command, fact: { kind: "unknown" } },
+  ]);
   book.collect([b.command.requestId]);
   expect(page(storage).snapshot()).toMatchObject([{ command: a.command }]);
   expect((await book.run(c)).kind).toBe("settled");
@@ -459,27 +465,37 @@ test("les envois refusés sans reprise d’un ancien chargement libèrent la cap
   expect((await reloaded.run(b)).kind).toBe("settled");
 });
 
-test("la purge retire le texte d’un ancien format sans toucher un autre bot ou espace", async () => {
+test("la purge retire le texte des anciens et futurs formats sans toucher un autre bot ou espace", async () => {
   const { storage, state } = browser();
   const a = input("Texte privé à effacer"),
     b = input("Texte conservé", "mino");
   await page(storage).run(a);
   await page(storage).run(b);
   await page(storage, undefined, { spaceId: "space-b" }).run(a);
-  for (const [key, value] of state.items) {
-    const row = JSON.parse(value);
-    if (row.spaceId === "space-a" && row.command.botId === "nova")
-      state.items.set(
-        key,
-        JSON.stringify({ ...row, fact: { kind: "format-futur" } }),
-      );
-  }
-  page(storage).purge(["nova"]);
-  const remaining = [...state.items.values()].filter((value) =>
-    value.includes(a.raw.text),
+  const legacy = (botId: string, text: string) =>
+    JSON.stringify({
+      spaceId: "space-a",
+      writerId: "ancien",
+      savedAt: 0,
+      command: { ...a.command, botId, text },
+      raw: { text, files: [] },
+      fact: { kind: "format-futur" },
+    });
+  state.items.set(
+    "mino.send-book.v1|space-a|ancien|1",
+    legacy("nova", a.command.text),
   );
+  state.items.set(
+    "mino.send-book.v1|space-a|ancien|2",
+    legacy("mino", b.command.text),
+  );
+  state.items.set("mino.send-book.v2|space-a|futur|nova|x|y", a.command.text);
+  state.items.set("mino.send-book.v2|space-a|futur|mino|x|y", b.command.text);
+  page(storage).purge(["nova"]);
+  const remaining = holding(state.items, a.command.text);
   expect(remaining).toHaveLength(1);
   expect(JSON.parse(remaining[0]).spaceId).toBe("space-b");
+  expect(holding(state.items, b.command.text)).toHaveLength(3);
   expect(page(storage).snapshot()).toMatchObject([{ command: b.command }]);
   expect(
     page(storage, undefined, { spaceId: "space-b" }).snapshot(),
@@ -487,20 +503,29 @@ test("la purge retire le texte d’un ancien format sans toucher un autre bot ou
 });
 
 test("la collecte retire ensemble les copies acceptées de plusieurs écrivains", async () => {
-  const { storage } = browser();
+  const { storage, state } = browser();
   const a = input();
   const options = { now: () => 0, ttlMs: 0, capacity: 1 };
   await page(storage, async () => accepted("a"), options).run(a);
   await page(storage, async () => accepted("a"), options).run(a);
-  expect(storage.length).toBe(2);
+  const witnesses = holding(state.items, a.command.text);
+  expect(witnesses).toHaveLength(2);
   const reader = page(storage, undefined, options);
   reader.collect([a.command.requestId]);
   expect(reader.snapshot()).toEqual([]);
-  expect(storage.length).toBe(0);
+  expect(page(storage, undefined, options).snapshot()).toEqual([]);
+  expect(holding(state.items, a.command.text)).toEqual(witnesses);
+  expect(
+    (await page(storage, undefined, options).run(input("Nouvelle"))).kind,
+  ).toBe("settled");
+  page(storage).purge(["nova"]);
+  expect([...state.items.keys()]).toEqual([
+    "mino.send-book.v2|space-a|gone|nova",
+  ]);
 });
 
 test("un refus ne fait pas collecter une copie encore inconnue", async () => {
-  const { storage } = browser();
+  const { storage, state } = browser();
   const a = input();
   await page(storage).run(a);
   await page(storage, async () => ({
@@ -508,9 +533,10 @@ test("un refus ne fait pas collecter une copie encore inconnue", async () => {
     status: 403,
     message: "refus",
   })).run(a);
+  const saved = [...state.items];
   const reader = page(storage, undefined, { ttlMs: 0 });
   reader.collect([a.command.requestId]);
-  expect(storage.length).toBe(2);
+  expect([...state.items]).toEqual(saved);
   expect(reader.snapshot()).toMatchObject([{ command: a.command }]);
 });
 
@@ -518,13 +544,18 @@ test("une purge vide ne touche rien et une purge nommée retire les octets incla
   const { storage, state } = browser();
   const ownKey = "mino.send-book.v1|space-a|broken|broken";
   const otherKey = "mino.send-book.v1|space-b|broken|broken";
-  state.items.set(ownKey, "{texte privé incomplet");
-  state.items.set(otherKey, "{texte privé incomplet");
+  const ownV2 = "mino.send-book.v2|space-a|body|%E0%A4%A|w|d";
+  const otherV2 = "mino.send-book.v2|space-b|body|%E0%A4%A|w|d";
+  for (const key of [ownKey, otherKey, ownV2, otherV2])
+    state.items.set(key, "{texte privé incomplet");
   page(storage).purge([]);
   expect(state.items.get(ownKey)).toBe("{texte privé incomplet");
+  expect(state.items.get(ownV2)).toBe("{texte privé incomplet");
   page(storage).purge(["nova"]);
   expect(state.items.has(ownKey)).toBe(false);
+  expect(state.items.has(ownV2)).toBe(false);
   expect(state.items.get(otherKey)).toBe("{texte privé incomplet");
+  expect(state.items.get(otherV2)).toBe("{texte privé incomplet");
 });
 
 test("un refus précédent ne masque pas une reprise dont la réponse est perdue", async () => {
@@ -769,7 +800,14 @@ test("une reprise injectée avant chaque opération de la collecte garde l’ide
         const during = page(storage).snapshot();
         retry.resolve(c.late);
         await pending;
-        return { a, ops, sent, pending, during, after: page(storage).snapshot() };
+        return {
+          a,
+          ops,
+          sent,
+          pending,
+          during,
+          after: page(storage).snapshot(),
+        };
       };
       const { ops: total } = await attempt(0);
       expect(total).toBeGreaterThan(3);
@@ -864,9 +902,7 @@ test("une réponse tardive lue avant la barrière ne réécrit jamais le texte p
   expect(holding(state.items, a.command.text)).toEqual([]);
   expect(page(storage).snapshot("nova")).toEqual([]);
   page(storage).collect([]);
-  expect([...state.items.keys()].every((k) => k.includes("|gone|"))).toBe(
-    true,
-  );
+  expect([...state.items.keys()].every((k) => k.includes("|gone|"))).toBe(true);
 });
 
 test("une lecture ou une énumération en échec bloque l’envoi et la collecte", async () => {
@@ -1052,4 +1088,65 @@ test("après rechargement, un reçu retiré absorbe le refus d’une reprise exp
   expect(page(storage).snapshot()).toMatchObject([
     { command: a.command, fact: acceptedA },
   ]);
+});
+
+test("la collecte d’un refus retire le corps avant le résultat et s’arrête à la première erreur", async () => {
+  for (const failing of ["body", "final"] as const) {
+    const { storage, state } = browser();
+    const a = input("Refus privé");
+    await page(storage, async () => refusal).run(a);
+    const removed: string[] = [];
+    const book = page(
+      relay(storage, (op, key) => {
+        if (op !== "removeItem" || !key) return;
+        removed.push(key.split("|")[2]);
+        if (key.includes(`|${failing}|`)) throw Error("quota");
+      }),
+      undefined,
+      { capacity: 1, ttlMs: 0 },
+    );
+    book.collect([]);
+    expect(book.status(), failing).toBe("storage-error");
+    if (failing === "body") {
+      expect(removed).toEqual(["body"]);
+      expect(page(storage).snapshot()).toMatchObject([
+        { command: a.command, fact: { kind: "refused" } },
+      ]);
+    } else {
+      expect(removed).toEqual(["body", "final"]);
+      expect(page(storage).snapshot()).toEqual([]);
+      expect(holding(state.items, a.command.text)).toEqual([]);
+      expect(state.items.size).toBe(1);
+    }
+  }
+});
+
+test("chaque départ a sa propre identité et son résultat ne copie aucun texte", async () => {
+  const { storage, state } = browser();
+  const a = input();
+  const book = page(storage, async () => refusal);
+  await book.run(a);
+  await book.run(a);
+  await page(storage).run(a);
+  const stored = (part: string) =>
+    [...state.items].filter(([k]) => k.includes(`|${part}|`)).map(([, v]) => v);
+  const bodies = stored("body").map((v) => JSON.parse(v));
+  expect(bodies).toHaveLength(3);
+  expect(new Set(bodies.map((b) => b.departureId)).size).toBe(3);
+  for (const body of bodies) {
+    expect(body.departureId).not.toBe(a.command.requestId);
+    expect(body.departureId).not.toBe(body.writerId);
+    expect(body).toMatchObject({
+      command: a.command,
+      raw: a.raw,
+      draftNonce: a.draftNonce,
+    });
+  }
+  expect(bodies.filter((b) => b.writerId === book.writerId)).toHaveLength(2);
+  const finals = stored("final");
+  expect(finals).toHaveLength(3);
+  for (const final of finals) {
+    expect(final).not.toContain(a.command.text);
+    expect(final).not.toContain(a.draftNonce);
+  }
 });
