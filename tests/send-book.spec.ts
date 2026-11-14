@@ -372,3 +372,73 @@ test("une panne après un résultat inconnu conserve les octets pour le rejeu", 
   await book.run(a);
   expect(book.snapshot()[0].command).toEqual(a.command);
 });
+
+test("les reçus terminés d’un ancien chargement libèrent la capacité", async () => {
+  const { storage } = browser();
+  let time = 0;
+  const options = { now: () => time, capacity: 2, ttlMs: 10 };
+  const a = input("A"),
+    b = input("B"),
+    c = input("C");
+  const first = page(
+    storage,
+    async (command) => accepted(command.requestId),
+    options,
+  );
+  await first.run(a);
+  await first.run(b);
+  time = 100;
+  const reloaded = page(
+    storage,
+    async (command) => accepted(command.requestId),
+    options,
+  );
+  reloaded.collect([a.command.requestId, b.command.requestId]);
+  expect(reloaded.snapshot()).toEqual([]);
+  expect((await reloaded.run(c)).kind).toBe("settled");
+});
+
+test("les refus définitifs d’un ancien chargement libèrent aussi la capacité", async () => {
+  const { storage } = browser();
+  let time = 0;
+  const options = { now: () => time, capacity: 1, ttlMs: 10 };
+  const a = input("Refus"),
+    b = input("Nouvelle demande");
+  await page(
+    storage,
+    async () => ({ kind: "rejected", status: 403, message: "refus" }),
+    options,
+  ).run(a);
+  time = 100;
+  const reloaded = page(storage, async () => accepted("b"), options);
+  reloaded.collect([]);
+  expect(reloaded.snapshot()).toEqual([]);
+  expect((await reloaded.run(b)).kind).toBe("settled");
+});
+
+test("la purge retire le texte d’un ancien format sans toucher un autre bot ou espace", async () => {
+  const { storage, state } = browser();
+  const a = input("Texte privé à effacer"),
+    b = input("Texte conservé", "mino");
+  await page(storage).run(a);
+  await page(storage).run(b);
+  await page(storage, undefined, { spaceId: "space-b" }).run(a);
+  for (const [key, value] of state.items) {
+    const row = JSON.parse(value);
+    if (row.spaceId === "space-a" && row.command.botId === "nova")
+      state.items.set(
+        key,
+        JSON.stringify({ ...row, fact: { kind: "format-futur" } }),
+      );
+  }
+  page(storage).purge(["nova"]);
+  const remaining = [...state.items.values()].filter((value) =>
+    value.includes(a.raw.text),
+  );
+  expect(remaining).toHaveLength(1);
+  expect(JSON.parse(remaining[0]).spaceId).toBe("space-b");
+  expect(page(storage).snapshot()).toMatchObject([{ command: b.command }]);
+  expect(
+    page(storage, undefined, { spaceId: "space-b" }).snapshot(),
+  ).toHaveLength(1);
+});
