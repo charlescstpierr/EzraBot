@@ -39,7 +39,8 @@ export type Route =
   | { page: "missions"; missionId?: string }
   | { page: "projects" }
   | { page: "characters"; botId?: string }
-  | { page: "carnet" };
+  | { page: "carnet" }
+  | { page: "results" };
 export type Port = {
   view: PcView;
   agents: AgentsView | null;
