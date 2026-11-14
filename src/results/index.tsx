@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Port } from "../port";
+import { CALL_STATE_LABELS } from "../documents/model";
 import { activity, results } from "./model";
 import "./style.css";
 
@@ -97,7 +98,10 @@ export function ResultsPage({
                   {work.attempt ? (
                     <>
                       <p>
-                        Tentative {work.attempt.n} · {activity(work)}
+                        Tentative {work.attempt.n} ·{" "}
+                        {work.attempt.state === "running"
+                          ? activity(work)
+                          : CALL_STATE_LABELS[work.attempt.state]}
                       </p>
                       {work.attempt.error && <p>{work.attempt.error}</p>}
                       <p>

@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openStore } from "../server/src/store";
-import { loadMascots } from "../server/src/domain";
+import { engineFailure, loadMascots } from "../server/src/domain";
 import { createServer } from "node:net";
 import { createHttpServer } from "../server/src/http";
 import { createWorker } from "../server/src/worker";
@@ -220,7 +220,7 @@ testResults(
 
 testResults(
   "distingue vide, erreur réseau et tentative active sans annoncer une réussite",
-  async ({ page, lab }) => {
+  async ({ page, lab }, testInfo) => {
     await page.goto(lab.origin);
     await page
       .getByRole("button", { name: "Tous mes résultats", exact: true })
@@ -250,6 +250,25 @@ testResults(
         .getByRole("list", { name: "Résultats enregistrés" })
         .getByRole("button"),
     ).toHaveCount(0);
+    lab.store.finishJob(claim, {
+      kind: "succeeded",
+      reply: {
+        reply: "Une simple réponse, sans validation.",
+        deliverable: null,
+      },
+      used: { model: "qa", effort: "low", speed: "standard" },
+      threadId: "qa-thread",
+      turnId: randomUUID(),
+    });
+    await expect(page.locator(".results-activity")).not.toContainText(
+      "Rédaction en cours",
+    );
+    await page.screenshot({
+      path: testInfo.outputPath("conversation-terminee.png"),
+      fullPage: true,
+    });
+    await expect(page.locator(".results-activity")).toContainText("Terminé");
+    await expect(page.locator(".results-activity")).not.toContainText("Validé");
     await page.route("**/api/view*", (route) =>
       route.fulfill({ status: 503, body: "indisponible" }),
     );
@@ -260,6 +279,73 @@ testResults(
     ).toBeVisible();
   },
 );
+
+for (const state of ["cancelled", "failed"] as const) {
+  testResults(
+    `distingue la tentative ${state} du document encore à examiner`,
+    async ({ page, lab }, testInfo) => {
+      const sent = lab.store.dispatch({
+        type: "message.send",
+        requestId: randomUUID(),
+        botId: "mino",
+        text: "Document à reprendre",
+        attachments: [],
+        document: { reviewerBotId: null },
+      });
+      if (!sent.ok || sent.result.kind !== "message" || !sent.result.taskId)
+        throw Error("Tâche documentaire absente");
+      const first = lab.store.claimNext("doc");
+      if (!first) throw Error("Première tentative absente");
+      lab.store.finishJob(first, {
+        kind: "succeeded",
+        reply: {
+          reply: "Version enregistrée.",
+          deliverable: { title: "Plan enregistré", body: "Texte à examiner." },
+        },
+        used: { model: "qa", effort: "low", speed: "standard" },
+        threadId: "qa-thread",
+        turnId: randomUUID(),
+      });
+      expect(
+        lab.store.dispatch({
+          type: "task.continue",
+          requestId: randomUUID(),
+          taskId: sent.result.taskId,
+        }).ok,
+      ).toBe(true);
+      const next = lab.store.claimNext("doc");
+      if (!next) throw Error("Seconde tentative absente");
+      lab.store.finishJob(
+        next,
+        state === "cancelled"
+          ? { kind: "cancelled" }
+          : engineFailure("timeout"),
+      );
+      await page.goto(lab.origin);
+      await page
+        .getByRole("button", { name: "Tous mes résultats", exact: true })
+        .click();
+      await page.getByText("Activité des travaux", { exact: true }).click();
+      await page.getByText("Détails de l’activité", { exact: true }).click();
+      await page.screenshot({
+        path: testInfo.outputPath(`tentative-${state}.png`),
+        fullPage: true,
+      });
+      await expect(
+        page.getByText(
+          `Tentative 2 · ${state === "cancelled" ? "annulé" : "échec"}`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(page.locator(".results-activity")).toContainText(
+        "À examiner",
+      );
+      await expect(
+        page.getByRole("list", { name: "Résultats enregistrés" }),
+      ).toContainText("Plan enregistré");
+    },
+  );
+}
 
 testResults(
   "ouvre le résultat de mission dans la coordination existante",

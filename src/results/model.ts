@@ -85,7 +85,7 @@ export function activity(work: WorkView): string {
     case "review":
       return "À examiner";
     case "done":
-      return "Validé";
+      return "Terminé";
     case "failed":
       return "Échec";
     case "cancelled":
