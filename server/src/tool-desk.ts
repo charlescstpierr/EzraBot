@@ -5,6 +5,7 @@ import type { Claim, Store } from './store.js';
 import { assessTool, type AccountReading, type LiveFacts, type SendResult } from './tool-ledger.js';
 import {
   AvailableQuerySchema,
+  ConnectionLinkSchema,
   LinkRequestSchema,
   ToolCommandSchema,
   isMetaTool,
@@ -68,6 +69,8 @@ export function createActionDesk(options: {
   let closed = false;
   let draining: Promise<void> | null = null;
   let again = false;
+  /** Connection requests whose link is being started. A second start of the same request is refused, so one gesture reaches the provider once. */
+  const starting = new Set<string>();
 
   const view = (): ToolsView => ledger.view(provider ? { state: 'ready' } : { state: 'missing_key' });
 
@@ -169,11 +172,45 @@ export function createActionDesk(options: {
     return { status: 200, body: { ok: true, kind: 'checked', link: checked } };
   }
 
+  async function startLink(port: Provider, link: { serviceId: string; alias: string; connectionId?: string }): Promise<DeskResponse> {
+    const linkId = `tl_${randomUUID()}`;
+    const callbackUrl = `http://127.0.0.1:${options.port}/api/tools/callback?link=${linkId}`;
+    const read = await reading(port, p => p.startLink(link.serviceId, link.alias, callbackUrl));
+    log({ event: 'tools', action: link.connectionId === undefined ? 'link' : 'connection.link', ok: read.ok });
+    if (!read.ok) return read.response;
+    ledger.recordLink({ linkId, toolkit: read.value.toolkit, accountId: read.value.accountId, ...(link.connectionId === undefined ? {} : { connectionId: link.connectionId }) });
+    return { status: 200, body: { ok: true, kind: 'link', linkId, redirectUrl: read.value.redirectUrl } };
+  }
+
+  /** The person starts the connection a bot proposed. The bot's service name only selects one entry of this server's own catalogue. */
+  async function startConnection(connectionId: string, body: unknown, port: Provider): Promise<DeskResponse> {
+    const parsed = ConnectionLinkSchema.safeParse(body);
+    if (!parsed.success) return failure('invalid_command', 'Cette demande de connexion est incomplète ou invalide.');
+    const connection = ledger.connection(connectionId);
+    if (!connection) return failure('not_found', 'Cette demande de connexion n’existe pas.');
+    if (starting.has(connectionId) || (connection.link?.id ?? null) !== parsed.data.after) {
+      return failure('busy', 'Cette demande de connexion a changé ou est déjà en cours. Relisez son état avant de recommencer.');
+    }
+    starting.add(connectionId);
+    try {
+      const catalog = await reading(port, p => p.catalog());
+      if (!catalog.ok) return catalog.response;
+      const [service, ...others] = catalog.value.filter(candidate => candidate.toolkit === connection.toolkit && candidate.connectable);
+      if (!service) return failure('tool_unavailable', `Ce serveur ne propose pas le service « ${connection.toolkit} » à la connexion. Rien n’a été relié.`);
+      if (others.length) return failure('tool_unavailable', `Plusieurs configurations existent pour « ${connection.toolkit} ». Reliez ce compte depuis les préférences. Rien n’a été relié.`);
+      return await startLink(port, { serviceId: service.id, alias: parsed.data.alias, connectionId });
+    } finally {
+      starting.delete(connectionId);
+    }
+  }
+
   async function route(request: DeskRequest): Promise<DeskResponse | null> {
     const { method, route: path } = request;
     if (method === 'POST' && path === 'commands') return command(request.body);
     const linkCheck = /^links\/([A-Za-z0-9_-]{1,80})\/check$/.exec(path);
-    const known = (method === 'GET' && (path === 'catalog' || path === 'available' || path === 'callback')) || (method === 'POST' && (path === 'link' || linkCheck !== null));
+    const connectionLink = /^connections\/([A-Za-z0-9_-]{1,80})\/link$/.exec(path);
+    const known = (method === 'GET' && (path === 'catalog' || path === 'available' || path === 'callback'))
+      || (method === 'POST' && (path === 'link' || linkCheck !== null || connectionLink !== null));
     if (!known) return null;
     if (!provider) return path === 'callback' ? { status: 200, page: CALLBACK_PAGE } : failure('provider_unavailable', MISSING_KEY);
 
@@ -184,14 +221,9 @@ export function createActionDesk(options: {
     if (path === 'link') {
       const parsed = LinkRequestSchema.safeParse(request.body);
       if (!parsed.success) return failure('invalid_command', 'Choisissez un service et donnez un nom à ce compte.');
-      const linkId = `tl_${randomUUID()}`;
-      const callbackUrl = `http://127.0.0.1:${options.port}/api/tools/callback?link=${linkId}`;
-      const read = await reading(provider, p => p.startLink(parsed.data.serviceId, parsed.data.alias, callbackUrl));
-      log({ event: 'tools', action: 'link', ok: read.ok });
-      if (!read.ok) return read.response;
-      ledger.recordLink({ linkId, toolkit: read.value.toolkit, accountId: read.value.accountId });
-      return { status: 200, body: { ok: true, kind: 'link', linkId, redirectUrl: read.value.redirectUrl } };
+      return startLink(provider, parsed.data);
     }
+    if (connectionLink?.[1]) return startConnection(connectionLink[1], request.body, provider);
     if (linkCheck?.[1]) return checkLink(linkCheck[1], provider);
     if (path === 'callback') {
       const linkId = request.query.get('link') ?? '';

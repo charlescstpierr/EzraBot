@@ -144,8 +144,14 @@ async function toolTurn(threadId: string, turnId: string, input: string, early: 
   complete(threadId, turnId, 'completed');
 }
 
-/** A turn without tools in a tool scenario: an ordinary reply, or the report of a receipt read from the input. */
-function plainTurn(threadId: string, turnId: string, input: string) {
+/** The service word of a request, copied as the person wrote it, so a test steers the proposal through its message. */
+const namedService = (asked: string): string | null => /\b(gmail|slack|notion|agenda)\b/i.exec(asked)?.[1] ?? null;
+
+/**
+ * A turn without tools in a tool scenario: an ordinary reply, or the report of a receipt read from the input.
+ * `offered`: the turn's schema has the `connection` field, so a request that names a service gets a proposal to connect it.
+ */
+function plainTurn(threadId: string, turnId: string, input: string, offered: boolean) {
   const state = /état : ([a-z_]+)/.exec(input)?.[1];
   const request = /Demande initiale de la personne :\n([^\n]*)/.exec(input)?.[1] ?? '';
   if (state && request.includes('rapport fragile') && !fragileReports.has(request)) {
@@ -154,8 +160,11 @@ function plainTurn(threadId: string, turnId: string, input: string) {
     return complete(threadId, turnId, 'failed', { message: 'raw upstream text', codexErrorInfo: 'serverOverloaded' });
   }
   const asked = input.split('\n').at(-1) ?? '';
+  const service = offered && !state ? namedService(asked) : null;
   agentMessage(threadId, turnId, state
     ? JSON.stringify({ reply: `Compte rendu : l’action est dans l’état ${state}.`, deliverable: null })
+    : service
+      ? JSON.stringify({ reply: `Je ne peux pas utiliser ${service} pour le moment. Je vous propose de relier ce service sur votre PC. Cela ne me donne aucun droit : vous les choisirez ensuite dans ma page.`, deliverable: null, connection: { service } })
     : asked.includes('note synthétique')
       ? JSON.stringify({ reply: 'Voici la note.', deliverable: { title: 'Note synthétique', body: 'Première version de la note synthétique.' } })
       : REPLY);
@@ -178,7 +187,7 @@ function startTurn(params: Record<string, unknown>) {
     notify('turn/started', { threadId, turn: { id: turnId, status: 'inProgress', items: [] } });
     if (TOOL_SCENARIOS.has(scenario)) {
       if (withTools) void toolTurn(threadId, turnId, first, early);
-      else plainTurn(threadId, turnId, first);
+      else plainTurn(threadId, turnId, first, isRecord(params.outputSchema) && isRecord(params.outputSchema.properties) && 'connection' in params.outputSchema.properties);
       return;
     }
     switch (scenario) {

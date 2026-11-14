@@ -43,6 +43,12 @@ export type FakeProvider = Provider & {
   tools: RawToolFacts[];
   /** Actions that really reached the provider's execute call. */
   sent: { pin: Pin; args: Record<string, unknown> }[];
+  /** The provider's current catalogue of services. Tests change it to simulate another configuration. */
+  services: ServiceOption[];
+  /** Connection requests that really reached the provider. */
+  started: number;
+  /** When set, a connection request waits for it before it answers. */
+  gate: Promise<void> | null;
   /** When set, every read fails with this category. */
   failing: ProviderErrorCategory | null;
   /** Replaces the default outcome of the next sends. */
@@ -55,9 +61,11 @@ export type FakeProvider = Provider & {
  * and a mismatch is `not_sent`. Without a scripted outcome, the subject or text of the action picks a synthetic result.
  */
 export function createFakeProvider(): FakeProvider {
-  let links = 0;
   const provider: FakeProvider = {
     accounts: new Map(),
+    services: [...SERVICES],
+    started: 0,
+    gate: null,
     tools: [SEND_EMAIL, FETCH_EMAILS, UNVERSIONED, META_TOOL, SEND_MESSAGE],
     sent: [],
     failing: null,
@@ -65,13 +73,14 @@ export function createFakeProvider(): FakeProvider {
     reads: 0,
     async catalog() {
       read();
-      return SERVICES;
+      return provider.services;
     },
     async startLink(serviceId, alias, callbackUrl) {
       read();
-      const service = SERVICES.find(candidate => candidate.id === serviceId);
+      const service = provider.services.find(candidate => candidate.id === serviceId);
       if (!service?.connectable || !callbackUrl.startsWith('http://127.0.0.1:')) throw new ProviderError('not_found');
-      links += 1;
+      const links = (provider.started += 1);
+      await provider.gate;
       const accountId = `ca_synthetique_lien_${links}`;
       provider.accounts.set(accountId, { id: accountId, toolkit: service.toolkit, alias, status: alias.includes('refus') ? 'FAILED' : alias.includes('attente') ? 'INITIATED' : 'ACTIVE' });
       return { accountId, toolkit: service.toolkit, redirectUrl: `https://connexion-synthetique.invalid/lien/${links}` };
