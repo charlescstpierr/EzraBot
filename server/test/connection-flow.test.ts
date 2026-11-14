@@ -76,14 +76,15 @@ test('a bot without a right proposes a connection; the person starts it, only a 
 
 test('the same gesture from two tabs reaches the provider once, a stale repeat starts nothing, and a deliberate new start replaces the link', async () => {
   const app = await start();
+  let release = () => {};
   try {
     assert(app.provider);
     const request = await proposed(app, 'Lis mes courriels gmail');
-    let release = () => {};
     app.provider.gate = new Promise<void>(resolve => { release = resolve; });
     const first = startLink(app, request, null);
     const second = startLink(app, request, null);
-    assert.deepEqual(await refusal(await Promise.race([first, second])), [409, 'busy'], 'the second tab is refused while the first start is in flight');
+    const neither = new Promise<never>((_, reject) => { setTimeout(() => reject(new Error('neither start was refused while the other was in flight')), 2_000).unref(); });
+    assert.deepEqual(await refusal(await Promise.race([first, second, neither])), [409, 'busy'], 'the second tab is refused while the first start is in flight');
     release();
     app.provider.gate = null;
     const settled = await Promise.all([first, second]);
@@ -105,6 +106,7 @@ test('the same gesture from two tabs reaches the provider once, a stale repeat s
     assert.deepEqual([requestOf(view, request.id).link?.id, requestOf(view, request.id).link?.state], [again.linkId, 'failed'], 'the card follows the newest link, as the provider reports it');
     assert.equal(app.store.tools.link(link.linkId)?.state, 'pending', 'the earlier link is untouched');
   } finally {
+    release();
     await app.stop();
   }
 });
@@ -146,12 +148,18 @@ test('a provider failure, an unknown service, an unconnectable one and an ambigu
 test('a request and its pending link survive a restart, and the check resumes on the same link', async () => {
   const first = await start();
   assert(first.provider);
-  const request = await proposed(first, 'Lis mes courriels gmail');
-  const untouched = await proposed(first, 'Écris sur Slack');
-  const link = await first.tools('link', await startLink(first, request, null, 'Courriel attente'));
-  await first.tools('checked', await first.post(`/api/tools/links/${link.linkId}/check`, {}));
-  assert.equal(requestOf(await first.view(), request.id).link?.state, 'pending', 'the provider still waits for the person');
-  await first.stop();
+  const { request, untouched, link } = await (async () => {
+    try {
+      const request = await proposed(first, 'Lis mes courriels gmail');
+      const untouched = await proposed(first, 'Écris sur Slack');
+      const link = await first.tools('link', await startLink(first, request, null, 'Courriel attente'));
+      await first.tools('checked', await first.post(`/api/tools/links/${link.linkId}/check`, {}));
+      assert.equal(requestOf(await first.view(), request.id).link?.state, 'pending', 'the provider still waits for the person');
+      return { request, untouched, link };
+    } finally {
+      await first.stop();
+    }
+  })();
 
   const second = await start({ path: first.path, provider: first.provider });
   try {
