@@ -829,6 +829,7 @@ export function openStore(options: StoreOptions): Store {
         run('INSERT INTO commands(request_id, type, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)', requestId, type, print, result, now());
       },
     },
+    admission,
   );
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {

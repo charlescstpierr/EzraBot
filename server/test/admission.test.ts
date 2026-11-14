@@ -407,6 +407,51 @@ test('the real engine takes its permit after the thread opens and sends no turn 
   assert.deepEqual(reservations(path).map(row => row.state), ['released']);
 });
 
+test('the chat engine has no shell, no file tool and no network of its own, and any such item ends the call unrecorded', async () => {
+  const dir = tempDir();
+  const probe = join(dir, 'boundary.json');
+  process.env.MINO_TEST_BOUNDARY_PROBE = probe;
+  const store = openStore({ path: join(dir, 'mino.sqlite'), mascots });
+  const engineFor = (scenario: string) => createCodexEngine({
+    command: process.execPath, args: [fixture, scenario], workDir: mkdtempSync(join(dir, 'cwd-')), clientVersion: 'test', requestTimeoutMs: 2000, interruptGraceMs: 300,
+  });
+  const run = async (scenario: string, text: string) => {
+    const engine = engineFor(scenario);
+    const worker = createWorker({ store, engines: { chat: engine, doc: engine } });
+    try {
+      const chat = say(store, text);
+      worker.kick();
+      await worker.idle();
+      return workOf(store.view(), chat.workId);
+    } finally {
+      await worker.close();
+      await engine.close();
+    }
+  };
+  try {
+    assert.equal((await run('reply', 'Bonjour')).state, 'done');
+    const seen = JSON.parse(readFileSync(probe, 'utf8')) as { argv: string[]; thread: Record<string, unknown>; turn: Record<string, unknown> };
+    const disabled = seen.argv.flatMap((arg, i) => (arg === '--disable' ? [seen.argv[i + 1]] : []));
+    for (const feature of ['shell_tool', 'unified_exec', 'apps', 'plugins', 'browser_use', 'browser_use_external', 'in_app_browser', 'computer_use', 'view_image', 'multi_agent', 'code_mode_host']) {
+      assert(disabled.includes(feature), `${feature} is disabled when Codex starts`);
+    }
+    assert(seen.argv.includes('mcp_servers={}') && seen.argv.includes('web_search="disabled"'));
+    assert.deepEqual([seen.thread.sandbox, seen.thread.approvalPolicy, seen.thread.config, seen.thread.dynamicTools],
+      ['read-only', 'untrusted', { mcp_servers: {}, web_search: 'disabled' }, undefined]);
+    assert.deepEqual([seen.turn.sandboxPolicy, seen.turn.approvalPolicy], [{ type: 'readOnly', networkAccess: false }, 'untrusted']);
+
+    for (const item of ['commandExecution', 'fileChange', 'webSearch', 'mcpToolCall', 'dynamicToolCall', 'imageView']) {
+      const work = await run(`item:${item}`, `Essai ${item}`);
+      assert.equal(work.state, 'failed', item);
+      assert.match(work.attempt?.error ?? '', /Codex a tenté d’utiliser un outil\. Mino l’a bloqué et a arrêté l’appel/, item);
+    }
+    assert.equal(store.view().messages.filter(message => message.role === 'assistant').length, 1, 'only the plain reply was recorded');
+  } finally {
+    delete process.env.MINO_TEST_BOUNDARY_PROBE;
+    store.close();
+  }
+});
+
 test('an engine that answers without taking its permit is not recorded', async () => {
   const store = openStore({ path: join(tempDir(), 'mino.sqlite'), mascots });
   const rogue: Engine = {

@@ -245,11 +245,15 @@ function startTurn(params: Record<string, unknown>) {
       case 'slow':
         return;
       default:
+        // `item:<type>`: Codex starts an item of that type, as it would for a shell command, a file change or a web search.
+        if (scenario.startsWith('item:')) notify('item/started', { threadId, turnId, item: { type: scenario.slice(5), id: 'x1' } });
         return;
     }
   }, 5);
   return { turn: { id: turnId, status: 'inProgress', items: [] } };
 }
+
+let threadParams: Record<string, unknown> = {};
 
 function handle(method: string, params: Record<string, unknown>): unknown {
   switch (method) {
@@ -266,6 +270,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'model/list':
       return { data: MODELS, nextCursor: null };
     case 'thread/start': {
+      threadParams = params;
       const config = isRecord(params.config) ? params.config : {};
       if (params.ephemeral !== true || params.sandbox !== 'read-only' || config.web_search !== 'disabled') throw new Error('unsafe thread');
       const dynamicTools = Array.isArray(params.dynamicTools) ? params.dynamicTools : [];
@@ -280,6 +285,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
       return { thread: { id: threadId }, model: params.model, modelProvider: 'openai', serviceTier: null };
     }
     case 'turn/start': {
+      if (process.env.MINO_TEST_BOUNDARY_PROBE) writeFileSync(process.env.MINO_TEST_BOUNDARY_PROBE, JSON.stringify({ argv: args, thread: threadParams, turn: params }));
       if (scenario === 'reject-turn') throw new Error('turn refused');
       const sandbox = isRecord(params.sandboxPolicy) ? params.sandboxPolicy : {};
       if (sandbox.type !== 'readOnly' || sandbox.networkAccess !== false || !isRecord(params.outputSchema)) throw new Error('unsafe turn');

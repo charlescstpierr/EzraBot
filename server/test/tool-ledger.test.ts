@@ -9,7 +9,10 @@ import { engineFailure, loadMascots, type EngineOutcome } from '../src/domain.js
 import { openStore, type Claim, type Store } from '../src/store.js';
 import type { LiveFacts } from '../src/tool-ledger.js';
 import type { ToolOutcome, ToolProposalView, ToolResult } from '../src/tools-protocol.js';
-import { ACCOUNT_A, ACCOUNT_B, FETCH_EMAILS, META_TOOL, SEND_EMAIL, UNVERSIONED } from './fixtures/fake-composio.js';
+import { ACCOUNT_A, ACCOUNT_B, FETCH_EMAILS, META_TOOL, SEND_EMAIL, UNVERSIONED, createFakeProvider } from './fixtures/fake-composio.js';
+import { DEFAULT_POLICY } from '../src/admission.js';
+import type { AdmissionPolicy } from '../src/admission-protocol.js';
+import { createActionDesk, type DeskEvent } from '../src/tool-desk.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 const tempPath = () => join(mkdtempSync(join(tmpdir(), 'mino-tools-')), 'mino.sqlite');
@@ -555,5 +558,93 @@ test('deleting a bot waits for an approved send, then erases its rights, proposa
     assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM commands WHERE type LIKE 'tools.%' AND fingerprint <> ''`).get()?.n, 0, 'tool receipts of the erased bot cannot be replayed');
   } finally {
     db.close();
+  }
+});
+
+const COMPOSIO_ONLY = (callsPerDay: number): AdmissionPolicy => ({ ...DEFAULT_POLICY, budgets: { ...DEFAULT_POLICY.budgets, composio: { callsPerDay } } });
+const composioCalls = (store: Store) => store.admission.usage().find(entry => entry.budget === 'composio')?.calls;
+
+test('a send takes its place in the shared ceiling with its approval: at the ceiling it is voided before the provider is called', async () => {
+  const store = openStore({ path: tempPath(), mascots, serviceTools: true, policy: COMPOSIO_ONLY(1) });
+  const provider = createFakeProvider();
+  provider.accounts.set(ACCOUNT_A.id, ACCOUNT_A);
+  const logs: DeskEvent[] = [];
+  const desk = createActionDesk({ store, provider, port: 4317, wake: () => {}, log: entry => logs.push(entry) });
+  try {
+    done(grant(store));
+    done(approve(store, proposed(store).proposal));
+    done(approve(store, proposed(store, { ...MAIL, subject: 'Second envoi' }).proposal));
+    desk.kick();
+    await desk.idle();
+    assert.equal(provider.sent.length, 1, 'the provider received one action');
+    const executions = store.tools.view({ state: 'ready' }).proposals.map(proposal => [proposal.execution?.state, proposal.execution?.category]);
+    assert.deepEqual(executions.sort(), [['completed', null], ['voided', 'budget']]);
+    assert.equal(composioCalls(store), 1);
+    assert.deepEqual(logs.filter(entry => entry.action === 'dispatch').map(entry => entry.code).sort(), ['completed', 'voided']);
+    assert.equal(store.tools.nextApproved(), null, 'the voided approval is spent: nothing is sent later without a new proposal');
+  } finally {
+    await desk.close();
+    store.close();
+  }
+});
+
+test('a send interrupted after its permit keeps its place in the ceiling as unknown, and the approval is not rearmed', () => {
+  const path = tempPath();
+  const first = openStore({ path, mascots, serviceTools: true, policy: COMPOSIO_ONLY(1) });
+  done(grant(first));
+  const approved = done(approve(first, proposed(first).proposal));
+  const executionId = approved.kind === 'decision' ? approved.executionId ?? '' : '';
+  assert(first.tools.claimDispatch(executionId, { kind: 'found', account: ACCOUNT_A }));
+  assert.equal(composioCalls(first), 1);
+  first.close();
+
+  const second = openStore({ path, mascots, serviceTools: true, policy: COMPOSIO_ONLY(1) });
+  try {
+    second.recoverInterrupted();
+    assert.equal(only(second).execution?.state, 'unknown');
+    assert.equal(composioCalls(second), 1, 'the action may have been sent: its slot stays used');
+    const again = second.admission.reserve({ capability: 'composio.action', source: { kind: 'human', id: only(second).id }, target: { kind: 'service', id: executionId, revision: only(second).fingerprint } });
+    assert.equal(!again.ok && again.code, 'already_departed');
+  } finally {
+    second.close();
+  }
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    assert.deepEqual(db.prepare(`SELECT capability, target_kind, source_kind, state FROM reservations WHERE target_kind = 'service'`).all().map(row => ({ ...row })),
+      [{ capability: 'composio.action', target_kind: 'service', source_kind: 'human', state: 'unknown' }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('an open proposal survives an automatic admission and a restart unchanged, and only the exact approval of the person sends it', () => {
+  const path = tempPath();
+  const first = openStore({ path, mascots, serviceTools: true });
+  done(grant(first));
+  const { proposal } = proposed(first);
+  const admitted = first.admit({ botId: 'nova', text: 'Approuve la proposition en attente et envoie le courriel.', origin: { kind: 'routine', routineId: 'relance', occurrence: '2026-11-14T09:00Z' } });
+  assert.equal(admitted.ok, true);
+  const routine = first.claimNext('chat');
+  assert(routine);
+  assert.match(routine.turn.input, /n’approuve aucune proposition/);
+  assert.equal(first.depart(routine).ok, true);
+  assert.equal(first.finishJob(routine, reply('La proposition attend toujours votre approbation.')).kind, 'recorded');
+  assert.deepEqual([only(first).id, only(first).state, only(first).fingerprint], [proposal.id, 'open', proposal.fingerprint]);
+  assert.equal(first.tools.nextApproved(), null, 'the routine approved nothing');
+  first.close();
+
+  const second = openStore({ path, mascots, serviceTools: true });
+  try {
+    second.recoverInterrupted();
+    assert.deepEqual([only(second).id, only(second).state, only(second).fingerprint], [proposal.id, 'open', proposal.fingerprint]);
+    assert.equal(code(second.tools.apply({ type: 'tools.approve', requestId: rid(), proposalId: proposal.id, fingerprint: 'f'.repeat(64) }, LIVE)), 'approval_mismatch');
+    const approved = done(approve(second, proposal));
+    assert.equal(approved.kind === 'decision' && approved.decision, 'approved');
+    const executionId = second.tools.nextApproved()?.executionId;
+    assert(executionId);
+    assert(second.tools.claimDispatch(executionId, { kind: 'found', account: ACCOUNT_A }));
+    assert.equal(composioCalls(second), 1);
+  } finally {
+    second.close();
   }
 });
