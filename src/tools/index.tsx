@@ -10,6 +10,7 @@ import type {
 } from "../../server/src/tools-protocol";
 import { toolsRequest, uid } from "../api";
 import { SourceLine } from "../documents/source";
+import { failureText, freeAlias, useLinkFlow } from "./link-flow";
 import type { Port, ToolsOutcome } from "../port";
 import "./style.css";
 
@@ -80,20 +81,6 @@ function useToolCommand(port: Port) {
   };
 }
 
-const failureText = (reason: unknown) =>
-  reason instanceof Error ? reason.message : "Le service ne répond pas.";
-
-type ConnectionState =
-  | { kind: "selection" }
-  | { kind: "opening" }
-  | { kind: "waiting"; linkId: string; fallback: string | null }
-  | { kind: "success" }
-  | {
-      kind: "error";
-      message: string;
-      linkId: string | null;
-      fallback: string | null;
-    };
 type CatalogState =
   | { kind: "loading" }
   | { kind: "ready"; services: ServiceOption[] }
@@ -105,22 +92,9 @@ export function ToolConnections({ port }: { port: Port }) {
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [serviceId, setServiceId] = useState("");
   const [alias, setAlias] = useState("");
-  const [state, setState] = useState<ConnectionState>({ kind: "selection" });
-  const lifecycle = useRef<AbortController | null>(null);
-  const opening = useRef(false);
-  const popup = useRef<Window | null>(null);
-  const checkNow = useRef<(() => void) | null>(null);
   const configured = tools.status.state !== "missing_key";
-
-  useEffect(() => {
-    const controller = new AbortController();
-    lifecycle.current = controller;
-    return () => {
-      controller.abort();
-      if (opening.current) popup.current?.close();
-      lifecycle.current = null;
-    };
-  }, []);
+  const flow = useLinkFlow(configured);
+  const state = flow.state;
 
   useEffect(() => {
     if (!configured) return;
@@ -141,80 +115,6 @@ export function ToolConnections({ port }: { port: Port }) {
     return () => controller.abort();
   }, [configured, catalogAttempt]);
 
-  const waitingId = state.kind === "waiting" ? state.linkId : null;
-  const waitingFallback = state.kind === "waiting" ? state.fallback : null;
-  useEffect(() => {
-    if (!configured || !waitingId) return;
-    const controller = new AbortController();
-    let inFlight = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const finish = (next: ConnectionState) => {
-      controller.abort();
-      clearTimeout(timer);
-      setState(next);
-    };
-    const deadline = setTimeout(
-      () =>
-        finish({
-          kind: "error",
-          linkId: waitingId,
-          fallback: waitingFallback,
-          message:
-            "La connexion attend encore votre autorisation. Vérifiez de nouveau quand vous avez terminé chez le fournisseur.",
-        }),
-      120_000,
-    );
-    async function check() {
-      if (inFlight || controller.signal.aborted) return;
-      clearTimeout(timer);
-      inFlight = true;
-      try {
-        const reply = await toolsRequest(
-          "checked",
-          `links/${encodeURIComponent(waitingId ?? "")}/check`,
-          {},
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        if (reply.link.state === "active") finish({ kind: "success" });
-        else if (reply.link.state === "failed")
-          finish({
-            kind: "error",
-            linkId: waitingId,
-            fallback: waitingFallback,
-            message:
-              "La connexion n’a pas abouti. Vous pouvez vérifier de nouveau ou choisir un autre compte.",
-          });
-        else timer = setTimeout(() => void check(), 3_000);
-      } catch (reason) {
-        if (!controller.signal.aborted)
-          finish({
-            kind: "error",
-            linkId: waitingId,
-            fallback: waitingFallback,
-            message: failureText(reason),
-          });
-      } finally {
-        inFlight = false;
-      }
-    }
-    const onReturn = () => {
-      if (document.visibilityState === "visible") void check();
-    };
-    checkNow.current = () => void check();
-    window.addEventListener("focus", onReturn);
-    document.addEventListener("visibilitychange", onReturn);
-    timer = setTimeout(() => void check(), 1_000);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-      clearTimeout(deadline);
-      checkNow.current = null;
-      window.removeEventListener("focus", onReturn);
-      document.removeEventListener("visibilitychange", onReturn);
-    };
-  }, [configured, waitingId, waitingFallback]);
-
   if (!configured)
     return (
       <section className="ez-tools" aria-label="Services connectés">
@@ -226,56 +126,23 @@ export function ToolConnections({ port }: { port: Port }) {
     );
   const services = catalog.kind === "ready" ? catalog.services : [];
   const chosen = services.find((service) => service.id === serviceId);
-  const busy = state.kind === "opening" || state.kind === "waiting";
-  function defaultAlias(service: ServiceOption) {
-    const base = service.name.slice(0, 36);
-    const used = new Set(tools.accounts.map((account) => account.alias));
-    let name = base;
-    for (let number = 2; used.has(name); number += 1)
-      name = `${base} ${number}`.slice(0, 40);
-    return name;
-  }
+  const busy = flow.busy;
+  const defaultAlias = (service: ServiceOption) =>
+    freeAlias(service.name, tools.accounts);
   async function connect() {
-    const controller = lifecycle.current;
-    if (!chosen?.connectable || !controller || opening.current) return;
-    opening.current = true;
-    const child = window.open("about:blank", "_blank");
-    popup.current = child;
-    if (child) child.opener = null;
-    setState({ kind: "opening" });
-    try {
-      const reply = await toolsRequest(
+    if (!chosen?.connectable) return;
+    const started = await flow.open((signal) =>
+      toolsRequest(
         "link",
         "link",
         {
           serviceId: chosen.id,
           alias: alias.trim() || defaultAlias(chosen),
         },
-        controller.signal,
-      );
-      if (controller.signal.aborted) {
-        child?.close();
-        return;
-      }
-      if (new URL(reply.redirectUrl).protocol !== "https:")
-        throw Error("Adresse de connexion invalide.");
-      let fallback: string | null = null;
-      if (child && !child.closed) child.location.href = reply.redirectUrl;
-      else fallback = reply.redirectUrl;
-      setState({ kind: "waiting", linkId: reply.linkId, fallback });
-      setAlias("");
-    } catch (reason) {
-      child?.close();
-      if (!controller.signal.aborted)
-        setState({
-          kind: "error",
-          message: failureText(reason),
-          linkId: null,
-          fallback: null,
-        });
-    } finally {
-      opening.current = false;
-    }
+        signal,
+      ),
+    );
+    if (started) setAlias("");
   }
   return (
     <section className="ez-tools" aria-label="Services connectés">
@@ -319,9 +186,7 @@ export function ToolConnections({ port }: { port: Port }) {
               type="button"
               className="outline"
               disabled={busy}
-              onClick={() =>
-                setState({ kind: "waiting", linkId: link.id, fallback: null })
-              }
+              onClick={() => flow.check(link.id)}
             >
               Vérifier la connexion
             </button>
@@ -414,15 +279,11 @@ export function ToolConnections({ port }: { port: Port }) {
           <button
             type="button"
             className="outline"
-            onClick={() => checkNow.current?.()}
+            onClick={() => flow.checkNow()}
           >
             Vérifier maintenant
           </button>
-          <button
-            type="button"
-            className="outline"
-            onClick={() => setState({ kind: "selection" })}
-          >
+          <button type="button" className="outline" onClick={() => flow.stop()}>
             Arrêter la vérification
           </button>
         </div>
@@ -451,12 +312,7 @@ export function ToolConnections({ port }: { port: Port }) {
             <button
               className="outline"
               onClick={() => {
-                if (state.linkId)
-                  setState({
-                    kind: "waiting",
-                    linkId: state.linkId,
-                    fallback: state.fallback,
-                  });
+                if (state.linkId) flow.check(state.linkId, state.fallback);
               }}
             >
               Réessayer la vérification
