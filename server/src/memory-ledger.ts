@@ -19,17 +19,10 @@ import {
   type ScopeView,
   type SyncState,
 } from './memory-protocol.js';
+import { EXPORT_STATES, RECALL_STATES, REQUEST_KINDS, SESSIONS, SOURCE_KINDS, type RequestKind } from './memory-schema.js';
 import { int, oneOf, str, strOrNull, type Row } from './sql-rows.js';
 import type { LedgerKit } from './tool-ledger.js';
 
-const sqlList = (values: readonly string[]) => values.map(value => `'${value}'`).join(',');
-
-const REQUEST_KINDS = ['workspace', 'session', 'ingest', 'read', 'search', 'withdraw'] as const;
-type RequestKind = (typeof REQUEST_KINDS)[number];
-const RECALL_STATES = ['none', 'used', 'empty', 'unavailable', 'suspended'] as const;
-const EXPORT_STATES = ['pending', 'ingested', 'verified', 'uncertain', 'failed', 'voided'] as const;
-const SOURCE_KINDS = ['message', 'declaration'] as const;
-const SESSIONS = ['declarations', 'conversation'] as const;
 /** The only peer EzraBot provisions. It is never observed: no derived conclusion is asked for and none is read. */
 export const MEMORY_PEER = 'person';
 const SEARCH_LIMIT = 20;
@@ -48,163 +41,6 @@ export function withMemoryCapabilities(policy: AdmissionPolicy): AdmissionPolicy
   const cost = { kind: 'unavailable' as const, reason: 'Honcho n’annonce aucun prix par appel à ce serveur.' };
   return { ...policy, capabilities: { ...policy.capabilities, ...Object.fromEntries([...new Set(Object.values(CAPABILITY))].map(name => [name, { budget: MEMORY_BUDGET, cost }])) } };
 }
-
-/**
- * Honcho is the only long memory. SQLite keeps the originals, the consent, the mapping of each original to its remote copy,
- * the exclusions, the generation and one row per HTTP request. No remote text and no derived profile is stored.
- */
-export const MEMORY_MIGRATION = `
-CREATE TABLE memory_scopes(
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL UNIQUE REFERENCES bots(id),
-  label TEXT NOT NULL,
-  generation INTEGER NOT NULL DEFAULT 0 CHECK(generation >= 0),
-  state TEXT NOT NULL CHECK(state IN (${sqlList(SCOPE_STATES)})),
-  workspace_id TEXT NOT NULL,
-  next_workspace_id TEXT,
-  note TEXT,
-  consented_at TEXT NOT NULL,
-  CHECK((state = 'reset_pending') = (next_workspace_id IS NOT NULL))
-) STRICT;
-CREATE TRIGGER memory_scopes_forward BEFORE UPDATE ON memory_scopes
-  WHEN NEW.id IS NOT OLD.id OR NEW.bot_id IS NOT OLD.bot_id OR NEW.label IS NOT OLD.label OR NEW.consented_at IS NOT OLD.consented_at
-    OR NEW.generation < OLD.generation
-    OR (NEW.state IS NOT OLD.state AND NOT (
-      (OLD.state = 'preparing' AND NEW.state = 'active')
-      OR (OLD.state = 'active' AND NEW.state = 'withdrawal_pending')
-      OR (OLD.state = 'withdrawal_pending' AND NEW.state = 'withdrawal_unverified')
-      OR (OLD.state = 'withdrawal_unverified' AND NEW.state = 'reset_pending')
-      OR (OLD.state = 'reset_pending' AND NEW.state = 'active')))
-  BEGIN SELECT RAISE(ABORT, 'a memory scope only moves forward'); END;
-
-CREATE TABLE memory_workspaces(
-  id TEXT PRIMARY KEY,
-  scope_id TEXT REFERENCES memory_scopes(id),
-  state TEXT NOT NULL CHECK(state IN ('pending','confirmed','failed','retired')),
-  created_at TEXT NOT NULL
-) STRICT;
-CREATE TRIGGER memory_workspaces_forward BEFORE UPDATE ON memory_workspaces
-  WHEN NEW.id IS NOT OLD.id OR (NEW.state IS NOT OLD.state AND NOT (
-    (OLD.state = 'pending' AND NEW.state IN ('confirmed','failed'))
-    OR (OLD.state = 'confirmed' AND NEW.state IN ('failed','retired'))))
-  BEGIN SELECT RAISE(ABORT, 'a workspace is never reopened'); END;
-CREATE TRIGGER memory_workspaces_kept BEFORE DELETE ON memory_workspaces
-  BEGIN SELECT RAISE(ABORT, 'a workspace name is never reused'); END;
-
-CREATE TABLE memory_sessions(
-  workspace_id TEXT NOT NULL REFERENCES memory_workspaces(id),
-  name TEXT NOT NULL CHECK(name IN (${sqlList(SESSIONS)})),
-  confirmed INTEGER NOT NULL DEFAULT 0 CHECK(confirmed IN (0, 1)),
-  PRIMARY KEY(workspace_id, name)
-) STRICT;
-
-CREATE TABLE memory_sources(
-  id TEXT PRIMARY KEY,
-  scope_id TEXT NOT NULL REFERENCES memory_scopes(id),
-  kind TEXT NOT NULL CHECK(kind IN (${sqlList(SOURCE_KINDS)})),
-  message_id TEXT UNIQUE REFERENCES messages(id),
-  declaration_id TEXT,
-  revision INTEGER NOT NULL CHECK(revision >= 1),
-  text TEXT,
-  state TEXT NOT NULL CHECK(state IN ('authorized','corrected','excluded','forgotten')),
-  replaced_by TEXT REFERENCES memory_sources(id),
-  created_at TEXT NOT NULL,
-  UNIQUE(declaration_id, revision),
-  CHECK((kind = 'message') = (message_id IS NOT NULL)),
-  CHECK((kind = 'declaration') = (declaration_id IS NOT NULL)),
-  CHECK(kind = 'declaration' OR revision = 1),
-  CHECK((kind = 'declaration' AND state = 'authorized') = (text IS NOT NULL)),
-  CHECK((state = 'corrected') = (replaced_by IS NOT NULL))
-) STRICT;
-CREATE INDEX memory_sources_by_scope ON memory_sources(scope_id, state);
-CREATE TRIGGER memory_sources_insert BEFORE INSERT ON memory_sources WHEN NEW.state IS NOT 'authorized'
-  BEGIN SELECT RAISE(ABORT, 'a memory source starts authorized'); END;
-CREATE TRIGGER memory_sources_withdrawn_once BEFORE UPDATE ON memory_sources
-  WHEN OLD.state <> 'authorized' OR NEW.state = 'authorized' OR NEW.id IS NOT OLD.id OR NEW.scope_id IS NOT OLD.scope_id OR NEW.kind IS NOT OLD.kind
-    OR NEW.message_id IS NOT OLD.message_id OR NEW.declaration_id IS NOT OLD.declaration_id OR NEW.revision IS NOT OLD.revision
-  BEGIN SELECT RAISE(ABORT, 'a memory source is withdrawn once and never comes back'); END;
-
-CREATE TABLE memory_exports(
-  source_id TEXT NOT NULL REFERENCES memory_sources(id),
-  workspace_id TEXT NOT NULL,
-  session TEXT NOT NULL,
-  state TEXT NOT NULL CHECK(state IN (${sqlList(EXPORT_STATES)})),
-  remote_id TEXT,
-  request_id TEXT,
-  reconcile INTEGER NOT NULL DEFAULT 0 CHECK(reconcile IN (0, 1)),
-  PRIMARY KEY(source_id, workspace_id),
-  FOREIGN KEY(workspace_id, session) REFERENCES memory_sessions(workspace_id, name),
-  CHECK(state NOT IN ('ingested','verified') OR remote_id IS NOT NULL)
-) STRICT;
-CREATE UNIQUE INDEX memory_exports_remote ON memory_exports(workspace_id, session, remote_id) WHERE remote_id IS NOT NULL;
-CREATE INDEX memory_exports_by_state ON memory_exports(workspace_id, state);
-
-CREATE TABLE memory_requests(
-  id TEXT PRIMARY KEY,
-  scope_id TEXT NOT NULL REFERENCES memory_scopes(id),
-  workspace_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN (${sqlList(REQUEST_KINDS)})),
-  state TEXT NOT NULL CHECK(state IN ('reserved','started','ok','rejected','unavailable','uncertain','voided')),
-  source_id TEXT REFERENCES memory_sources(id),
-  session TEXT,
-  work_id TEXT,
-  hits TEXT CHECK(hits IS NULL OR json_valid(hits)),
-  category TEXT,
-  created_at TEXT NOT NULL,
-  closed_at TEXT
-) STRICT;
-CREATE INDEX memory_requests_live ON memory_requests(scope_id, state);
-CREATE TRIGGER memory_requests_insert BEFORE INSERT ON memory_requests WHEN NEW.state IS NOT 'reserved'
-  BEGIN SELECT RAISE(ABORT, 'a memory request starts reserved'); END;
-CREATE TRIGGER memory_requests_forward BEFORE UPDATE ON memory_requests
-  WHEN NEW.id IS NOT OLD.id OR NEW.scope_id IS NOT OLD.scope_id OR NEW.workspace_id IS NOT OLD.workspace_id OR NEW.generation IS NOT OLD.generation
-    OR NEW.kind IS NOT OLD.kind OR NEW.source_id IS NOT OLD.source_id OR NEW.session IS NOT OLD.session OR NEW.work_id IS NOT OLD.work_id
-    OR NOT ((OLD.state = 'reserved' AND NEW.state IN ('started','voided'))
-      OR (OLD.state = 'started' AND NEW.state IN ('ok','rejected','unavailable','uncertain')))
-  BEGIN SELECT RAISE(ABORT, 'a memory request leaves once and only moves forward'); END;
-
-CREATE TABLE attempt_memory(
-  attempt_id TEXT PRIMARY KEY REFERENCES attempts(id),
-  scope_id TEXT NOT NULL REFERENCES memory_scopes(id),
-  generation INTEGER NOT NULL,
-  recall TEXT NOT NULL CHECK(recall IN (${sqlList(RECALL_STATES)})),
-  category TEXT,
-  omitted INTEGER NOT NULL DEFAULT 0 CHECK(omitted >= 0),
-  retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN (0, 1))
-) STRICT;
-CREATE TRIGGER attempt_memory_frozen BEFORE UPDATE ON attempt_memory
-  WHEN NEW.attempt_id IS NOT OLD.attempt_id OR NEW.scope_id IS NOT OLD.scope_id OR NEW.generation IS NOT OLD.generation
-    OR NEW.recall IS NOT OLD.recall OR NEW.omitted IS NOT OLD.omitted OR NEW.retired < OLD.retired
-  BEGIN SELECT RAISE(ABORT, 'a frozen manifest only gets retired'); END;
-CREATE TABLE attempt_sources(
-  attempt_id TEXT NOT NULL REFERENCES attempt_memory(attempt_id),
-  source_id TEXT NOT NULL REFERENCES memory_sources(id),
-  via TEXT NOT NULL CHECK(via IN ('recall','request','history')),
-  PRIMARY KEY(attempt_id, source_id)
-) STRICT;
-CREATE INDEX attempt_sources_by_source ON attempt_sources(source_id);
-CREATE TABLE attempt_replies(
-  attempt_id TEXT NOT NULL REFERENCES attempt_memory(attempt_id),
-  reply_attempt_id TEXT NOT NULL REFERENCES attempts(id),
-  PRIMARY KEY(attempt_id, reply_attempt_id)
-) STRICT;
-CREATE INDEX attempt_replies_by_reply ON attempt_replies(reply_attempt_id);
-CREATE TRIGGER attempt_sources_frozen BEFORE UPDATE ON attempt_sources BEGIN SELECT RAISE(ABORT, 'a manifest row is frozen'); END;
-CREATE TRIGGER attempt_replies_frozen BEFORE UPDATE ON attempt_replies BEGIN SELECT RAISE(ABORT, 'a manifest row is frozen'); END;
-`;
-
-/** Rows erased with a bot. Workspace names stay as tombstones, detached from their scope. */
-export const MEMORY_PURGE_ORDER = [
-  ['attempt_replies', `attempt_id || ':' || reply_attempt_id`],
-  ['attempt_sources', `attempt_id || ':' || source_id`],
-  ['attempt_memory', 'attempt_id'],
-  ['memory_requests', 'id'],
-  ['memory_exports', `source_id || ':' || workspace_id`],
-  ['memory_sources', 'id'],
-  ['memory_sessions', `workspace_id || ':' || name`],
-  ['memory_scopes', 'id'],
-] as const;
 
 /** Why a planned search gave nothing: admission refused it, or Honcho did not answer it. */
 export type RecallFailure = 'budget' | 'provider';
@@ -241,7 +77,7 @@ export type Settlement =
 export type Hold = { ok: true } | { ok: false; reason: 'generation_moved' | 'scope_suspended' | 'source_withdrawn' };
 
 /** A chat request about to be composed, as the store read it. */
-export type Candidate = { workId: string; botId: string; threadBotId: string; requestMessageId: string; human: boolean };
+export type Candidate = { workId: string; botId: string; threadBotId: string; requestMessageId: string };
 
 /** What the composed text of one attempt contains, by local identity. */
 export type Manifest = {
@@ -319,11 +155,14 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
   const original = (source: Row): string | null => str(source, 'kind') === 'declaration'
     ? strOrNull(source, 'text')
     : strOrNull(get('SELECT text FROM messages WHERE id = ?', str(source, 'message_id')) ?? { text: null }, 'text');
-  /** Counts the notes that really changed, so a view is refreshed once when a refusal first appears and not at every later try. */
-  let noted = 0;
+  /** Counts what `next` changed for the view, so it is refreshed once when a refusal first appears and not at every later try. */
+  let touched = 0;
   const note = (scopeId: string, category: string | null) => {
-    noted += run('UPDATE memory_scopes SET note = ? WHERE id = ? AND note IS NOT ?', category, scopeId, category);
+    touched += run('UPDATE memory_scopes SET note = ? WHERE id = ? AND note IS NOT ?', category, scopeId, category);
   };
+  /** The source of a request of the person in this project, while it is still authorized. A request written before the consent has none. */
+  const sharedRequest = (scope: Row, messageId: string): boolean =>
+    get(`SELECT 1 AS x FROM memory_sources WHERE message_id = ? AND scope_id = ? AND state = 'authorized'`, messageId, str(scope, 'id')) !== undefined;
 
   function requireScope(botId: string): Row {
     const scope = scopeOf(botId);
@@ -574,13 +413,22 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     }
     if (state === 'withdrawal_pending') {
       const target = WITHDRAW_TARGETS.find(session => !withdrawn(scope, session));
-      return target === undefined ? null : reserve(scope, str(scope, 'workspace_id'), 'withdraw', target === null ? {} : { session: target });
+      if (target !== undefined) return reserve(scope, str(scope, 'workspace_id'), 'withdraw', target === null ? {} : { session: target });
+      // Every withdrawal ended, the last one maybe across a restart: the scope closes for good.
+      closeWithdrawal(scope);
+      touched += 1;
     }
     return null;
   }
 
+  /** Even three acknowledgements prove no purge: the scope stays closed, and only a new empty workspace reopens it. */
+  function closeWithdrawal(scope: Row): void {
+    run(`UPDATE memory_scopes SET state = 'withdrawal_unverified', note = 'purge_unverified' WHERE id = ?`, str(scope, 'id'));
+    run(`UPDATE memory_workspaces SET state = 'retired' WHERE id = ? AND state = 'confirmed'`, str(scope, 'workspace_id'));
+  }
+
   function next(): string | null {
-    const before = noted;
+    const before = touched;
     const requestId = kit.transaction(() => {
       for (const scope of all('SELECT * FROM memory_scopes ORDER BY rowid')) {
         const reserved = nextFor(scope);
@@ -588,7 +436,7 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
       }
       return null;
     });
-    if (noted !== before) kit.changed();
+    if (touched !== before) kit.changed();
     return requestId;
   }
 
@@ -619,8 +467,9 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     if (state !== 'active' || workspaceId !== str(scope, 'workspace_id')) return undefined;
     const workId = strOrNull(request, 'work_id');
     if (kind === 'search' && workId !== null) {
-      const work = get(`SELECT m.text FROM works w JOIN messages m ON m.id = w.request_message_id WHERE w.id = ? AND w.state = 'pending'`, workId);
-      return work ? { ...base, kind, query: clip(str(work, 'text'), QUERY_CHARS), limit: SEARCH_LIMIT, session: null } : undefined;
+      // The query is the text of the request: it leaves only for a request that is itself a consented source.
+      const work = get(`SELECT m.id, m.text FROM works w JOIN messages m ON m.id = w.request_message_id WHERE w.id = ? AND w.state = 'pending'`, workId);
+      return work && sharedRequest(scope, str(work, 'id')) ? { ...base, kind, query: clip(str(work, 'text'), QUERY_CHARS), limit: SEARCH_LIMIT, session: null } : undefined;
     }
     const exported = exportOf(request);
     const source = authorizedSource(strOrNull(request, 'source_id'));
@@ -735,13 +584,11 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
         return;
       }
       if (settlement.kind === 'withdraw') {
-        if (stateOf(scope) !== 'withdrawal_pending' || WITHDRAW_TARGETS.some(session => {
+        const ended = stateOf(scope) === 'withdrawal_pending' && WITHDRAW_TARGETS.every(session => {
           const sent = withdrawn(scope, session);
-          return !sent || str(sent, 'state') === 'reserved' || str(sent, 'state') === 'started';
-        })) return;
-        // Even three acknowledgements prove no purge: the scope stays closed, and only a new empty workspace reopens it.
-        run(`UPDATE memory_scopes SET state = 'withdrawal_unverified', note = 'purge_unverified' WHERE id = ?`, scopeId);
-        run(`UPDATE memory_workspaces SET state = 'retired' WHERE id = ? AND state = 'confirmed'`, workspaceId);
+          return sent !== undefined && str(sent, 'state') !== 'reserved' && str(sent, 'state') !== 'started';
+        });
+        if (ended) closeWithdrawal(scope);
         return;
       }
       if (strOrNull(request, 'work_id') !== null) return;
@@ -784,7 +631,7 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
   }
 
   const eligible = (candidate: Candidate, scope: Row | undefined): scope is Row =>
-    scope !== undefined && candidate.botId === candidate.threadBotId && candidate.human && stateOf(scope) === 'active';
+    scope !== undefined && candidate.botId === candidate.threadBotId && stateOf(scope) === 'active' && sharedRequest(scope, candidate.requestMessageId);
 
   function plan(candidate: Candidate): RecallPlan {
     const scope = scopeOf(candidate.botId);
@@ -799,7 +646,8 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     const absent = (state: 'unavailable' | 'suspended', category: string | null) => ({ part: { state, items: [], omitted: 0 }, recalled: [], category });
     const state = stateOf(scope);
     if (state !== 'active') return state === 'preparing' ? absent('unavailable', 'preparing') : absent('suspended', null);
-    if (!candidate.human) return absent('unavailable', 'automatic_request');
+    // A request written before the consent, an automatic one or a withdrawn one was never shared: its text is not sent as a query.
+    if (!sharedRequest(scope, candidate.requestMessageId)) return absent('unavailable', 'request_not_shared');
     if (given === undefined) return absent('unavailable', 'not_planned');
     if (given.kind === 'forced') return absent('unavailable', 'replan');
     if (given.kind === 'none' || given.workId !== candidate.workId) return 'replan';
@@ -905,8 +753,10 @@ export function createMemoryLedger(kit: LedgerKit, receipts: {
     return {
       status: config ? { state: 'ready', budget: usage ? { calls: usage.calls, callsPerDay: usage.callsPerDay } : null } : { state: 'off' },
       scopes: all('SELECT s.* FROM memory_scopes s JOIN bots b ON b.id = s.bot_id AND b.deleted_at IS NULL ORDER BY s.rowid').map(scopeViewOf),
-      recalls: Object.fromEntries(all(`SELECT m.id, COUNT(*) AS n FROM attempt_sources s JOIN messages m ON m.attempt_id = s.attempt_id
-        WHERE s.via = 'recall' GROUP BY m.id`).map(row => [str(row, 'id'), int(row, 'n')])),
+      recalls: Object.fromEntries(all(`SELECT m.id, a.recall,
+          (SELECT COUNT(*) FROM attempt_sources s WHERE s.attempt_id = a.attempt_id AND s.via = 'recall') AS n
+        FROM attempt_memory a JOIN messages m ON m.attempt_id = a.attempt_id WHERE a.recall <> 'none'`)
+        .map(row => [str(row, 'id'), { state: oneOf(row, 'recall', ['used', 'empty', 'unavailable', 'suspended'] as const), sources: int(row, 'n') }])),
     };
   }
 

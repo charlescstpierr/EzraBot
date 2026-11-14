@@ -101,7 +101,7 @@ test('consent, import, sync and recall: each request is admitted, each mapping i
 
     const current = await app.view();
     assert(second.reply);
-    assert.equal(current.memory.recalls[second.reply.id], 3);
+    assert.deepEqual(current.memory.recalls[second.reply.id], { state: 'used', sources: 3 });
     const provenance = (await (await fetch(`${app.base}/api/memory/provenance?messageId=${second.reply.id}`)).json()) as { recall: string; sources: Record<string, unknown>[] };
     assert.equal(provenance.recall, 'used');
     assert.deepEqual(provenance.sources.map(s => [s.state, s.kind, s.revision, s.text]), [
@@ -394,6 +394,18 @@ test('after a crash a request that had left is uncertain, one that had not left 
     await app.accepted({ type: 'memory.resume' });
     await app.until(v => app.scopeOf(v).state === 'active', 'the person asked again and a new workspace is confirmed');
     assert.notEqual((honcho.requests[0]?.body as { id: string }).id, permit?.workspaceId, 'the interrupted workspace name is never used again');
+
+    // A forget whose first withdrawal was in flight at the crash still closes: the others leave, the interrupted one is not sent again.
+    await app.desk?.close();
+    app.apply({ type: 'memory.forget', confirmLabel: LABEL });
+    const withdrawal = app.store.memory.next();
+    assert(withdrawal);
+    assert.deepEqual(app.store.memory.begin(withdrawal)?.kind, 'withdraw');
+    await app.stop();
+    app = await open();
+    await app.until(v => app.scopeOf(v).state === 'withdrawal_unverified', 'the forget ends after the restart');
+    assert.deepEqual(honcho.requests.filter(r => r.method === 'DELETE').map(r => r.path.split('/').slice(4).join('/')), ['sessions/conversation', ''],
+      'only the withdrawals that had not left were sent');
   } finally {
     await app.stop();
     await honcho.close();
@@ -593,4 +605,53 @@ test('the Honcho key and address reach no child process, prompt, view, log or da
   const [workspace = ''] = [...honcho.workspaces.keys()];
   for (const secret of [honcho.key, new URL(honcho.url).host]) assert.equal(stored.includes(secret), false, 'the key and the address are never written to SQLite');
   assert.equal(stored.includes(workspace), true, 'the mapping keeps the workspace name on the server');
+});
+
+test('a request written before the consent is never sent to Honcho as a search query', async () => {
+  const honcho = await startFakeHoncho();
+  const app = await startMemory({ honcho });
+  try {
+    const early = app.send('Demande écrite avant mon accord.');
+    app.apply(ENABLE);
+    await app.until(v => app.scopeOf(v).state === 'active', 'the scope is active');
+    assert.deepEqual(app.store.planRecall(), { kind: 'none' });
+    const claim = app.store.claimNext('chat', { kind: 'none' });
+    assert(claim && claim !== 'replan');
+    assert.match(claim.turn.input, /Mémoire de Nova indisponible pour ce tour/);
+    assert.equal(searches(honcho), 0);
+    assert.equal(honcho.messages([...honcho.workspaces.keys()][0] ?? '').length, 0, 'the earlier request was not exported either');
+    assert.equal((await app.view()).works.find(w => w.id === early.workId)?.attempt?.plan?.memory.recall?.state, 'unavailable');
+  } finally {
+    await app.stop();
+    await honcho.close();
+  }
+});
+
+test('a recall planned for another call is not used, and a call that could not be planned leaves with a visible absence of memory', async () => {
+  const honcho = await startFakeHoncho();
+  const app = await startMemory({ honcho });
+  assert(app.desk);
+  try {
+    await app.enable();
+    await app.accepted({ type: 'memory.declare', text: 'Préfère les musées le matin.' });
+    await app.synced();
+    const first = app.send('Quel musée visiter demain ?');
+    const plan = app.store.planRecall();
+    assert(plan.kind === 'search');
+    const found = await app.desk.recall(plan);
+    assert.equal(app.store.dispatch({ type: 'work.cancel', requestId: randomUUID(), workId: first.workId }).ok, true);
+    const second = app.send('Et quel musée après-demain ?');
+    assert.equal(app.store.claimNext('chat', found), 'replan', 'the search of the cancelled call is not given to the next one');
+    assert.equal(app.store.claimNext('chat', { kind: 'none' }), 'replan', 'a call that needs a recall is not claimed without one');
+    assert.equal((await app.view()).works.find(w => w.id === second.workId)?.attempts, 0, 'nothing was claimed');
+    const forced = app.store.claimNext('chat', { kind: 'forced' });
+    assert(forced && forced !== 'replan');
+    assert.equal(forced.workId, second.workId);
+    assert.match(forced.turn.input, /Mémoire de Nova indisponible pour ce tour/);
+    assert.doesNotMatch(forced.turn.input, /musées le matin/);
+    assert.equal((await app.view()).works.find(w => w.id === second.workId)?.attempt?.plan?.memory.recall?.state, 'unavailable');
+  } finally {
+    await app.stop();
+    await honcho.close();
+  }
 });

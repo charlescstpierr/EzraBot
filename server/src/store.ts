@@ -76,7 +76,8 @@ import { SOURCE_MIGRATION, createSources } from './source.js';
 import { CONNECTION_MIGRATION, createConnections } from './connection.js';
 import { ADMISSION_MIGRATION, DEFAULT_POLICY, createAdmission, type Admission, type Departure, type Target } from './admission.js';
 import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type AutomaticOrigin, type Origin } from './admission-protocol.js';
-import { MEMORY_MIGRATION, MEMORY_PURGE_ORDER, createMemoryLedger, type Candidate, type MemoryLedger, type RecallOutcome, type RecallPlan } from './memory-ledger.js';
+import { createMemoryLedger, type Candidate, type MemoryLedger, type RecallOutcome, type RecallPlan } from './memory-ledger.js';
+import { MEMORY_MIGRATION, MEMORY_PURGE_ORDER } from './memory-schema.js';
 
 export type Claim = {
   lane: Lane;
@@ -1724,8 +1725,7 @@ export function openStore(options: StoreOptions): Store {
      WHERE w.state = 'pending' AND w.task_id IS NULL ORDER BY m.seq, w.rowid LIMIT 1`,
   );
   const candidateOf = (next: Row): Candidate => ({
-    workId: str(next, 'work_id'), botId: str(next, 'bot_id'), threadBotId: str(next, 'thread_bot_id'),
-    requestMessageId: str(next, 'message_id'), human: str(next, 'origin_kind') === 'human',
+    workId: str(next, 'work_id'), botId: str(next, 'bot_id'), threadBotId: str(next, 'thread_bot_id'), requestMessageId: str(next, 'message_id'),
   });
 
   function planRecall(): RecallPlan {

@@ -69,6 +69,8 @@ export async function startMemory(options: Options) {
     allowLoopbackHttpForTests: true, log: entry => logs.push(entry), closeGraceMs: 50,
   }) : null;
   const worker = createWorker({ store, engines: { chat, doc }, ...(desk ? { memory: desk } : {}) });
+  // As the server does once it listens: what a restart left waiting is looked at again.
+  desk?.kick();
   const port = await freePort();
   const server: Server = createHttpServer({ store, worker, engine: chat, port, root, csrfToken: CSRF, longPollMs: 50 });
   await new Promise<void>(r => server.listen(port, '127.0.0.1', r));

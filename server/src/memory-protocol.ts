@@ -82,8 +82,8 @@ export const MemoryViewSchema = z.strictObject({
     z.strictObject({ state: z.literal('ready'), budget: z.strictObject({ calls: count, callsPerDay: count }).nullable() }),
   ]),
   scopes: z.array(ScopeViewSchema),
-  /** Replies composed with recalled sources: reply message id to the number of sources. */
-  recalls: z.record(z.string(), count),
+  /** How the recall of each reply ended, by reply message id. A reply of a turn that had no recall to make has no entry. */
+  recalls: z.record(z.string(), z.strictObject({ state: z.enum(['used', 'empty', 'unavailable', 'suspended']), sources: count })),
 });
 export type MemoryView = z.infer<typeof MemoryViewSchema>;
 
