@@ -6,7 +6,7 @@
 
 `new HonchoHttpClient(config)` reçoit explicitement `baseUrl`, `apiKey`, `workspaceId`, `timeoutMs` et `maxResponseBytes`. Aucun accès à l'environnement. HTTPS est requis. L'option `allowLoopbackHttpForTests` autorise HTTP uniquement sur les adresses littérales `127.0.0.1` et `::1`. Authentification dans l'URL, requête et fragment sont refusés. Un préfixe de chemin d'hébergement est accepté avant `/v3`.
 
-Chaque méthode accepte un `AbortSignal` final facultatif et effectue au plus une requête. Le constructeur ne fait aucun appel. Aucune méthode ne réessaie ni ne provisionne une autre ressource.
+Chaque méthode accepte un `AbortSignal` final facultatif et effectue au plus une requête. Le constructeur ne fait aucun appel. Aucune méthode ne réessaie ni n'émet de requête de provisionnement supplémentaire. Le serveur Honcho peut toutefois créer une session ou des pairs manquants lors de l'ingestion. Le raccord doit attendre leur provisionnement confirmé avant d'ingérer et empêcher une ingestion tardive de recréer une portée retirée.
 
 | Méthode | Requête | Résultat utile |
 | --- | --- | --- |
