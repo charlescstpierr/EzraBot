@@ -75,6 +75,7 @@ test("seule la version courante figure parmi les résultats documentaires", asyn
   const view: AppView = await (await request.get("/api/view")).json();
   const createdAt = "2025-01-01T00:00:00.000Z";
   const work: WorkView = {
+    next: { kind: "none", reason: "Terminé" }, lastFact: { kind: "none" },
     id: "search-document",
     threadBotId: "mino",
     botId: "mino",

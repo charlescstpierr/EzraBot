@@ -1,3 +1,4 @@
+import { workNext } from './resume.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
@@ -878,6 +879,22 @@ export function openStore(options: StoreOptions): Store {
     }
     run('UPDATE works SET state = ?, title = ?, updated_at = ? WHERE id = ?', to, title ?? str(work, 'title'), now(), str(work, 'id'));
   };
+  const nextOf = (work: Row) => workNext({
+    task: strOrNull(work, 'task_id') !== null,
+    botPresent: get('SELECT id FROM bots WHERE id = ? AND deleted_at IS NULL', str(work, 'bot_id')) !== undefined,
+    hasExecution: tools.hasLiveExecution(str(work, 'id')),
+    state: workState(work),
+  });
+  function lastFactOf(workId: string): import('./protocol.js').WorkFact {
+    const execution = get(`SELECT e.* FROM tool_executions e JOIN tool_proposals p ON p.id=e.proposal_id
+      WHERE p.work_id=? AND e.state IS NOT 'voided' ORDER BY e.rowid DESC LIMIT 1`, workId);
+    if (execution) return { kind: 'execution', id: str(execution, 'id'), state: str(execution, 'state'), logId: strOrNull(execution, 'log_id'), at: str(execution, 'updated_at') };
+    const version = currentVersion(workId);
+    const reply = get(`SELECT m.* FROM messages m JOIN attempts a ON a.id=m.attempt_id WHERE a.work_id=? AND a.state='succeeded' ORDER BY m.seq DESC LIMIT 1`, workId);
+    if (version && (!reply || str(version, 'created_at') >= str(reply, 'created_at'))) return { kind: 'version', id: str(version, 'id'), n: int(version, 'n'), at: str(version, 'created_at') };
+    if (reply) return { kind: 'reply', id: str(reply, 'id'), at: str(reply, 'created_at') };
+    return { kind: 'none' };
+  }
   const currentVersion = (workId: string): Row | undefined =>
     get('SELECT * FROM versions WHERE work_id = ? ORDER BY n DESC LIMIT 1', workId);
   const staleOpenProposals = (workId: string, reason: 'edited' | 'restored' | 'replaced') => {
@@ -1122,11 +1139,9 @@ export function openStore(options: StoreOptions): Store {
       }
       case 'work.retry': {
         const work = requireWork(command.workId);
-        if (taskOf(work)) throw new Refusal('invalid_transition', 'Ce travail documentaire se reprend avec « Reprendre », qui compte dans sa limite d’appels.');
-        requireBot(str(work, 'bot_id'), 'Ce bot a été supprimé : ce travail ne peut pas être relancé.');
-        if (tools.hasLiveExecution(command.workId)) {
-          throw new Refusal('invalid_transition', 'Ce travail a déjà une action de service approuvée. Il ne se relance pas : faites une nouvelle demande.');
-        }
+        const next = nextOf(work);
+        if (next.kind !== 'document') requireBot(str(work, 'bot_id'), 'Ce bot a été supprimé : ce travail ne peut pas être relancé.');
+        if (next.kind !== 'retry') throw new Refusal('invalid_transition', next.reason);
         setWorkState(work, 'pending');
         return { kind: 'work', workId: command.workId, state: 'pending' };
       }
@@ -1592,9 +1607,7 @@ export function openStore(options: StoreOptions): Store {
   };
   const originKind = (messageId: string): Row => get('SELECT kind AS origin_kind FROM origins WHERE message_id = ?', messageId) ?? {};
 
-  type Traced = { exchange: Exchange; requestMessageId: string; attemptIds: string[] };
-
-  function threadExchanges(threadBotId: string, beforeSeq: number): Traced[] {
+  function threadExchanges(threadBotId: string, beforeSeq: number): Exchange[] {
     return all(`SELECT request.*, o.kind AS origin_kind FROM messages request JOIN origins o ON o.message_id = request.id
       WHERE request.role='user' AND request.bot_id=? AND request.seq < ?
       AND EXISTS(SELECT 1 FROM works w WHERE w.request_message_id=request.id AND w.state IN ('review','done')) ORDER BY request.seq`,
@@ -1609,11 +1622,9 @@ export function openStore(options: StoreOptions): Store {
       if (recorded.length && !responses.length) return [];
       const lastVersion = responses.map(row => currentVersion(str(row, 'work_id'))).findLast(v => v !== undefined);
       return [{
-        requestMessageId,
-        attemptIds: responses.map(row => str(row, 'attempt_id')),
-        exchange: { request: { text: str(request, 'text'), ...triggerOf(request), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', requestMessageId).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
-          replies: responses.map(row => ({ by: str(row, 'name'), text: str(row, 'text') })),
-          deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n') } : null },
+        request: { messageId: requestMessageId, text: str(request, 'text'), ...triggerOf(request), attachments: all('SELECT name, length(text) AS chars FROM attachments WHERE message_id=? ORDER BY seq', requestMessageId).map(f => ({ name: str(f, 'name'), chars: int(f, 'chars') })) },
+          replies: responses.map(row => ({ attemptId: str(row, 'attempt_id'), by: str(row, 'name'), text: str(row, 'text') })),
+          deliverable: lastVersion ? { title: str(lastVersion, 'title'), body: str(lastVersion, 'body'), n: int(lastVersion, 'n'), ...(strOrNull(lastVersion, 'attempt_id') ? { attemptId: str(lastVersion, 'attempt_id') } : {}) } : null,
       }];
     });
   }
@@ -1640,7 +1651,7 @@ export function openStore(options: StoreOptions): Store {
 
   type Prepared = {
     workId: string; botId: string; bot: Row; memories: { id: string; text: string }[]; source: Omit<ContextSource, 'exchanges'>;
-    threadBotId: string; requestMessageId: string; exchanges: Traced[];
+    threadBotId: string; requestMessageId: string; exchanges: Exchange[];
     /** Recalled source rows of this turn, and how the recall ended. */
     recalled?: { sourceIds: string[]; category: string | null };
     /** Attempts whose recorded output this text contains outside the past exchanges: a handoff, a prior reply, a document. */
@@ -1654,7 +1665,7 @@ export function openStore(options: StoreOptions): Store {
       ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
-      exchanges: prepared.exchanges.map(traced => traced.exchange),
+      exchanges: prepared.exchanges,
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
       ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
       ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? { connections: true as const } : {}),
@@ -1673,15 +1684,13 @@ export function openStore(options: StoreOptions): Store {
       lane, frozen?.step ?? null, frozen?.taskRevision ?? null, frozen?.baseVersionId ?? null, frozen?.eventsThrough ?? null,
       frozen?.handoffId ?? null, frozen?.continued ? 1 : 0, purpose.kind === 'receipt' ? purpose.executionId : null,
     );
-    const lastDeliverable = prepared.exchanges.findLastIndex(traced => traced.exchange.deliverable !== null);
-    const sent = prepared.exchanges.filter((_, index) => index >= composed.plan.exchanges.omitted || index === lastDeliverable);
     memory.freeze(attemptId, {
       threadBotId: prepared.threadBotId,
       recalled: prepared.recalled?.sourceIds ?? [],
       recall: { state: source.recall?.state ?? 'none', category: prepared.recalled?.category ?? null, omitted: source.recall?.omitted ?? 0 },
       requestMessageId: prepared.requestMessageId,
-      historyMessageIds: sent.map(traced => traced.requestMessageId),
-      replyAttemptIds: [...sent.flatMap(traced => traced.attemptIds), ...(prepared.builtOn ?? [])],
+      historyMessageIds: composed.used.historyMessageIds,
+      replyAttemptIds: [...composed.used.replyAttemptIds, ...(prepared.builtOn ?? [])],
     });
     return { lane, workId: prepared.workId, attemptId, n, botId: prepared.botId, choice, turn: composed.turn, toolGrants, purpose };
   }
@@ -2211,6 +2220,8 @@ export function openStore(options: StoreOptions): Store {
       const attempt = latestAttempts.get(id);
       return {
         id,
+        next: nextOf(row),
+        lastFact: lastFactOf(id),
         taskId: strOrNull(row, 'task_id'),
         botId: str(row, 'bot_id'),
         threadBotId: str(row, 'thread_bot_id'),

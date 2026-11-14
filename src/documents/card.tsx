@@ -21,7 +21,7 @@ import {
   Progress,
   StepChain,
 } from "./task";
-import { AcceptButton, NonTaskWorkControls, workNote } from "./work";
+import { AcceptButton, NonTaskWorkControls, WorkContinuity, workNote } from "./work";
 
 function TaskSummary({ port, task }: { port: Port; task: TaskView }) {
   const name = botNamer(port.view);
@@ -113,6 +113,7 @@ function WorkSummary({ port, work }: { port: Port; work: WorkView }) {
           {statuses[work.state]}
         </span>
       </header>
+      <WorkContinuity port={port} work={work} />
       {current && <strong className="ez-doc-card-title">{work.title}</strong>}
       <p className={work.state === "failed" ? "ez-doc-error" : undefined}>
         {workNote(work, busyElsewhere)}

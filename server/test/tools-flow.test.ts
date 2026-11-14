@@ -182,6 +182,9 @@ test('an ambiguous send stays unknown, is reported as unknown, and nothing can s
     const execution = find(reported, open.id).execution;
     assert(execution);
     assert.deepEqual([execution.state, execution.category, execution.summary], ['unknown', 'timeout', null]);
+    const work = reported.works.find(w => w.id === open.workId);
+    assert.equal(work?.next.kind, 'new_request');
+    assert.deepEqual(work?.lastFact, { kind: 'execution', id: execution.id, state: 'unknown', logId: execution.logId, at: execution.updatedAt });
     assert.equal(reported.messages.filter(m => m.workId === open.workId).at(-1)?.text, 'Compte rendu : l’action est dans l’état unknown.');
     const retry = await app.command({ type: 'tools.report.retry', executionId: execution.id });
     assert.deepEqual([retry.status, (await retry.json() as { code: string }).code], [409, 'invalid_transition']);

@@ -273,8 +273,8 @@ export const UsageSnapshotSchema = z.strictObject({
 export type UsageSnapshot = z.infer<typeof UsageSnapshotSchema>;
 
 /** What the context policy put in the text sent for one attempt. Sizes are characters, never tokens. */
-export const ContextPlanSchema = z.strictObject({
-  policyVersion: z.number().int(),
+const LegacyContextPlanSchema = z.strictObject({
+  policyVersion: z.number().int().max(11),
   contextSize: z.enum(CONTEXT_SIZES),
   replyStyle: z.enum(REPLY_STYLES),
   exchanges: z.strictObject({ full: count, brief: count, omitted: count }),
@@ -297,6 +297,18 @@ export const ContextPlanSchema = z.strictObject({
   inputChars: count,
   utf8Bytes: count,
 });
+export const HistoryCoverageSchema = z.strictObject({
+  budgetChars: count, usedChars: count,
+  entries: z.array(z.strictObject({
+    requestMessageId: z.string().nullable(),
+    kind: z.enum(['recent', 'older']),
+    components: z.array(z.strictObject({ by: z.string(), sourceChars: count, omittedChars: count })),
+  })),
+});
+export const ContextPlanSchema = z.union([
+  LegacyContextPlanSchema,
+  LegacyContextPlanSchema.extend({ policyVersion: z.literal(12), history: HistoryCoverageSchema }),
+]);
 export type ContextPlan = z.infer<typeof ContextPlanSchema>;
 
 export type AttemptView = {
@@ -376,7 +388,25 @@ export type PublicationView = {
   createdAt: string;
 };
 
+export const WorkNextSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('retry') }),
+  z.strictObject({ kind: z.literal('wait'), reason: z.string() }),
+  z.strictObject({ kind: z.literal('document'), reason: z.string() }),
+  z.strictObject({ kind: z.literal('new_request'), reason: z.string() }),
+  z.strictObject({ kind: z.literal('none'), reason: z.string() }),
+]);
+export type WorkNext = z.infer<typeof WorkNextSchema>;
+export const WorkFactSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('none') }),
+  z.strictObject({ kind: z.literal('reply'), id: z.string(), at: z.string() }),
+  z.strictObject({ kind: z.literal('version'), id: z.string(), n: count, at: z.string() }),
+  z.strictObject({ kind: z.literal('execution'), id: z.string(), state: z.string(), logId: z.string().nullable(), at: z.string() }),
+]);
+export type WorkFact = z.infer<typeof WorkFactSchema>;
+
 export type WorkView = {
+  next: WorkNext;
+  lastFact: WorkFact;
   threadBotId: string;
   id: string;
   taskId: string | null;

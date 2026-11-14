@@ -1052,13 +1052,14 @@ function statusElement(work: WorkView): HTMLElement {
     controls.append(button(work.state === 'running' ? 'Arrêter' : 'Annuler', () => void dispatch({ type: 'work.cancel', workId: work.id })));
   } else if (work.state === 'failed') {
     element.classList.add('run-failed');
+    if (work.next.kind === 'new_request') element.append(make('p', '', work.next.reason));
     element.append(intro(bot, 'Échec', work.botId), make('span', '', work.attempt?.error ?? 'L’appel a échoué.'));
-    if (bot) controls.append(button('Relancer', () => void dispatch({ type: 'work.retry', workId: work.id })));
+    if (work.next.kind === 'retry') controls.append(button('Relancer', () => void dispatch({ type: 'work.retry', workId: work.id })));
   } else {
     element.classList.add('run-cancelled');
     element.append(intro(bot, 'Annulé', work.botId), make('span', '', bot ? 'Arrêté à votre demande. Aucune réponse n’a été enregistrée.'
       : 'Ce bot a été supprimé. Aucune réponse n’a été enregistrée et ce travail ne peut plus être relancé.'));
-    if (bot) controls.append(button('Relancer', () => void dispatch({ type: 'work.retry', workId: work.id })));
+    if (work.next.kind === 'retry') controls.append(button('Relancer', () => void dispatch({ type: 'work.retry', workId: work.id })));
   }
   element.append(controls);
   return element;
@@ -2156,7 +2157,7 @@ function renderWorkDrawer(): void {
       list.append(row);
       continue;
     }
-    if ((work.state === 'failed' || work.state === 'cancelled') && botById(work.botId)) rowActions.append(button('Relancer', () => void dispatch({ type: 'work.retry', workId: work.id })));
+    if (work.next.kind === 'retry') rowActions.append(button('Relancer', () => void dispatch({ type: 'work.retry', workId: work.id })));
     if (work.state === 'pending' || work.state === 'running') rowActions.append(button('Annuler', () => void dispatch({ type: 'work.cancel', workId: work.id })));
     if (work.state === 'review') rowActions.append(button('Valider', () => void dispatch({ type: 'work.accept', workId: work.id })));
     if (work.versions.length > 1) rowActions.append(button(`${work.versions.length} versions`, () => { workDrawer.close(); showVersions(work.id); }));
@@ -2175,6 +2176,7 @@ function attemptFacts(work: WorkView): string[] {
   const plan = attempt.plan;
   if (plan) {
     const parts = [
+      !('history' in plan) ? 'palier ancien, intégralité non garantie' : '',
       plan.exchanges.full ? `${plan.exchanges.full} échange${plan.exchanges.full > 1 ? 's' : ''} récent${plan.exchanges.full > 1 ? 's' : ''}` : '',
       plan.exchanges.brief ? `${plan.exchanges.brief} abrégé${plan.exchanges.brief > 1 ? 's' : ''}` : '',
       plan.exchanges.omitted ? `${plan.exchanges.omitted} omis` : '',
