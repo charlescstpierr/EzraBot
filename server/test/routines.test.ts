@@ -225,7 +225,6 @@ test('an edit never admits a date again, and a zone change cannot bring two admi
     assert.equal(refused(update({ time: '09:30' }, 1)).code, 'stale_base');
     s.set('2026-11-16T14:00:30Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0, 'the 16th is already decided');
-    // Kiritimati is already on the 17th: a fresh date, five minutes after the last admission.
     ok(update({ zone: 'Pacific/Kiritimati', time: '04:06' }, 2));
     s.set('2026-11-16T14:06:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 0);
@@ -381,7 +380,7 @@ test('a call that left without a recorded end holds the routine until the person
     s.store.close();
     assert.deepEqual(rows(s.path, `SELECT state FROM reservations ORDER BY rowid`), [{ state: 'unknown' }], 'the unknown reservation stays unknown and nothing reserved for the new request yet');
   } finally {
-    try { s.store.close(); } catch { /* closed above */ }
+    try { s.store.close(); } catch { }
   }
 });
 

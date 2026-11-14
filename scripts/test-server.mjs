@@ -1,7 +1,7 @@
-import { missionOrigins } from "../server/dist/src/routines.js";
 // Isolated browser QA: synthetic SQLite data, deliberately unavailable engine, no provider calls.
 // With MINO_QA_TOOLS=1 the chat lane runs the real engine against the fake App Server process,
 // and connected services use the fake provider: every account, action and result is synthetic.
+import { missionOrigins } from "../server/dist/src/routines.js";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

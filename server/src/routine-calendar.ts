@@ -125,7 +125,6 @@ function* slotsAfter(schedule: Schedule, after: number): Generator<Slot> {
   for (let date = localDateAt(after, schedule.zone); date <= schedule.endsOn; date = addDays(date, 1)) {
     if (!schedule.weekdays.includes(weekdayOf(date))) continue;
     const slot = slotOn(date, schedule);
-    // A missing wall time is placed where the offset in force before the jump would have put it.
     const at = slot.kind === 'due' ? slot.at : wallInstant(date, schedule.time) - offsetAt(wallInstant(date, schedule.time) - 15 * HOUR, schedule.zone) * 60_000;
     if (at > after) yield slot;
   }

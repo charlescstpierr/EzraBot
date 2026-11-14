@@ -25,7 +25,6 @@ import { BudgetConfigError, policyFromEnv } from './admission.js';
 import { ROUTINE_LIMITS } from './protocol.js';
 
 const VERSION = '0.1.0';
-/** Routine slots at or before this instant were missed while Mino was off: they are never admitted. */
 const startedAt = new Date().toISOString();
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
