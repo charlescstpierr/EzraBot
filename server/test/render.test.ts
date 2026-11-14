@@ -55,11 +55,11 @@ test('lists, tables and emphasis render as structure', () => {
 });
 
 const message = (patch: Partial<MessageView> & Pick<MessageView, 'id' | 'text'>): MessageView => ({
-  threadBotId: 'mino', mentions: [], role: 'user', botId: 'mino', workId: 'w', attachments: [], createdAt: '2026-11-01T10:00:00Z', stamp: null, taskStep: null, handoff: null, ...patch,
+  threadBotId: 'mino', mentions: [], role: 'user', botId: 'mino', workId: 'w', attachments: [], createdAt: '2026-11-01T10:00:00Z', stamp: null, taskStep: null, handoff: null, trigger: null, ...patch,
 });
 
 function viewWith(messages: MessageView[], works: WorkView[] = []): AppView {
-  return { rev: 1, spaceId: 's', activeBotId: 'mino', bots: [], retiredBotIds: [], purged: { botIds: [], workIds: [] }, erasure: 'complete', messages, works, tasks: [], carnet: [], engine: { state: 'starting' } };
+  return { rev: 1, spaceId: 's', activeBotId: 'mino', bots: [], retiredBotIds: [], purged: { botIds: [], workIds: [] }, erasure: 'complete', messages, works, tasks: [], carnet: [], routines: [], engine: { state: 'starting' } };
 }
 
 test('search ignores accents and case, needs every term, and points back to the right bot and message', () => {

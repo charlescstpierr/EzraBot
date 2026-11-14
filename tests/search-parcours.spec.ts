@@ -23,6 +23,7 @@ test("la recherche retrouve les anciens passages sans accents et cible le messag
     createdAt,
     stamp: null,
     taskStep: null,
+    trigger: null,
     handoff: null,
   });
   view.messages = [
