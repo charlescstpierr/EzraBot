@@ -13,14 +13,12 @@ export type SendFact =
   | { kind: "accepted"; receipt: Extract<CommandResult, { kind: "message" }> }
   | { kind: "refused"; reason: "refused" | "rejected" };
 type FrozenSend = SavedSend & { draftNonce: string };
-/** One explicit departure, written once before its POST. A retry is a new departure with the same bytes. */
 type Body = FrozenSend & {
   spaceId: string;
   writerId: string;
   departureId: string;
   savedAt: number;
 };
-/** Written once after the response. It holds no command or draft text, so a late write cannot restore purged text. */
 type Final = Exclude<SendFact, { kind: "queued" }>;
 type Departure = {
   ref: string;
@@ -73,7 +71,6 @@ function decode(segment: string | undefined): string | undefined {
     return undefined;
   }
 }
-/** Throws instead of returning a partial list: an unreadable registry is never an empty one. */
 function keys(storage: KeyValueStorage): string[] {
   const length = storage.length;
   const found: string[] = [];
@@ -178,13 +175,24 @@ function parseFinal(raw: string): Final | null {
     return null;
   }
 }
+function legacyBot(raw: string | null): string | undefined {
+  try {
+    const value: unknown = JSON.parse(raw ?? "null");
+    return record(value) &&
+      record(value.command) &&
+      typeof value.command.botId === "string"
+      ? value.command.botId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 const finalOf = (outcome: AppOutcome): Final =>
   outcome.kind === "accepted" && outcome.result.kind === "message"
     ? { kind: "accepted", receipt: outcome.result }
     : outcome.kind === "refused" || outcome.kind === "rejected"
       ? { kind: "refused", reason: outcome.kind }
       : { kind: "unknown" };
-/** An acceptance absorbs every other outcome of the same command, then uncertainty, then a departure still in flight. */
 function entryOf(ds: readonly Departure[], conflict: boolean): BookEntry {
   const decisive =
     ds.find((d) => d.final?.kind === "accepted") ??
@@ -199,7 +207,6 @@ function entryOf(ds: readonly Departure[], conflict: boolean): BookEntry {
     conflict,
   });
 }
-/** A retired acceptance stays a witness for its command but no longer occupies a visible slot on its own. */
 function project(departures: readonly Departure[]): BookEntry[] {
   const requests = new Map<string, Map<string, Departure[]>>();
   for (const d of [...departures].sort(byAge)) {
@@ -238,9 +245,7 @@ export function openSendBook(options: {
   const space = encodeURIComponent(options.spaceId);
   const legacy = `${LEGACY}${space}|`;
   const prefix = `${PREFIX}${space}|`;
-  /** Bodies this page could not store, by requestId. Nothing was posted for them. */
   const drafts = new Map<string, Body>();
-  /** Outcomes this page received but could not store, by departure. */
   const unsaved = new Map<string, { bot: string; final: Final }>();
   const active = new Map<
     string,
@@ -329,7 +334,6 @@ export function openSendBook(options: {
     const { departures, fenced } = load(storage);
     return withDrafts(departures, fenced);
   }
-  /** Removes rows written under a barrier after its purge read the registry. */
   function sweep(store: KeyValueStorage): void {
     const found = keys(store)
       .filter((k) => k.startsWith(prefix))
@@ -341,28 +345,21 @@ export function openSendBook(options: {
       if (s.part !== "gone" && s.bot !== undefined && fenced.has(s.bot))
         store.removeItem(s.key);
   }
-  /** null: not a private row of this space. undefined: private bytes whose bot cannot be identified. */
-  function ownerOf(
+  function purgeable(
     store: KeyValueStorage,
     key: string,
-  ): string | null | undefined {
+    botIds: readonly string[],
+  ): boolean {
+    let bot: string | undefined;
     if (key.startsWith(prefix)) {
-      const { part, bot } = split(key);
-      return part === "gone" ? null : bot;
-    }
-    if (!key.startsWith(legacy) || key.startsWith(`${legacy}gone|`))
-      return null;
-    const raw = store.getItem(key);
-    try {
-      const value: unknown = JSON.parse(raw ?? "null");
-      return record(value) &&
-        record(value.command) &&
-        typeof value.command.botId === "string"
-        ? value.command.botId
-        : undefined;
-    } catch {
-      return undefined;
-    }
+      const parsed = split(key);
+      if (parsed.part === "gone") return false;
+      bot = parsed.bot;
+    } else if (key.startsWith(legacy) && !key.startsWith(`${legacy}gone|`))
+      bot = legacyBot(store.getItem(key));
+    else return false;
+    // Unreadable rows cannot identify a surviving bot and must not retain private text.
+    return bot === undefined || botIds.includes(bot);
   }
   const freeze = (f: FrozenSend): Body =>
     copy({
@@ -579,12 +576,8 @@ export function openSendBook(options: {
       for (const [ref, kept] of unsaved)
         if (botIds.includes(kept.bot)) unsaved.delete(ref);
       try {
-        for (const key of keys(storage)) {
-          const owner = ownerOf(storage, key);
-          // Unreadable rows cannot identify a surviving bot and must not retain private text.
-          if (owner !== null && (owner === undefined || botIds.includes(owner)))
-            storage.removeItem(key);
-        }
+        for (const key of keys(storage))
+          if (purgeable(storage, key, botIds)) storage.removeItem(key);
       } catch {
         status = "storage-error";
       }

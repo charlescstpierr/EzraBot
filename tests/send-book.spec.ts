@@ -62,7 +62,6 @@ function deferred() {
   return { promise, resolve };
 }
 type Op = "length" | "key" | "getItem" | "setItem" | "removeItem";
-/** Another tab's view of the same storage. `before` runs ahead of every operation and may throw or interleave. */
 function relay(
   storage: KeyValueStorage,
   before: (op: Op, key?: string) => void,
