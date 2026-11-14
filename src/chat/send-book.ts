@@ -353,12 +353,21 @@ export function openSendBook(options: {
     let bot: string | undefined;
     if (key.startsWith(prefix)) {
       const parsed = split(key);
-      if (parsed.part === "gone") return false;
-      bot = parsed.bot;
-    } else if (key.startsWith(legacy) && !key.startsWith(`${legacy}gone|`))
-      bot = legacyBot(store.getItem(key));
-    else return false;
-    // Unreadable rows cannot identify a surviving bot and must not retain private text.
+      if (
+        parsed.part === "gone" &&
+        parsed.bot &&
+        parsed.size === 0 &&
+        store.getItem(key) === "1"
+      )
+        return false;
+      bot = parsed.bot || undefined;
+    } else if (key.startsWith(legacy)) {
+      const raw = store.getItem(key);
+      const [part, botPart, ...rest] = key.slice(legacy.length).split("|");
+      const markerBot = part === "gone" ? decode(botPart) : undefined;
+      if (markerBot && rest.length === 0 && raw === "1") return false;
+      bot = legacyBot(raw) ?? (markerBot || undefined);
+    } else return false;
     return bot === undefined || botIds.includes(bot);
   }
   const freeze = (f: FrozenSend): Body =>

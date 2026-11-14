@@ -1179,3 +1179,31 @@ test("un reçu seulement retiré ne contourne pas la capacité active", async ()
   expect(sent).toEqual([pending.command]);
   expect(full.snapshot()).toEqual(before);
 });
+
+for (const version of ["v1", "v2"]) {
+  test(`la purge retire le texte caché sous une fausse barrière ${version}`, () => {
+    const { storage, state } = browser();
+    const prefix = `mino.send-book.${version}|space-a|gone|`;
+    const privateKeys =
+      version === "v1"
+        ? [`${prefix}nova`, `${prefix}nova|extra`, `${prefix}%E0%A4%A`]
+        : [`${prefix}nova|extra`, `${prefix}%E0%A4%A`];
+    for (const key of privateKeys) state.items.set(key, "Texte privé à purger");
+    const kept = new Map([
+      [`${prefix}mino|extra`, "Autre personnage"],
+      [`${prefix}mino`, "1"],
+      [`mino.send-book.${version}|space-b|gone|nova|extra`, "Autre espace"],
+      ["mino.send-book.v2|space-a|gone|déjà", "1"],
+    ]);
+    for (const [key, value] of kept) state.items.set(key, value);
+    const book = page(storage);
+    book.purge(["nova"]);
+    expect(book.status()).toBe("durable");
+    for (const key of privateKeys)
+      expect(state.items.has(key), key).toBe(false);
+    for (const [key, value] of kept)
+      expect(state.items.get(key), key).toBe(value);
+    expect(holding(state.items, "Texte privé à purger")).toEqual([]);
+    expect(state.items.get("mino.send-book.v2|space-a|gone|nova")).toBe("1");
+  });
+}
