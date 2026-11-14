@@ -483,3 +483,84 @@ test("une purge vide ne touche rien et une purge nommée retire les octets incla
   expect(state.items.has(ownKey)).toBe(false);
   expect(state.items.get(otherKey)).toBe("{texte privé incomplet");
 });
+
+test("un refus précédent ne masque pas une reprise dont la réponse est perdue", async () => {
+  const { storage } = browser();
+  const a = input();
+  let n = 0;
+  const book = page(storage, async () =>
+    ++n === 1
+      ? { kind: "rejected", status: 503, message: "indisponible" }
+      : unknown,
+  );
+  await book.run(a);
+  expect(await book.run(a)).toMatchObject({
+    entry: { fact: { kind: "unknown" } },
+  });
+  expect(page(storage).snapshot()).toMatchObject([
+    { command: a.command, fact: { kind: "unknown" } },
+  ]);
+});
+
+test("la collecte ne retire pas une reprise après refus arrivée au serveur sans reçu", async () => {
+  const { storage } = browser();
+  const a = input();
+  let n = 0;
+  const book = page(
+    storage,
+    async () =>
+      ++n === 1
+        ? { kind: "rejected", status: 503, message: "indisponible" }
+        : unknown,
+    { capacity: 1, ttlMs: 0 },
+  );
+  await book.run(a);
+  await book.run(a);
+  book.collect([]);
+  expect(page(storage).snapshot()).toMatchObject([
+    { command: a.command, fact: { kind: "unknown" } },
+  ]);
+});
+
+test("un ancien écrivain refusé ne masque pas le départ d’une reprise dans un autre onglet", async () => {
+  const { storage } = browser();
+  const a = input();
+  await page(storage, async () => ({
+    kind: "rejected",
+    status: 503,
+    message: "indisponible",
+  })).run(a);
+  const result = deferred();
+  const second = page(storage, () => result.promise, { capacity: 1, ttlMs: 0 });
+  const pending = second.run(a);
+  const during = page(storage).snapshot();
+  second.collect([]);
+  const afterCollect = page(storage).snapshot();
+  result.resolve(unknown);
+  await pending;
+  expect(during).toMatchObject([
+    { command: a.command, fact: { kind: "queued" } },
+  ]);
+  expect(afterCollect).toHaveLength(1);
+  expect(page(storage).snapshot()).toMatchObject([
+    { command: a.command, fact: { kind: "unknown" } },
+  ]);
+});
+
+test("un refus du rejeu ne résout pas une ancienne incertitude sans reçu serveur", async () => {
+  const { storage } = browser();
+  const a = input();
+  let n = 0;
+  const book = page(
+    storage,
+    async () =>
+      ++n === 1 ? unknown : { kind: "rejected", status: 403, message: "refus" },
+    { capacity: 1, ttlMs: 0 },
+  );
+  await book.run(a);
+  await book.run(a);
+  book.collect([]);
+  expect(page(storage).snapshot()).toMatchObject([
+    { command: a.command, fact: { kind: "unknown" } },
+  ]);
+});
