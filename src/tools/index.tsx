@@ -10,6 +10,7 @@ import type {
 } from "../../server/src/tools-protocol";
 import { toolsRequest, uid } from "../api";
 import { SourceLine } from "../documents/source";
+import { ConnectionCard } from "./connection";
 import { failureText, freeAlias, useLinkFlow } from "./link-flow";
 import type { Port, ToolsOutcome } from "../port";
 import "./style.css";
@@ -703,6 +704,15 @@ export function ToolCards({
       {proposals.map((proposal) => (
         <ToolCard key={proposal.id} port={port} proposal={proposal} />
       ))}
+      {port.view.tools.connections
+        .filter((connection) => connection.messageId === message.id)
+        .map((connection) => (
+          <ConnectionCard
+            key={connection.id}
+            port={port}
+            connection={connection}
+          />
+        ))}
     </>
   );
 }
