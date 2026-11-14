@@ -120,3 +120,13 @@ npx playwright test tests/honcho-parcours.spec.ts
 ```
 
 Aucun compte, aucune clé réelle et aucune instance Honcho n'ont été utilisés. La compatibilité avec une instance Honcho réelle n'est pas prouvée. Les routes viennent du code officiel épinglé cité dans [honcho-http.md](honcho-http.md).
+
+## Historique borné et reprise d'un travail
+
+La politique 12 recompose l'historique depuis les originaux autorisés à chaque tentative. Elle conserve en priorité les deux échanges récents. Si leurs textes tiennent ensemble, elle les envoie entiers. Sinon, elle coupe séparément la demande et chaque réponse attribuée, aux frontières des graphèmes. Les comptes restent en points de code Unicode. L'enveloppe historique reste de 4 000, 12 000 ou 30 000 points, libellés et marqueurs compris. Les échanges anciens occupent la place restante en extraits. Les pièces historiques ne sont pas renvoyées.
+
+Le texte, sa couverture et les sources utilisées viennent du même calcul. Le dernier livrable envoyé séparément conserve ses dépendances, même si son échange est omis. Le retrait d'une source utilise les gardes et le retrait transitif existants. Aucun condensé persistant, table ou appel fournisseur ne s'ajoute. La demande actuelle, ses pièces et une version choisie gardent leurs contrats existants. Ces budgets ne représentent pas une fenêtre modèle ni des jetons.
+
+La fiche distingue la dernière tentative du dernier fait enregistré. Un texte en cours de rédaction ne prouve aucun résultat. Une reprise explicite conserve le travail et le fil, puis crée la tentative suivante. Une action de service déjà approuvée bloque cette reprise, même si son résultat est inconnu. Son compte rendu se reprend séparément sur le PC. Les tâches documentaires et les missions gardent leurs commandes et leurs limites. Le téléphone ne reçoit aucune commande PC supplémentaire.
+
+Les anciens plans restent lisibles. Leur diagnostic précise que l'intégralité n'est pas garantie.

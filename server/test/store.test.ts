@@ -100,6 +100,9 @@ test('a call left running at shutdown becomes a visible interrupted failure that
   assert.equal(second.store.recoverInterrupted(), 1);
   const recovered = second.store.view();
   assert.equal(work(recovered, workId).state, 'failed');
+  assert.equal(work(recovered, workId).next.kind, 'retry');
+  assert.equal(work(recovered, workId).lastFact.kind, 'none');
+  const requestMessageId = work(recovered, workId).requestMessageId;
   assert.match(work(recovered, workId).attempt?.error ?? '', /arrêté pendant cet appel/);
   assert.equal(work(recovered, queued).state, 'pending');
   const queuedClaim = claim(second.store);
@@ -109,6 +112,8 @@ test('a call left running at shutdown becomes a visible interrupted failure that
   const retried = claim(second.store);
   assert.equal(retried.workId, workId);
   assert.equal(retried.n, 2);
+  assert.equal(work(second.store.view(), workId).requestMessageId, requestMessageId);
+  assert.equal(work(second.store.view(), workId).threadBotId, 'mino');
   second.store.close();
 });
 

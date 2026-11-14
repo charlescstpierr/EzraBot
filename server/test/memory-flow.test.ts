@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_POLICY } from '../src/admission.js';
 import { HonchoConfigError, childEnv, takeHonchoConfig } from '../src/child-env.js';
 import type { PcView } from '../src/tools-protocol.js';
@@ -719,4 +720,89 @@ test('a recall planned for another call is not used, and a call that could not b
     await app.stop();
     await honcho.close();
   }
+});
+
+
+test('withdrawing an old excerpt during a controlled call prevents reply and document publication', async () => {
+  const honcho = await startFakeHoncho();
+  const app = await startMemory({ honcho, scenario: 'gated' });
+  try {
+    await app.enable();
+    const requests = [];
+    for (const text of ['SOURCE_ANCIENNE ' + 'x'.repeat(900), 'Sujet récent A', 'Sujet récent B']) {
+      const request = app.send(text);
+      requests.push(request);
+      const claim = app.store.claimNext('chat');
+      assert(claim);
+      assert.deepEqual(app.store.finishJob(claim, SUCCEEDED), { kind: 'recorded', state: 'done' });
+    }
+    await app.synced();
+    const workId = await app.say('Compose une suite avec les échanges autorisés.');
+    const running = await app.until(v => v.works.find(w => w.id === workId)?.attempt?.turnId != null, 'the controlled engine accepted the composed history');
+    const plan = running.works.find(w => w.id === workId)?.attempt?.plan;
+    assert(plan && 'history' in plan);
+    const first = requests[0];
+    assert(first);
+    const excerpt = plan.history.entries.find(entry => entry.requestMessageId === first.messageId);
+    assert.equal(excerpt?.kind, 'older');
+    assert(excerpt?.components.some(component => component.omittedChars > 0));
+    assert.match(app.turn().input, /SOURCE_ANCIENNE/);
+    await app.accepted({ type: 'memory.exclude', target: { kind: 'message', messageId: first.messageId } });
+    const stopped = await app.until(v => v.works.find(w => w.id === workId)?.state === 'failed', 'the withdrawn excerpt stops publication');
+    assert.match(stopped.works.find(w => w.id === workId)?.attempt?.error ?? '', /La mémoire de cette conversation a changé/);
+    app.openGate();
+    await app.quiet();
+    const after = await app.view();
+    assert.equal(after.messages.some(message => message.workId === workId && message.role === 'assistant'), false);
+    assert.equal(after.works.find(work => work.id === workId)?.versions.length, 0);
+  } finally {
+    await app.stop();
+    await honcho.close();
+  }
+});
+
+
+test('an edited deliverable sent without its old exchange keeps exactly its producing work ancestry', async () => {
+  const honcho = await startFakeHoncho();
+  const app = await startMemory({ honcho });
+  let stopped = false;
+  try {
+    await app.enable();
+    const first = app.send('Source du document synthétique.');
+    const produced = app.store.claimNext('chat');
+    assert(produced);
+    app.store.finishJob(produced, { ...SUCCEEDED, reply: { reply: 'Voici.', deliverable: { title: 'Document synthétique', body: 'Texte original.' } } });
+    const version = (await app.view()).works.find(work => work.id === first.workId)?.versions[0];
+    assert(version);
+    assert(app.store.dispatch({ type: 'version.edit', requestId: randomUUID(), workId: first.workId, baseVersionId: version.id, title: 'Document édité', body: 'Texte édité complet.' }).ok);
+    const attempts = new Map<string, string>();
+    for (let i = 0; i < 4; i += 1) {
+      const recent = app.send('Question récente ' + String(i) + 'x'.repeat(5800));
+      const claim = app.store.claimNext('chat');
+      assert(claim);
+      attempts.set(recent.messageId, claim.attemptId);
+      app.store.finishJob(claim, SUCCEEDED);
+    }
+    const request = app.send('Reprends le document enregistré.');
+    const claim = app.store.claimNext('chat');
+    assert(claim);
+    assert.match(claim.turn.input, /Dernier livrable « Document édité », version 2, texte complet :\nTexte édité complet./);
+    const plan = (await app.view()).works.find(work => work.id === request.workId)?.attempt?.plan;
+    assert(plan && 'history' in plan);
+    assert.equal(plan.history.entries.some(entry => entry.requestMessageId === first.messageId), false);
+    const expected = [produced.attemptId, ...plan.history.entries.flatMap(entry => {
+      const id = entry.requestMessageId ? attempts.get(entry.requestMessageId) : undefined;
+      return id ? [id] : [];
+    })].sort();
+    app.apply({ type: 'memory.exclude', target: { kind: 'message', messageId: first.messageId } });
+    assert.deepEqual(app.store.finishJob(claim, SUCCEEDED), { kind: 'recorded', state: 'failed' });
+    await app.stop();
+    stopped = true;
+    const db = new DatabaseSync(app.path, { readOnly: true });
+    try {
+      const actual = db.prepare('SELECT reply_attempt_id AS id FROM attempt_replies WHERE attempt_id=? ORDER BY reply_attempt_id').all(claim.attemptId).map(row => row.id);
+      assert.deepEqual(actual, expected);
+    } finally { db.close(); }
+
+  } finally { if (!stopped) await app.stop(); await honcho.close(); }
 });

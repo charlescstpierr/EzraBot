@@ -1,10 +1,11 @@
+import { composeHistory } from './history.js';
 import { createHash } from 'node:crypto';
 import { LIMITS, type ContextPlan, type ContextSize, type ReplyStyle, type TaskStep } from './protocol.js';
 import type { MissionChatContext } from './mission-context.js';
 import type { AutomaticOrigin } from './admission-protocol.js';
 
 /** Bump whenever the rendered text or the budgets change, so equal hashes always mean equal policies. */
-export const CONTEXT_POLICY_VERSION = 11;
+export const CONTEXT_POLICY_VERSION = 12;
 
 export const OUTPUT_SCHEMA = {
   type: 'object',
@@ -111,9 +112,9 @@ export type TaskSource = {
 
 /** One request in the originating thread, with its completed responses attributed to their actors. */
 export type Exchange = {
-  request: { text: string; trigger?: AutomaticOrigin['kind']; attachments: { name: string; chars: number }[] };
-  replies: { by: string; text: string }[];
-  deliverable: { title: string; body: string; n: number } | null;
+  request: { messageId?: string; text: string; trigger?: AutomaticOrigin['kind']; attachments: { name: string; chars: number }[] };
+  replies: { attemptId?: string; by: string; text: string }[];
+  deliverable: { builtOn?: string[]; attemptId?: string; title: string; body: string; n: number } | null;
 };
 
 export type ContextSource = {
@@ -177,17 +178,17 @@ export type ComposedTurn = {
   readonly outputSchema: OutputSchema;
 };
 
-export type ComposedContext = { turn: ComposedTurn; plan: ContextPlan; sha256: string };
+export type ComposedContext = { turn: ComposedTurn; plan: ContextPlan; sha256: string; used: { historyMessageIds: string[]; replyAttemptIds: string[] } };
 
-type Budget = { historyChars: number; fullTurnChars: number; briefTurnChars: number; deliverableChars: number };
+type Budget = { historyChars: number; briefTurnChars: number; deliverableChars: number };
 
 const BUDGETS: Record<ContextSize, Budget> = {
-  short: { historyChars: 4_000, fullTurnChars: 1_500, briefTurnChars: 300, deliverableChars: 6_000 },
-  standard: { historyChars: 12_000, fullTurnChars: 3_000, briefTurnChars: 500, deliverableChars: 12_000 },
-  long: { historyChars: 30_000, fullTurnChars: 6_000, briefTurnChars: 1_000, deliverableChars: 30_000 },
+  short: { historyChars: 4_000, briefTurnChars: 300, deliverableChars: 6_000 },
+  standard: { historyChars: 12_000, briefTurnChars: 500, deliverableChars: 12_000 },
+  long: { historyChars: 30_000, briefTurnChars: 1_000, deliverableChars: 30_000 },
 };
 
-const FULL_EXCHANGES = 2;
+
 
 const REPLY_RULES: Record<ReplyStyle, string> = {
   concise: 'Sois concis, sans préambule ni conclusion ; un contenu demandé reste complet.',
@@ -257,28 +258,6 @@ function clipMiddle(text: string, max: number): { text: string; omitted: number 
   };
 }
 
-type Rendered = { text: string; omitted: number };
-
-function renderExchange(input: {
-  exchange: Exchange; turnChars: number; deliverableShown: boolean;
-}): Rendered {
-  const { exchange, turnChars, deliverableShown } = input;
-  const request = clipMiddle(exchange.request.text, turnChars);
-  const reply = clipMiddle(exchange.replies.map(reply => `${reply.by} : ${reply.text}`).join('\n'), turnChars);
-  const lines = [`${exchange.request.trigger ? TRIGGERS[exchange.request.trigger].label : 'Personne'} : ${request.text}`];
-  for (const file of exchange.request.attachments) {
-    lines.push(`(fichier joint : ${file.name}, ${file.chars} caractères, non renvoyé)`);
-  }
-  lines.push(reply.text);
-  const deliverable = exchange.deliverable;
-  if (deliverable) {
-    lines.push(deliverableShown
-      ? `[Livrable « ${deliverable.title} », version ${deliverable.n} : voir « Dernier livrable » plus bas]`
-      : `[Livrable « ${deliverable.title} », version ${deliverable.n}, ${chars(deliverable.body)} caractères, non inclus]`);
-  }
-  return { text: lines.join('\n'), omitted: request.omitted + reply.omitted };
-}
-
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
   if (value !== null && typeof value === 'object') {
@@ -341,27 +320,9 @@ export function composeContext(source: ContextSource): ComposedContext {
   const baseInstructions = base.join('\n');
 
   const latestWithDeliverable = source.exchanges.findLastIndex(exchange => exchange.deliverable !== null);
-  const kept: string[] = [];
-  let used = 0;
-  let clipped = 0;
-  let full = 0;
-  let brief = 0;
-  for (let i = source.exchanges.length - 1; i >= 0; i -= 1) {
-    const exchange = source.exchanges[i];
-    if (!exchange) break;
-    const tiers = full < FULL_EXCHANGES ? [budget.fullTurnChars, budget.briefTurnChars] : [budget.briefTurnChars];
-    const fitting = tiers
-      .map(turnChars => ({ turnChars, rendered: renderExchange({ exchange, turnChars, deliverableShown: !chosen && i === latestWithDeliverable }) }))
-      .find(candidate => used + chars(candidate.rendered.text) <= budget.historyChars);
-    if (!fitting) break;
-    kept.unshift(fitting.rendered.text);
-    used += chars(fitting.rendered.text);
-    clipped += fitting.rendered.omitted;
-    if (fitting.turnChars === budget.fullTurnChars && full < FULL_EXCHANGES) full += 1;
-    else brief += 1;
-  }
-  const omitted = source.exchanges.length - kept.length;
-
+  const history = composeHistory({ exchanges: source.exchanges, budgetChars: budget.historyChars, olderChars: budget.briefTurnChars,
+    deliverableIndex: chosen ? -1 : latestWithDeliverable });
+  let clipped = history.clippedChars;
   const parts: string[] = [];
   if (orchestrating && source.missions) {
     const facts = clipMiddle(JSON.stringify(source.missions), 8_000);
@@ -382,12 +343,7 @@ export function composeContext(source: ContextSource): ComposedContext {
   } else if (recall && recall.state !== 'empty') {
     parts.push(`Mémoire de ${bot.name} indisponible pour ce tour : réponds sans elle et ne prétends pas te souvenir d’un échange ancien.`, '');
   }
-  if (kept.length || omitted) {
-    parts.push(`Échanges précédents du fil, du plus ancien au plus récent :`);
-    if (omitted) parts.push(`[${omitted} échange${omitted > 1 ? 's' : ''} plus ancien${omitted > 1 ? 's' : ''} non inclus]`);
-    for (const text of kept) parts.push(text, '');
-    if (!kept.length) parts.push('');
-  }
+  if (history.text) parts.push(history.text);
   let deliverablePlan: ContextPlan['deliverable'] = { kind: 'none' };
   const latest = chosen ? undefined : source.exchanges[latestWithDeliverable]?.deliverable;
   if (latest) {
@@ -439,7 +395,8 @@ export function composeContext(source: ContextSource): ComposedContext {
     policyVersion: CONTEXT_POLICY_VERSION,
     contextSize: bot.contextSize,
     replyStyle: bot.replyStyle,
-    exchanges: { full, brief, omitted },
+    exchanges: history.counts,
+    history: history.plan,
     clippedChars: clipped,
     deliverable: deliverablePlan,
     memory: {
@@ -458,5 +415,12 @@ export function composeContext(source: ContextSource): ComposedContext {
   const sha256 = createHash('sha256')
     .update(canonicalJson({ policyVersion: CONTEXT_POLICY_VERSION, baseInstructions, input, outputSchema }), 'utf8')
     .digest('hex');
-  return { turn, plan, sha256 };
+  const used = history.used;
+  if (latest) {
+    const exchange = source.exchanges[latestWithDeliverable];
+    if (exchange?.request.messageId) used.historyMessageIds.push(exchange.request.messageId);
+    if (latest.attemptId) used.replyAttemptIds.push(latest.attemptId);
+    used.replyAttemptIds.push(...(latest.builtOn ?? []));
+  }
+  return { turn, plan, sha256, used };
 }

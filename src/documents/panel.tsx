@@ -25,7 +25,7 @@ import {
 } from "./task";
 import { PrepareAction } from "./source";
 import { History, Publication, Reader } from "./versions";
-import { AcceptButton, NonTaskWorkControls, workNote } from "./work";
+import { AcceptButton, NonTaskWorkControls, WorkContinuity, workNote } from "./work";
 
 const UNSAVED =
   "Enregistrez ou abandonnez d’abord votre saisie : elle n’est pas dans la version enregistrée.";
@@ -107,6 +107,7 @@ function Panel({
         </p>
       )}
 
+      <WorkContinuity port={port} work={work} />
       <section className="ez-doc-section">
         <h3>
           {shown

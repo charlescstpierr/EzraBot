@@ -80,7 +80,8 @@ test('search ignores accents and case, needs every term, and points back to the 
 });
 
 test('search covers the current version of a deliverable only, and leads to that version', () => {
-  const work: WorkView = { threadBotId: 'mino', taskId: null,
+  const work: WorkView = {
+    next: { kind: "none", reason: "Document prêt" }, lastFact: { kind: "none" }, threadBotId: 'mino', taskId: null,
     id: 'w1', botId: 'atlas', requestMessageId: 'm1', state: 'review', title: 'Plan', createdAt: '', updatedAt: '', attempt: null, attempts: 1, proposals: [],
     versions: [
       { id: 'v1', n: 1, title: 'Plan', body: 'ANCIENNE formulation', source: 'result', restoredFromN: null, createdAt: '2026-11-01T10:00:00Z' },

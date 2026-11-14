@@ -179,6 +179,7 @@ test("approval with unknown response is surfaced and never automatically retried
     works: [
       {
         id: "w",
+        next: { kind: "none", reason: "Terminé" }, lastFact: { kind: "none" },
         threadBotId: "bot",
         botId: "bot",
         taskId: null,

@@ -337,6 +337,10 @@ export function Work({
       <Text style={s.muted}>
         {label(work.state)}{work.attempt?.stage ? ` · ${label(work.attempt.stage)}` : ""}{work.attempt?.error ? ` · ${work.attempt.error}` : ""}
       </Text>
+      <Text style={s.muted}>Dernière tentative {work.attempt?.n ?? 0}. Même travail dans ce fil.</Text>
+      <Text style={s.text}>{work.lastFact.kind === 'none' ? 'Aucun résultat confirmé.' : work.lastFact.kind === 'execution' ? `Action enregistrée · ${work.lastFact.state}. ${work.lastFact.state === 'unknown' ? 'Résultat inconnu. Action non renvoyée.' : ''} Gérer le reçu et son compte rendu sur le PC.` : work.lastFact.kind === 'version' ? `Version ${work.lastFact.n} enregistrée ci-dessous.` : 'Réponse enregistrée dans le fil.'}</Text>
+      {(work.next.kind === 'new_request' || (work.next.kind === 'none' && work.state !== 'review' && work.state !== 'done')) && <Text style={s.muted}>{work.next.reason}</Text>}
+      {work.next.kind === 'document' && <Text style={s.muted}>Les commandes de ce travail documentaire figurent ci-dessous. Le bouton « Continuer » permet une reprise quand il est disponible.</Text>}
       {dirty && (latest?.id ?? null) !== base && (
         <Text style={s.text}>
           Une nouvelle version existe sur le PC. Votre brouillon conserve sa
@@ -406,14 +410,14 @@ export function Work({
                   task?.status === "running" ||
                   task?.status === "queued"
                 : type === "work.retry"
-                  ? !!task
+                  ? work.next.kind !== "retry"
                   : work.state === "cancelled" || work.state === "done"
             }
             title={
               type === "work.cancel"
                 ? "Annuler"
                 : type === "work.retry"
-                  ? "Réessayer sur le PC"
+                  ? "Reprendre ce travail"
                   : "Valider le résultat"
             }
             onPress={() => void send({ type, workId: work.id })}

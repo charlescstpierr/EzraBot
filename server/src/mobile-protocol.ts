@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CommandResultSchema, CommandSchema, DeletionCountsSchema, MentionSpanSchema, TASK_STATUSES, WORK_STATES } from './protocol.js';
+import { WorkNextSchema, WorkFactSchema, CommandResultSchema, CommandSchema, DeletionCountsSchema, MentionSpanSchema, TASK_STATUSES, WORK_STATES } from './protocol.js';
 
 const id = z.string();
 const choice = z.object({ model: id.nullable(), effort: id.nullable(), speed: id });
@@ -20,7 +20,7 @@ export const MobileSnapshotSchema = z.object({
     memories: z.array(z.object({ id, text: id, updatedAt: id })), memoryChars: z.number(), memoryScope: z.object({ label: id, state: id }).nullable().optional(), deletion: DeletionCountsSchema })),
   messages: z.array(z.object({ id, threadBotId: id, botId: id, role: z.enum(['user', 'assistant']), text: id, workId: id, createdAt: id, mentions: z.array(MentionSpanSchema), attachments: z.array(z.object({ name: id, chars: z.number() })),
     handoff: z.object({ goal: id, coordinated: z.boolean(), why: id }).nullable().optional() })),
-  works: z.array(z.object({ id, threadBotId: id, botId: id, taskId: id.nullable(), requestMessageId: id, state: z.enum(WORK_STATES), title: id, createdAt: id, updatedAt: id,
+  works: z.array(z.object({ next: WorkNextSchema, lastFact: WorkFactSchema, id, threadBotId: id, botId: id, taskId: id.nullable(), requestMessageId: id, state: z.enum(WORK_STATES), title: id, createdAt: id, updatedAt: id,
     attempt: z.object({ n: z.number(), state: id, stage: id.nullable(), error: id.nullable(), used: choice.nullable() }).nullable(),
     versions: z.array(version), proposals: z.array(proposal) })),
   tasks: z.array(z.object({ id, threadBotId: id, authorBotId: id, reviewerBotId: id.nullable(), authorWorkId: id, requestMessageId: id,

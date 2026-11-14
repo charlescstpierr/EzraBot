@@ -45,7 +45,9 @@ function planFacts(plan: ContextPlan): Fact[] {
     ],
     [
       "Échanges",
-      `${count(plan.exchanges.full)} complets, ${count(plan.exchanges.brief)} abrégés, ${count(plan.exchanges.omitted)} omis`,
+      "history" in plan
+        ? `${count(plan.exchanges.full)} textes récents complets, ${plural(plan.exchanges.brief, "extrait", "extraits")}, ${count(plan.exchanges.omitted)} omis. Pièces historiques non renvoyées. ${count(plan.history.usedChars)} / ${count(plan.history.budgetChars)} points de code Unicode`
+        : `${count(plan.exchanges.full)} au palier ancien, ${count(plan.exchanges.brief)} abrégés, ${count(plan.exchanges.omitted)} omis. Intégralité non garantie`,
     ],
     [
       "Document joint",
@@ -93,8 +95,21 @@ function attemptFacts(work: WorkView, name: BotNamer): Fact[] {
         : "non confirmé par Codex",
     ],
   );
-  if (attempt.plan) facts.push(...planFacts(attempt.plan));
-  else facts.push(["Contexte envoyé", "non enregistré pour cet appel"]);
+  if (attempt.plan) {
+    facts.push(...planFacts(attempt.plan));
+    if ("history" in attempt.plan)
+      for (const entry of attempt.plan.history.entries) {
+        facts.push([
+          entry.kind === "recent" ? "Échange récent" : "Extrait ancien",
+          entry.components
+            .map(
+              (c) =>
+                `${c.by} · ${count(c.sourceChars - c.omittedChars)} / ${count(c.sourceChars)} points de code, ${count(c.omittedChars)} omis`,
+            )
+            .join(" ; "),
+        ]);
+      }
+  } else facts.push(["Contexte envoyé", "non enregistré pour cet appel"]);
   if (usage)
     facts.push(
       ["Jetons de la dernière requête", tokens(usage.last)],
@@ -134,8 +149,8 @@ export function Diagnostics({
       <summary>Diagnostic du dernier appel</summary>
       {[work, ...(review ? [review] : [])].map((each) => (
         <dl key={each.id} className="ez-doc-facts" data-work-id={each.id}>
-          {attemptFacts(each, name).map(([term, value]) => (
-            <div key={term}>
+          {attemptFacts(each, name).map(([term, value], index) => (
+            <div key={`${term}-${index}`}>
               <dt>{term}</dt>
               <dd>{value}</dd>
             </div>

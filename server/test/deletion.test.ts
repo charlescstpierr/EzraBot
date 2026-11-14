@@ -145,10 +145,12 @@ test('deleting a bot erases its thread, guests and memory, keeps its guest contr
   assert.deepEqual(after.carnet, shown.carnet.filter(p => p.threadBotId !== 'nova'));
   const strip = (w: StoreView['works'][number]) => ({
     ...w,
+    next: w.botId === 'nova' ? null : w.next,
     ...(w.id === space.pendingWorkId ? { state: null, updatedAt: null } : {}),
     attempt: w.botId === 'nova' && w.attempt ? { ...w.attempt, plan: null } : w.attempt,
   });
   assert.deepEqual(after.works.map(strip), otherWorks.map(strip));
+  assert(after.works.filter(w => w.botId === 'nova').every(w => w.next.kind === 'none'), 'deleted actors no longer offer retry');
   assert.equal(after.works.find(w => w.id === space.pendingWorkId)?.state, 'cancelled', 'a waiting guest call never runs');
   assert.equal(after.works.find(w => w.id === space.novaGuestWorkId)?.attempt?.plan, null, 'its kept attempt no longer describes its memory or settings');
   const pixelShared = after.works.find(w => w.requestMessageId === space.shared.messageId && w.botId === 'pixel');

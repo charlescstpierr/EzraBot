@@ -133,13 +133,14 @@ const freePort = () =>
     });
   });
 
-async function openLab(page: Page) {
+async function openLab(page: Page, serviceTools = false) {
   const store: Store = openStore({
     path: join(
       mkdtempSync(join(tmpdir(), "ezrabot-documents-")),
       "mino.sqlite",
     ),
     mascots: loadMascots(join(root, "server/assets/mascots.json")),
+    serviceTools,
   });
   const chat = controlledEngine();
   const doc = controlledEngine();
@@ -178,6 +179,64 @@ async function openLab(page: Page) {
       body: `<!doctype html><html lang="fr"><head><meta charset="UTF-8"><meta name="mino-csrf" content="${CSRF}"><link rel="stylesheet" href="/__documents/harness.css"></head><body><div id="root"></div><script type="module" src="/__documents/harness.js"></script></body></html>`,
     });
   });
+  if (process.env.CONTINUITY_MOBILE) {
+    const mobile = await build({
+      entryPoints: [join(root, "tests/fixtures/continuity-mobile-harness.jsx")],
+      bundle: true,
+      format: "esm",
+      target: "es2022",
+      jsx: "automatic",
+      write: false,
+      alias: {
+        "react-native-svg": join(
+          root,
+          "server/mobile/node_modules/react-native-svg/lib/module/ReactNativeSVG.web.js",
+        ),
+        "@react-native/assets-registry/registry": join(
+          root,
+          "server/mobile/node_modules/react-native-web/dist/modules/AssetRegistry/index.js",
+        ),
+        "react-native": join(
+          root,
+          "server/mobile/node_modules/react-native-web",
+        ),
+        react: join(root, "node_modules/react"),
+        "react-dom": join(root, "node_modules/react-dom"),
+      },
+      resolveExtensions: [
+        ".web.tsx",
+        ".web.ts",
+        ".web.js",
+        ".tsx",
+        ".ts",
+        ".js",
+        ".json",
+      ],
+      plugins: [
+        {
+          name: "web-excludes-android-touch-sound",
+          setup(builder) {
+            builder.onResolve(
+              { filter: /\/fabric\/NativeSvgSoundModule$/ },
+              (args) => ({ path: args.path, external: true }),
+            );
+          },
+        },
+      ],
+      define: {
+        "process.env.NODE_ENV": '"production"',
+        __DEV__: "false",
+        global: "globalThis",
+      },
+      logLevel: "silent",
+    });
+    await page.route(`${origin}/__continuity-mobile**`, (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: `<!doctype html><html><meta name="viewport" content="width=device-width, initial-scale=1"><body><div id="root"></div><script type="module">${mobile.outputFiles[0]?.text}</script></body></html>`,
+      }),
+    );
+  }
   const posted: Record<string, unknown>[] = [];
   page.on("request", (request) => {
     if (request.method() === "POST" && request.url().endsWith("/api/commands"))
@@ -822,4 +881,337 @@ test("un relais montre chaque étape, les échanges transmis et le diagnostic du
     "Bot" + "Mino",
     "Bot" + "Nova",
   ]);
+});
+
+test("continuité29 garde le travail après rechargement et attribue les coupes du contexte", async ({
+  page,
+  lab,
+}, info) => {
+  for (const [botId, name] of [
+    ["mino", "Ana"],
+    ["nova", "Bob"],
+    ["atlas", "Cyd"],
+  ]) {
+    lab.dispatch({ type: "bot.update", botId, name });
+  }
+  const text = "@Ana @Bob @Cyd " + "Question synthétique. ".repeat(250);
+  const seeded = lab.store.dispatch({
+    type: "message.send",
+    requestId: randomUUID(),
+    botId: "mino",
+    text,
+    attachments: [],
+    mentions: [
+      { botId: "mino", start: 0, end: 4 },
+      { botId: "nova", start: 5, end: 9 },
+      { botId: "atlas", start: 10, end: 14 },
+    ],
+  });
+  expect(seeded.ok).toBe(true);
+  for (let i = 0; i < 3; i += 1) {
+    const claim = lab.store.claimNext("chat");
+    expect(claim).toBeTruthy();
+    if (!claim) throw Error("Tentative synthétique absente");
+    lab.store.finishJob(claim, {
+      kind: "succeeded",
+      reply: { reply: "Réponse synthétique. ".repeat(400), deliverable: null },
+      used: USED,
+      threadId: "qa-source",
+      turnId: `qa-source-${i}`,
+    });
+  }
+  const sent = lab.dispatch({
+    type: "message.send",
+    botId: "mino",
+    text: "Reprendre cette étude synthétique",
+    attachments: [],
+  });
+  if (sent.kind !== "message") throw Error("Travail absent");
+  await lab.open(`?workId=${sent.workId}`);
+  const call = await lab.chat.next();
+  call.finish(lab.failure("turn_failed"));
+  await expect.poll(() => lab.work(sent.workId).state).toBe("failed");
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Relancer", exact: true }),
+  ).toBeVisible();
+  await page.getByText("Diagnostic du dernier appel", { exact: true }).click();
+  await expect(page.getByText(/politique (11|12)/)).toBeVisible();
+  if (!process.env.CONTINUITY_BASELINE) {
+    for (const name of ["Ana", "Bob", "Cyd"])
+      await expect(page.locator("dl.ez-doc-facts")).toContainText(name);
+    await expect(page.getByText(/0 textes récents complets/)).toBeVisible();
+  }
+  await page.screenshot({
+    path: info.outputPath("continuity29-contexte-pc.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: info.outputPath("continuity29-contexte-etroit.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Relancer", exact: true }).click();
+  const retried = await lab.chat.next();
+  expect(retried.input.turn.input).toContain(
+    "Reprendre cette étude synthétique",
+  );
+  expect(lab.work(sent.workId).attempt?.n).toBe(2);
+  expect(lab.work(sent.workId).requestMessageId).toBe(sent.messageId);
+  retried.finish({
+    kind: "succeeded",
+    reply: {
+      reply: "Étude reprise",
+      deliverable: {
+        title: "Étude synthétique",
+        body: "Résultat confirmé après reprise explicite.",
+      },
+    },
+    used: USED,
+    threadId: "qa-new-thread",
+    turnId: "qa-retry",
+  });
+  await expect.poll(() => lab.work(sent.workId).state).toBe("review");
+  await page.reload();
+  await expect(
+    page
+      .getByText("Résultat confirmé après reprise explicite.", { exact: true })
+      .first(),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("continuity29-reprise.png"),
+    fullPage: true,
+  });
+});
+
+base(
+  "continuité29 un effet inconnu ne propose aucune relance du travail",
+  async ({ page }, info) => {
+    const { ACCOUNT_A, SEND_EMAIL } =
+      await import("../server/test/fixtures/fake-composio");
+    const lab = await openLab(page, true);
+    try {
+      const live = { account: ACCOUNT_A, tools: [SEND_EMAIL] };
+      expect(
+        lab.store.tools.apply(
+          {
+            type: "tools.grant",
+            requestId: randomUUID(),
+            botId: "mino",
+            accountId: ACCOUNT_A.id,
+            toolSlugs: [SEND_EMAIL.slug],
+          },
+          live,
+        ).ok,
+      ).toBe(true);
+      const sent = lab.store.dispatch({
+        type: "message.send",
+        requestId: randomUUID(),
+        botId: "mino",
+        text: "Action synthétique au résultat inconnu",
+        attachments: [],
+      });
+      if (!sent.ok || sent.result.kind !== "message")
+        throw Error("Travail absent");
+      const workId = sent.result.workId;
+      const claim = lab.store.claimNext("chat");
+      if (!claim) throw Error("Tentative absente");
+      expect(
+        lab.store.tools.propose(claim, {
+          callId: "qa-tool",
+          tool: SEND_EMAIL.slug,
+          arguments: {
+            to: "personne@exemple.invalid",
+            subject: "Synthétique",
+            body: "Preuve locale",
+          },
+        }).success,
+      ).toBe(true);
+      lab.store.finishJob(claim, {
+        kind: "succeeded",
+        reply: {
+          reply: "Proposition synthétique enregistrée",
+          deliverable: null,
+        },
+        used: USED,
+        threadId: "qa-proposal",
+        turnId: "qa-tool",
+      });
+      const proposal = lab.store.tools
+        .view({ state: "ready" })
+        .proposals.at(-1);
+      if (!proposal) throw Error("Proposition absente");
+      const approved = lab.store.tools.apply(
+        {
+          type: "tools.approve",
+          requestId: randomUUID(),
+          proposalId: proposal.id,
+          fingerprint: proposal.fingerprint,
+        },
+        live,
+      );
+      if (
+        !approved.ok ||
+        approved.result.kind !== "decision" ||
+        !approved.result.executionId
+      )
+        throw Error("Exécution absente");
+      const executionId = approved.result.executionId;
+      const permit = lab.store.tools.claimDispatch(executionId, {
+        kind: "found",
+        account: ACCOUNT_A,
+      });
+      if (!permit) throw Error("Permis absent");
+      lab.store.tools.settle(permit, { kind: "unknown", category: "timeout" });
+      const report = lab.store.claimNext("chat");
+      if (!report) throw Error("Compte rendu absent");
+      lab.store.finishJob(report, engineFailure("turn_failed"));
+      expect(lab.work(workId).state).toBe("done");
+      await lab.open(`?workId=${workId}`);
+      await page.reload();
+      if (!process.env.CONTINUITY_BASELINE) {
+        await expect(
+          page.getByText(/Résultat inconnu\. Action non renvoyée/),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Relancer", exact: true }),
+        ).toHaveCount(0);
+      }
+      await page.screenshot({
+        path: info.outputPath("continuity29-inconnu-pc.png"),
+        fullPage: true,
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({
+        path: info.outputPath("continuity29-inconnu-etroit.png"),
+        fullPage: true,
+      });
+      if (process.env.CONTINUITY_MOBILE) {
+        await page.goto(`${lab.origin}/__continuity-mobile?workId=${workId}`);
+        await expect(
+          page.getByText("Action synthétique au résultat inconnu", {
+            exact: true,
+          }),
+        ).toBeVisible();
+        if (!process.env.CONTINUITY_BASELINE) {
+          await expect(
+            page.getByText(/Résultat inconnu. Action non renvoyée./),
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", {
+              name: "Reprendre ce travail",
+              exact: true,
+            }),
+          ).toBeDisabled();
+        }
+        await page.screenshot({
+          path: info.outputPath("continuity29-inconnu-mobile-web.png"),
+          fullPage: true,
+        });
+      }
+      expect(
+        lab.store.tools.claimDispatch(executionId, {
+          kind: "found",
+          account: ACCOUNT_A,
+        }),
+      ).toBeNull();
+    } finally {
+      await lab.close();
+    }
+  },
+);
+
+test("continuité29 une validation possible ne porte pas un refus de relance", async ({
+  page,
+  lab,
+}, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = lab.dispatch({
+    type: "message.send",
+    botId: "mino",
+    text: "Document synthétique à valider",
+    attachments: [],
+  });
+  if (sent.kind !== "message") throw Error("Travail absent");
+  (await lab.chat.next()).finish({
+    kind: "succeeded",
+    reply: {
+      reply: "Prêt à relire",
+      deliverable: { title: "Validation synthétique", body: "Document prêt." },
+    },
+    used: USED,
+    threadId: "qa-validation",
+    turnId: "qa-validation",
+  });
+  await expect.poll(() => lab.work(sent.workId).state).toBe("review");
+  await lab.open(`?workId=${sent.workId}`);
+  await expect(
+    page.getByRole("button", { name: "Valider le document", exact: true }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: info.outputPath("validation-possible-pc.png"),
+    fullPage: true,
+  });
+  await expect(
+    page.getByText(/Ce travail ne peut pas changer d’état de cette façon/),
+  ).toHaveCount(0);
+  if (process.env.CONTINUITY_MOBILE) {
+    await page.goto(`${lab.origin}/__continuity-mobile?workId=${sent.workId}`);
+    await expect(
+      page.getByRole("button", { name: "Valider le résultat", exact: true }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: info.outputPath("validation-possible-mobile.png"),
+      fullPage: true,
+    });
+    await expect(
+      page.getByText(/Ce travail ne peut pas changer d’état de cette façon/),
+    ).toHaveCount(0);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("continuité29 le téléphone indique les commandes documentaires présentes", async ({
+  page,
+  lab,
+}, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = lab.dispatch({
+    type: "message.send",
+    botId: "mino",
+    text: "Tâche synthétique à poursuivre",
+    attachments: [],
+    document: { reviewerBotId: null },
+  });
+  if (sent.kind !== "message" || !sent.taskId) throw Error("Tâche absente");
+  (await lab.doc.next()).finish(lab.failure("turn_failed"));
+  await expect
+    .poll(
+      () =>
+        lab.store.view().tasks.find((task) => task.id === sent.taskId)
+          ?.canContinue,
+    )
+    .toBe(true);
+  await lab.open(`?workId=${sent.workId}`);
+  if (process.env.CONTINUITY_MOBILE) {
+    await page.goto(`${lab.origin}/__continuity-mobile?workId=${sent.workId}`);
+    await expect(
+      page.getByRole("button", { name: "Continuer", exact: true }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: info.outputPath("continuer-sur-mobile.png"),
+      fullPage: true,
+    });
+    await expect(page.getByText(/Gérer la suite sur le PC/)).toHaveCount(0);
+    await expect(page.getByText(/se reprend avec « Reprendre »/)).toHaveCount(
+      0,
+    );
+  }
+  lab.dispatch({ type: "task.continue", taskId: sent.taskId });
+  const call = await lab.doc.next();
+  expect(lab.work(sent.workId).attempt?.n).toBe(2);
+  call.finish(lab.failure("turn_failed"));
+  expect(errors).toEqual([]);
 });

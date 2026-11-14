@@ -50,3 +50,9 @@ Le ZIP des journaux contient aussi les trois conceptions comparées et le contra
 Les [preuves des corrections](https://github.com/charlescstpierr/EzraBot/releases/tag/preuves-revue-4-20261112) ciblent le commit `2a62a5ef0641ea530036b38f4606ca61799934de`. Elles contiennent les captures mobiles avant et après, une vidéo de reprise, les résultats des 48 contrôles et les journaux rouges et verts.
 
 La [recette GitHub Actions du même commit](https://github.com/charlescstpierr/EzraBot/actions/runs/43164995715) a réussi. Types, synchronisation mobile, compilation, tests serveur, tests d’interface et téléversement des preuves y passent.
+
+## Continuité du travail et contexte de la politique 12
+
+`server/test/context.test.ts` vérifie les deux récents, les attributions séparées, les graphèmes, les trois enveloppes, les sources du livrable séparé et la lecture des plans historiques. `server/test/memory-flow.test.ts` retire un original présent dans un extrait ancien pendant un appel contrôlé et vérifie l'absence de publication. Les tests du store et des outils vérifient l'identité après redémarrage et le refus de renvoyer un effet inconnu.
+
+Les parcours `continuité29` dans `tests/documents-parcours.spec.ts` utilisent SQLite et un moteur contrôlé. Ils montrent les coupes et la reprise après rechargement, puis le refus de relancer un travail lié à une action inconnue. `CONTINUITY_MOBILE=1` ajoute la capture du composant natif `Work` rendu par React Native Web. Cette preuve exige les dépendances mobiles installées. Elle ne représente pas un essai sur téléphone physique.
