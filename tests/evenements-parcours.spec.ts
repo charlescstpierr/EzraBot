@@ -42,6 +42,10 @@ test("un abonnement se crée inactif, refuse avant activation, crée une seule d
   mkdirSync(EVIDENCE, { recursive: true });
   await page.goto(QA);
   await page.getByRole("button", { name: "Routines" }).click();
+  await page
+    .getByRole("button", { name: /^Événements de service/ })
+    .scrollIntoViewIfNeeded();
+  await shot(page, "0-routines-avec-evenements");
   await page.getByRole("button", { name: /^Événements de service/ }).click();
   await expect(
     page.getByRole("heading", {
@@ -138,6 +142,7 @@ test("un abonnement se crée inactif, refuse avant activation, crée une seule d
     })
     .click();
   await expect.soft(card).toBeInViewport();
+  await shot(page, "3bis-abonnement-focalise");
   await card.getByRole("button", { name: "Modifier" }).click();
   const edit = page.getByRole("form", { name: "Modifier l’abonnement" });
   await expect(edit.getByLabel("Identifiant du déclencheur")).toBeDisabled();

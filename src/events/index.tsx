@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Ban,
@@ -266,6 +266,10 @@ function SubscriptionCard({
 }) {
   const [editing, setEditing] = useState(false),
     [revoking, setRevoking] = useState(false);
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focused) card.current?.scrollIntoView({ block: "start" });
+  }, [focused]);
   const action = useAction(port);
   const bot = port.view.bots.find((b) => b.id === subscription.botId);
   const run = (
@@ -288,6 +292,7 @@ function SubscriptionCard({
   const account = subscription.account;
   return (
     <article
+      ref={card}
       className={focused ? "ez-event focused" : "ez-event"}
       aria-label={`Abonnement ${subscription.triggerSlug} de ${bot?.name ?? "personnage supprimé"}`}
     >
@@ -429,7 +434,7 @@ function SubscriptionCard({
             </button>
           ))}
       </div>
-      {revoking && (
+      {revoking && subscription.state !== "revoked" && (
         <p className="ez-event-note">
           La révocation est définitive. Ce déclencheur reste lié à cet
           abonnement : il ne pourra servir à aucun autre personnage. Les
@@ -437,7 +442,7 @@ function SubscriptionCard({
         </p>
       )}
       {action.feedback}
-      {editing && (
+      {editing && subscription.state !== "revoked" && (
         <SubscriptionForm
           port={port}
           subscription={subscription}

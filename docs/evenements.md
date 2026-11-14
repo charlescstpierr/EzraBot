@@ -68,7 +68,7 @@ Le contenu reçu reste une donnée non fiable. Il ne choisit ni le personnage, n
 
 ## Téléphone
 
-Le téléphone voit les abonnements de chaque personnage : type, état, compte, compteurs du jour et dernière décision. Il ne reçoit ni la consigne, ni les champs, ni les identifiants. Il peut seulement mettre en pause.
+Le téléphone voit les abonnements de chaque personnage : type, état, compte, compteurs du jour et dernière décision. Cette liste ne contient ni la consigne configurée, ni la liste des champs, ni les identifiants du fournisseur. Le téléphone peut seulement mettre un abonnement en pause. Les demandes admises restent visibles dans son fil, avec leur consigne et les valeurs copiées, comme sur le PC.
 
 ## Personnage supprimé
 

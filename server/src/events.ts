@@ -172,7 +172,7 @@ export function createEvents(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'trans
   };
   const requireTransport = (row: Row | null): string => {
     const transport = deps.transport;
-    if (transport === null) deps.refuse('invalid_transition', 'Ce serveur ne reçoit aucun événement : sa réception n’est pas configurée. Rien n’a été activé.');
+    if (transport === null) deps.refuse('invalid_transition', `Ce serveur ne reçoit aucun événement : sa réception n’est pas configurée. Rien n’a été ${row ? 'activé' : 'créé'}.`);
     if (row && str(row, 'transport') !== transport) deps.refuse('invalid_transition', `Cet abonnement attend le transport « ${str(row, 'transport')} », mais ce serveur reçoit « ${transport} ». Rien n’a été activé.`);
     return transport;
   };
