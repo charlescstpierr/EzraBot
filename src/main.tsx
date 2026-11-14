@@ -40,6 +40,7 @@ import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
 import { CharacterPanel, CharacterCreate } from "./characters";
 import { ToolCards, ToolConnections } from "./tools";
+import { ResultsPage } from "./results";
 import "./style.css";
 function browserStorage(
   kind: "localStorage" | "sessionStorage",
@@ -299,6 +300,7 @@ function App() {
     { id: "chat", label: "Conversation", Icon: MessageCircle },
     { id: "missions", label: "Missions", Icon: Sparkles },
     { id: "projects", label: "Projets", Icon: Folder },
+    { id: "results", label: "Tous mes résultats", Icon: BookOpen },
     { id: "carnet", label: "Carnet", Icon: BookOpen },
     { id: "characters", label: "Personnages", Icon: Users },
   ];
@@ -342,6 +344,7 @@ function App() {
               onClick={() => {
                 if (id === "chat") openHome();
                 else if (id === "missions") go({ page: "missions" });
+                else if (id === "results") go({ page: "results" });
                 else if (id === "projects") go({ page: "projects" });
                 else if (id === "characters")
                   go({
@@ -548,6 +551,8 @@ function App() {
                 drafts={drafts}
                 versionId={route.versionId}
               />
+            ) : route.page === "results" ? (
+              <ResultsPage port={port} unavailable={Boolean(offline)} />
             ) : route.page === "projects" ? (
               <ProjectsPage port={port} />
             ) : route.page === "missions" ? (
