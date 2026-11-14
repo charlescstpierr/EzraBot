@@ -390,7 +390,11 @@ export function openSendBook(options: {
       .sort(byAge);
     if (same.some((d) => !sameCommand(d.body.command, f.command)))
       return blocked("conflict");
-    if (!same.length && slots(project(departures)) >= capacity) {
+    const visible = project(departures);
+    if (
+      !visible.some((entry) => entry.command.requestId === requestId) &&
+      slots(visible) >= capacity
+    ) {
       status = "saturated";
       return blocked(status);
     }
