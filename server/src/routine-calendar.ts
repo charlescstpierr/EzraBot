@@ -97,11 +97,6 @@ export function offsetAt(at: number, zone: Zone): number {
   return Math.round((Date.UTC(seen.year, seen.month - 1, seen.day, seen.hour, seen.minute, seen.second) - (at - (at % 1000))) / 60_000);
 }
 
-/**
- * Every instant whose wall clock in `zone` reads `date` at `time`, earliest first: none in a gap, two in a fold.
- * Offsets stay within ±15 hours and no offset lasts under an hour, so hourly samples over ±15 hours meet every
- * offset an answer can have.
- */
 const wallInstant = (date: LocalDate, time: ClockTime) => civil(date) + Number(time.slice(0, 2)) * HOUR + Number(time.slice(3, 5)) * 60_000;
 
 /**

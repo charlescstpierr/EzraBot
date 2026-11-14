@@ -43,6 +43,7 @@ const refused = (outcome: DispatchOutcome) => {
 
 type Fields = Omit<CommandOf<'routine.create'>, 'type' | 'requestId'>;
 const DAILY: Fields = { botId: 'nova', text: 'Fais le point du matin.', time: '08:30', weekdays: [1, 2, 3, 4, 5, 6, 7], zone: 'America/Toronto', endsOn: '2026-12-31', cap: 30 };
+const { botId: _botId, ...SCHEDULE } = DAILY;
 
 function create(store: Store, fields: Partial<Fields> = {}): string {
   const result = ok(store.dispatch({ type: 'routine.create', requestId: rid(), ...DAILY, ...fields }));
@@ -215,8 +216,7 @@ test('an edit never admits a date again, and a zone change cannot bring two admi
     s.set('2026-11-16T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 1);
     const update = (fields: Partial<Fields>, expectedRevision: number) => {
-      const { botId: _botId, ...rest } = { ...DAILY, ...fields };
-      return s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision, ...rest });
+      return s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision, ...SCHEDULE, ...fields });
     };
     ok(update({ time: '09:00', text: 'Nouveau texte.' }, 1));
     assert.equal(refused(update({ time: '09:30' }, 1)).code, 'stale_base');
@@ -450,9 +450,8 @@ test('the lifetime cap ends the routine; an edit can neither reset the count nor
     s.set('2026-11-16T13:30:00Z');
     s.store.tickRoutines('2026-11-16T12:00:00Z');
     s.store.dispatch({ type: 'work.cancel', requestId: rid(), workId: s.store.view().works[0]?.id ?? '' });
-    const { botId: _botId, ...fields } = DAILY;
-    assert.equal(refused(s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...fields, cap: 1 })).code, 'limit_reached');
-    ok(s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...fields, cap: 2, text: 'Autre texte' }));
+    assert.equal(refused(s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...SCHEDULE, cap: 1 })).code, 'limit_reached');
+    ok(s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...SCHEDULE, cap: 2, text: 'Autre texte' }));
     assert.equal(routineOf(s.store, routineId).admitted, 1);
     s.set('2026-11-17T13:30:00Z');
     assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 1);
@@ -526,11 +525,10 @@ test('routines never write a proposal, a decision, an action or a reservation, w
     const t = space({ path: s.path, at: '2026-11-16T12:00:00Z' });
     try {
       const routineId = create(t.store, { botId: 'pixel' });
-      const { botId: _botId, ...fields } = DAILY;
       const steps: [string, () => void][] = [
         ['activate', () => activate(t.store, routineId)],
         ['tick', () => { t.set('2026-11-16T13:30:00Z'); assert.equal(t.store.tickRoutines('2026-11-16T12:00:00Z'), 0, 'the earlier proposal is not the routine’s'); }],
-        ['edit', () => ok(t.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...fields, time: '09:00' }))],
+        ['edit', () => ok(t.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...SCHEDULE, time: '09:00' }))],
         ['pause', () => ok(t.store.dispatch({ type: 'routine.pause', requestId: rid(), routineId }))],
         ['resume', () => ok(t.store.dispatch({ type: 'routine.resume', requestId: rid(), routineId }))],
         ['delete', () => ok(t.store.dispatch({ type: 'routine.delete', requestId: rid(), routineId }))],
@@ -555,13 +553,14 @@ test('deleting a character erases its routines and their private texts; another 
   const secret = 'Texte privé de routine 7f3a9c';
   const routineId = create(s.store, { text: secret });
   activate(s.store, routineId);
-  ok(s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...(({ botId: _b, ...f }) => f)(DAILY), text: `${secret} révisé` }));
+  ok(s.store.dispatch({ type: 'routine.update', requestId: rid(), routineId, expectedRevision: 1, ...SCHEDULE, text: `${secret} révisé` }));
   const kept = create(s.store, { botId: 'pixel', text: 'Routine de Pixel' });
   s.set('2026-11-16T13:30:00Z');
   assert.equal(s.store.tickRoutines('2026-11-16T12:00:00Z'), 1);
   const nova = s.store.view().bots.find(bot => bot.id === 'nova');
-  assert.equal(nova?.deletion.routines, 1);
-  const deleted = s.store.dispatch({ type: 'bot.delete', requestId: rid(), botId: 'nova', confirmName: 'Nova', expected: nova?.deletion ?? DAILY as never });
+  assert(nova);
+  assert.equal(nova.deletion.routines, 1);
+  const deleted = s.store.dispatch({ type: 'bot.delete', requestId: rid(), botId: 'nova', confirmName: 'Nova', expected: nova.deletion });
   assert.equal(ok(deleted).kind, 'botDeleted');
   assert.deepEqual(s.store.view().routines.map(r => r.id), [kept]);
   s.store.close();
