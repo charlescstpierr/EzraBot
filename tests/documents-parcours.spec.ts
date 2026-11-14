@@ -936,7 +936,7 @@ test("continuité29 garde le travail après rechargement et attribue les coupes 
     page.getByRole("button", { name: "Relancer", exact: true }),
   ).toBeVisible();
   await page.getByText("Diagnostic du dernier appel", { exact: true }).click();
-  const plan = lab.work(sent.workId).attempts.at(-1)?.plan;
+  const plan = lab.work(sent.workId).attempt?.plan;
   if (!plan) throw Error("Plan de contexte absent");
   await expect(page.getByText(`politique ${plan.policyVersion}`)).toBeVisible();
   if (!process.env.CONTINUITY_BASELINE) {
