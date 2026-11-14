@@ -1149,3 +1149,33 @@ test("chaque départ a sa propre identité et son résultat ne copie aucun texte
     expect(final).not.toContain(a.draftNonce);
   }
 });
+
+test("un reçu seulement retiré ne contourne pas la capacité active", async () => {
+  const { storage } = browser();
+  const retired = input("Reçu retiré"),
+    pending = input("Demande incertaine");
+  const first = page(storage, async () => accepted("retired"), {
+    capacity: 1,
+    ttlMs: 0,
+  });
+  await first.run(retired);
+  first.collect([retired.command.requestId]);
+  expect(page(storage).snapshot()).toEqual([]);
+  const sent: Sendable[] = [];
+  const full = page(
+    storage,
+    async (command) => {
+      sent.push(command);
+      return unknown;
+    },
+    { capacity: 1, ttlMs: 0 },
+  );
+  await full.run(pending);
+  const before = full.snapshot();
+  expect(await full.run(retired)).toEqual({
+    kind: "blocked",
+    reason: "saturated",
+  });
+  expect(sent).toEqual([pending.command]);
+  expect(full.snapshot()).toEqual(before);
+});
