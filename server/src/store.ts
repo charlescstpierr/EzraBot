@@ -1606,7 +1606,7 @@ export function openStore(options: StoreOptions): Store {
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
   } | null, purpose: Claim['purpose'] = { kind: 'request' }): Claim {
-    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && prepared.source.source?.holds !== false
+    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && prepared.source.chosen?.holds !== false
       ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
@@ -1680,7 +1680,7 @@ export function openStore(options: StoreOptions): Store {
         memories,
         exchanges: threadExchanges(str(next, 'thread_bot_id'), int(next, 'seq')),
         request: { text: str(next, 'text'), ...triggerOf(next), attachments: requestAttachments(str(next, 'message_id')) },
-        ...(source ? { source: { title: source.title, n: source.versionN, headN: source.headN, body: sources.body(source), holds: sources.holds(source) } } : {}),
+        ...(source ? { chosen: { title: source.title, n: source.versionN, headN: source.headN, body: sources.body(source), holds: sources.holds(source) } } : {}),
         ...(ongoing.length ? { ongoing } : {}),
         ...(botId === MINO_ID && str(next, 'thread_bot_id') === MINO_ID ? { orchestrator: true } : {}),
       },

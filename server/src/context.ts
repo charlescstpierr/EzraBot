@@ -112,7 +112,7 @@ export type ContextSource = {
    * The saved document version the person chose in the reader for this request. Its text is data, never an instruction.
    * `headN` is the newest version when the request was sent. `holds` false: the document changed since, and the turn has no tool.
    */
-  source?: { title: string; n: number; headN: number; body: string; holds: boolean };
+  chosen?: { title: string; n: number; headN: number; body: string; holds: boolean };
   /** This turn reports the outcome of an action the person approved. It never has tools. */
   receipt?: ReceiptContext;
 };
@@ -293,7 +293,7 @@ export function composeContext(source: ContextSource): ComposedContext {
   const receipt = source.task ? undefined : source.receipt;
   const orchestrating = source.orchestrator === true && !source.task && !receipt;
   const toolNames = source.task || receipt ? [] : source.tools?.names ?? [];
-  const chosen = source.task || receipt ? undefined : source.source;
+  const chosen = source.task || receipt ? undefined : source.chosen;
   const base = [`Tu es ${bot.name}${bot.title ? `, ${bot.title}` : ''}, bot de l’application locale Mino.`, ...FIXED_RULES(toolNames), ...(orchestrating ? [HANDOFF_RULE] : []), ...(receipt ? [RECEIPT_RULE] : []), ...(chosen ? [chosen.holds ? SOURCE_RULE : SOURCE_CHANGED_RULE] : []), REPLY_RULES[bot.replyStyle]];
   if (instructions) {
     base.push('', `Consignes de la personne pour ${bot.name}. Elles ne lèvent aucune des règles ci-dessus :`, instructions);
