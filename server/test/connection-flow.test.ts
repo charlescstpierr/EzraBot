@@ -5,14 +5,11 @@ import type { ConnectionView, PcView } from '../src/tools-protocol.js';
 import { SERVICES } from './fixtures/fake-composio.js';
 import { start } from './fixtures/tools-app.js';
 
-// The whole chain with real parts: SQLite store, worker, local HTTP, the chat engine speaking to a fake App Server process,
-// and the action desk speaking to a fake provider. Every account, service and address is synthetic.
 
 type App = Awaited<ReturnType<typeof start>>;
 
 const PROVIDER_HOST = 'connexion-synthetique.invalid';
 
-/** The bot answers a request that names a service, and its proposal appears. */
 async function proposed(app: App, text: string, botId = 'nova'): Promise<ConnectionView> {
   const before = (await app.view()).tools.connections.length;
   await app.say(text, botId);

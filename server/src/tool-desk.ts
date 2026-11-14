@@ -69,7 +69,6 @@ export function createActionDesk(options: {
   let closed = false;
   let draining: Promise<void> | null = null;
   let again = false;
-  /** Connection requests whose link is being started. A second start of the same request is refused, so one gesture reaches the provider once. */
   const starting = new Set<string>();
 
   const view = (): ToolsView => ledger.view(provider ? { state: 'ready' } : { state: 'missing_key' });
@@ -182,7 +181,6 @@ export function createActionDesk(options: {
     return { status: 200, body: { ok: true, kind: 'link', linkId, redirectUrl: read.value.redirectUrl } };
   }
 
-  /** The person starts the connection a bot proposed. The bot's service name only selects one entry of this server's own catalogue. */
   async function startConnection(connectionId: string, body: unknown, port: Provider): Promise<DeskResponse> {
     const parsed = ConnectionLinkSchema.safeParse(body);
     if (!parsed.success) return failure('invalid_command', 'Cette demande de connexion est incomplète ou invalide.');

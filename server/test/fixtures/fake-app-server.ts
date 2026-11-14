@@ -144,13 +144,8 @@ async function toolTurn(threadId: string, turnId: string, input: string, early: 
   complete(threadId, turnId, 'completed');
 }
 
-/** The service word of a request, copied as the person wrote it, so a test steers the proposal through its message. */
 const namedService = (asked: string): string | null => /\b(gmail|slack|notion|agenda)\b/i.exec(asked)?.[1] ?? null;
 
-/**
- * A turn without tools in a tool scenario: an ordinary reply, or the report of a receipt read from the input.
- * `offered`: the turn's schema has the `connection` field, so a request that names a service gets a proposal to connect it.
- */
 function plainTurn(threadId: string, turnId: string, input: string, offered: boolean) {
   const state = /état : ([a-z_]+)/.exec(input)?.[1];
   const request = /Demande initiale de la personne :\n([^\n]*)/.exec(input)?.[1] ?? '';

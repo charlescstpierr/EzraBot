@@ -7,8 +7,6 @@ import {
 } from "@playwright/test";
 import type { PcView, ToolsReplyOf } from "../server/src/tools-protocol";
 
-// Real isolated store, worker and HTTP server. The provider and the App Server are fakes started by scripts/test-server.mjs:
-// every account, service and address on these pages is synthetic.
 
 const TOOLS = "http://127.0.0.1:4398";
 const EVIDENCE = ".audit/connexion-fil/evidence";
@@ -18,7 +16,6 @@ const PROVIDER = "connexion-synthetique.invalid";
 const pcView = async (request: APIRequestContext): Promise<PcView> =>
   (await request.get(`${TOOLS}/api/view`)).json();
 
-/** A new character without any right, so each test owns its thread. */
 async function character(request: APIRequestContext, name: string) {
   const model = (await pcView(request)).bots[0];
   const response = await request.post(`${TOOLS}/api/commands`, {
@@ -60,7 +57,6 @@ async function say(page: Page, text: string) {
 const card = (page: Page, service: string) =>
   page.getByRole("region", { name: `Connexion proposée ${service}` });
 
-/** A synthetic gmail account connected through the real PC routes, with no right for anyone. */
 async function connectedGmail(request: APIRequestContext, alias: string) {
   const link: ToolsReplyOf<"link"> = await (
     await request.post(`${TOOLS}/api/tools/link`, {
@@ -75,7 +71,6 @@ async function connectedGmail(request: APIRequestContext, alias: string) {
   expect((await checked.json()).link.state).toBe("active");
 }
 
-/** Every call a page makes to the provider-backed routes, to prove a card calls nothing by itself. */
 function providerCalls(page: Page) {
   const calls: string[] = [];
   page.on("request", (request) => {
@@ -94,7 +89,6 @@ const simulatedProvider = (page: Page) =>
     }),
   );
 
-/** The fake provider reads the outcome in the account name: « attente » waits, « refus » fails. */
 const nameAccount = (page: Page, alias: () => string) =>
   page.route("**/api/tools/connections/*/link", (route) =>
     route.continue({

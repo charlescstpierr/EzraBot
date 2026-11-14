@@ -17,7 +17,6 @@ export type LinkFlowState =
       fallback: string | null;
     };
 
-/** A free account name from this base: the base, then « base 2 », « base 3 ». */
 export function freeAlias(base: string, accounts: { alias: string }[]) {
   const stem = base.slice(0, 36);
   const used = new Set(accounts.map((account) => account.alias));
@@ -122,7 +121,6 @@ export function useLinkFlow(configured: boolean) {
     };
   }, [configured, waitingId, waitingFallback]);
 
-  /** Opens the window during the click, asks for the link, then waits for the provider. True once the wait has started. */
   async function open(
     start: (signal: AbortSignal) => Promise<ToolsReplyOf<"link">>,
   ): Promise<boolean> {
@@ -165,7 +163,6 @@ export function useLinkFlow(configured: boolean) {
     state,
     busy: state.kind === "opening" || state.kind === "waiting",
     open,
-    /** Checks an existing link again, for two minutes at most. */
     check(linkId: string, fallback: string | null = null) {
       setState({ kind: "waiting", linkId, fallback });
     },

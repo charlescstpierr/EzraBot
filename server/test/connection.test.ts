@@ -31,7 +31,6 @@ function claimFor(store: Store, botId = 'nova', text = 'Lis mes courriels'): Cla
   return claim;
 }
 
-/** One chat turn of a bot that answers with this proposal. */
 function turn(store: Store, service: string | null, botId = 'nova'): Claim {
   const claim = claimFor(store, botId);
   assert.equal(store.finishJob(claim, reply(service)).kind, 'recorded');

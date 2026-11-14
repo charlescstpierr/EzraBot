@@ -22,10 +22,6 @@ export type Connections = {
   attach(id: string, linkId: string): void;
 };
 
-/**
- * A bot's proposal to connect a service. The row keeps what the bot named and the link the person started from the card.
- * It holds no account state: the link carries it, and only a provider reading changes a link.
- */
 export const CONNECTION_MIGRATION = `
 CREATE TABLE tool_connections(
   id TEXT PRIMARY KEY,

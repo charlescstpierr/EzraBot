@@ -43,11 +43,8 @@ export type FakeProvider = Provider & {
   tools: RawToolFacts[];
   /** Actions that really reached the provider's execute call. */
   sent: { pin: Pin; args: Record<string, unknown> }[];
-  /** The provider's current catalogue of services. Tests change it to simulate another configuration. */
   services: ServiceOption[];
-  /** Connection requests that really reached the provider. */
   started: number;
-  /** When set, a connection request waits for it before it answers. */
   gate: Promise<void> | null;
   /** When set, every read fails with this category. */
   failing: ProviderErrorCategory | null;
