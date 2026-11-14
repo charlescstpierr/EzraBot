@@ -71,6 +71,11 @@ export const CommandSchema = z.discriminatedUnion('type', [
     attachments: z.array(attachment).max(LIMITS.attachments),
     /** A durable document task: written by the thread bot, optionally reviewed once by another selected bot. */
     document: z.strictObject({ reviewerBotId: id.nullable() }).optional(),
+    /**
+     * A saved document version the person picked in the reader of the PC, to prepare a service action from it.
+     * Identities only: the server reads the version again and freezes it with the request.
+     */
+    source: z.strictObject({ workId: id, versionId: id }).optional(),
   }),
   z.strictObject({
     type: z.literal('task.intent'),
@@ -191,10 +196,14 @@ export const HandoffSchema = z.strictObject({
 });
 export type Handoff = z.infer<typeof HandoffSchema>;
 
+/** A bot's proposal to connect a service it cannot use. Recorded with the reply; it connects nothing and grants nothing. */
+export const ConnectionOfferSchema = z.strictObject({ service: z.string().max(200) });
+
 export const EngineReplySchema = z.strictObject({
   reply: text(20000),
   deliverable: DeliverableSchema.nullable(),
   handoff: HandoffSchema.nullable().optional(),
+  connection: ConnectionOfferSchema.nullable().optional(),
 });
 export type EngineReply = z.infer<typeof EngineReplySchema>;
 

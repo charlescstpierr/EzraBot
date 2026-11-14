@@ -328,3 +328,26 @@
 .ez-chat-welcome {
   margin: 18px auto 28px;
 }
+.ez-chat-source {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  border: 1px solid #cfdcc0;
+  border-radius: 12px;
+  background: #fbfdf7;
+  padding: 10px 14px;
+  margin: 0 4px 8px;
+  font-size: 13px;
+  color: #26301e;
+}
+.ez-chat-source p {
+  margin: 0;
+}
+.ez-chat-source small {
+  color: #56634a;
+}
+.ez-chat-source button {
+  font-size: 12px;
+  text-decoration: underline;
+  color: #56634a;
+}

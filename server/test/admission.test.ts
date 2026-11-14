@@ -615,7 +615,7 @@ test('a database of the previous version keeps its works, gains their origin, an
   }
   const after = new DatabaseSync(path, { readOnly: true });
   try {
-    assert.equal(after.prepare('PRAGMA user_version').get()?.user_version, 8);
+    assert.equal(after.prepare('PRAGMA user_version').get()?.user_version, 10);
     assert.deepEqual(after.prepare('PRAGMA foreign_key_check').all(), []);
     assert.deepEqual(after.prepare('SELECT message_id, kind, occurrence FROM origins ORDER BY rowid LIMIT 2').all().map(row => ({ ...row })), [
       { message_id: 'm-done', kind: 'human', occurrence: 'legacy:m-done' }, { message_id: 'm-wait', kind: 'human', occurrence: 'legacy:m-wait' }]);

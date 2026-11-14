@@ -71,7 +71,9 @@ import type { AgentText } from './engine.js';
 import { decodeReplyProgress } from './partial-json.js';
 import { canContinue, maxCalls, nextStep, stepActor, taskStatus, type TaskFacts } from './task.js';
 import { int, oneOf, oneOfOrNull, str, strOrNull, type Row } from './sql-rows.js';
-import { TOOL_MIGRATION, TOOL_PURGE_ORDER, createToolLedger, type GrantSnapshot, type ReportClaim, type ToolLedger } from './tool-ledger.js';
+import { TOOL_MIGRATION, TOOL_PURGE_ORDER, TOOL_SOURCE_MIGRATION, createToolLedger, type GrantSnapshot, type ReportClaim, type ToolLedger } from './tool-ledger.js';
+import { SOURCE_MIGRATION, createSources } from './source.js';
+import { CONNECTION_MIGRATION, createConnections } from './connection.js';
 import { ADMISSION_MIGRATION, DEFAULT_POLICY, createAdmission, type Admission, type Departure, type Target } from './admission.js';
 import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type AutomaticOrigin, type Origin } from './admission-protocol.js';
 
@@ -317,13 +319,16 @@ CREATE TRIGGER IF NOT EXISTS publications_match_version BEFORE INSERT ON publica
 
 const sqlList = (values: readonly string[]) => values.map(value => `'${value}'`).join(',');
 
-const MIGRATIONS: readonly { sql: string; rebuild?: true }[] = [
+/** Migration backups Mino writes next to the database. Each holds the whole space at that time. */
+const MANAGED_BACKUPS = ['.pre-v2'] as const;
+
+const MIGRATIONS: readonly { sql: string; rebuild?: true; backup?: (typeof MANAGED_BACKUPS)[number] }[] = [
   { sql: `ALTER TABLE bots ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
    ALTER TABLE bots ADD COLUMN reply_style TEXT NOT NULL DEFAULT '${DEFAULT_REPLY_STYLE}' CHECK(reply_style IN (${sqlList(REPLY_STYLES)}));
    ALTER TABLE bots ADD COLUMN context_size TEXT NOT NULL DEFAULT '${DEFAULT_CONTEXT_SIZE}' CHECK(context_size IN (${sqlList(CONTEXT_SIZES)}));
    ALTER TABLE attempts ADD COLUMN context_plan TEXT CHECK(context_plan IS NULL OR json_valid(context_plan));
    ALTER TABLE attempts ADD COLUMN usage TEXT CHECK(usage IS NULL OR json_valid(usage));` },
-  { rebuild: true, sql: `
+  { rebuild: true, backup: '.pre-v2', sql: `
 DROP TRIGGER IF EXISTS work_request_owner;
 DROP TRIGGER IF EXISTS work_owner_immutable;
 DROP TRIGGER IF EXISTS reply_owner;
@@ -613,10 +618,9 @@ CREATE TRIGGER works_admitted BEFORE INSERT ON works
   BEGIN SELECT RAISE(ABORT, 'a work is created through admission, with its origin'); END;
 ` },
   { sql: ADMISSION_MIGRATION },
+  { rebuild: true, sql: SOURCE_MIGRATION + TOOL_SOURCE_MIGRATION },
+  { sql: CONNECTION_MIGRATION },
 ];
-
-/** Migration backups Mino writes next to the database. Each holds the whole space at that time. */
-const MANAGED_BACKUPS = ['.pre-v2'] as const;
 const SQLITE_COMPANIONS = ['', '-wal', '-shm', '-journal'] as const;
 export const managedBackupPaths = (path: string): string[] =>
   MANAGED_BACKUPS.flatMap(suffix => SQLITE_COMPANIONS.map(companion => path + suffix + companion));
@@ -624,6 +628,8 @@ export const managedBackupPaths = (path: string): string[] =>
 /** The rows erased with a bot, in an order that never leaves a dangling reference between statements. */
 const PURGE_ORDER = [
   ...TOOL_PURGE_ORDER,
+  ['tool_connections', 'id'],
+  ['message_sources', 'message_id'],
   ['publications', 'id'],
   ['decisions', 'id'],
   ['proposals', 'id'],
@@ -712,8 +718,8 @@ export function openStore(options: StoreOptions): Store {
   if (schemaVersion > MIGRATIONS.length) { db.close(); throw new Error('Ces données viennent d’une version plus récente de Mino.'); }
   db.exec(SCHEMA);
   MIGRATIONS.slice(schemaVersion).forEach((migration, i) => {
-    if (migration.rebuild) {
-      const backup = options.path + '.pre-v2';
+    if (migration.backup) {
+      const backup = options.path + migration.backup;
       if (options.path !== ':memory:' && !existsSync(backup)) {
         const previousMask = process.umask(0o077);
         try {
@@ -723,8 +729,8 @@ export function openStore(options: StoreOptions): Store {
           process.umask(previousMask);
         }
       }
-      db.exec('PRAGMA foreign_keys=OFF');
     }
+    if (migration.rebuild) db.exec('PRAGMA foreign_keys=OFF');
     try {
       db.exec('BEGIN IMMEDIATE');
       db.exec(migration.sql);
@@ -817,6 +823,8 @@ export function openStore(options: StoreOptions): Store {
 
   const sign = (payload: unknown) => createHmac('sha256', hmacKey).update(stableStringify(payload)).digest('hex');
   const admission = createAdmission({ get, all, run, transaction, now, newId }, options.policy ?? DEFAULT_POLICY);
+  const sources = createSources({ get, all, run, now });
+  const connections = createConnections({ get, all, run, now, newId });
 
   const tools = createToolLedger(
     { get, all, run, transaction, now, newId, changed, sign },
@@ -830,6 +838,8 @@ export function openStore(options: StoreOptions): Store {
       },
     },
     admission,
+    sources,
+    connections,
   );
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
@@ -873,6 +883,7 @@ export function openStore(options: StoreOptions): Store {
       versionId, input.workId, n, input.title, input.body, input.source, input.restoredFrom, input.attemptId, now(),
     );
     staleOpenProposals(input.workId, STALE_BY_SOURCE[input.source]);
+    tools.sourceMoved(input.workId);
     return { versionId, n };
   };
   const requireEditable = (work: Row): Row => {
@@ -1247,6 +1258,14 @@ export function openStore(options: StoreOptions): Store {
     }
     const targets = replyTargets(request.botId, mentions);
     targets.forEach(botId => requireBot(botId, 'Un bot mentionné a été supprimé ou n’existe plus. Retirez sa mention avant d’envoyer.'));
+    if (request.source) {
+      if (mentions.length || request.document) {
+        throw new Refusal('invalid_command', 'Une action depuis une version se prépare avec le bot de cette conversation, sans @ ni mode document.');
+      }
+      if (!options.serviceTools || !tools.grantsFor(request.botId).length) {
+        throw new Refusal('invalid_transition', 'Ce personnage n’a aucun service connecté utilisable. Rien n’a été préparé ni envoyé.');
+      }
+    }
     const reviewerBotId = request.document?.reviewerBotId ?? null;
     if (request.document) {
       if (mentions.length) throw new Refusal('invalid_command', 'Un document est rédigé par le bot de ce fil. Retirez les @ et choisissez le relecteur dans le mode document.');
@@ -1260,6 +1279,10 @@ export function openStore(options: StoreOptions): Store {
     run('INSERT INTO origins(message_id, bot_id, kind, occurrence, fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?)', messageId, request.botId, origin.kind, occurrence, print, at);
     for (const file of request.attachments) {
       run('INSERT INTO attachments(message_id, name, text) VALUES (?, ?, ?)', messageId, file.name, file.text);
+    }
+    if (request.source) {
+      const refused = sources.freeze(messageId, request.botId, request.source);
+      if (refused) throw new Refusal(refused.code, refused.message);
     }
     if (request.document) {
       const taskId = newId('t');
@@ -1359,6 +1382,8 @@ export function openStore(options: StoreOptions): Store {
     target('handoffs', `SELECT 'handoffs', id FROM handoffs WHERE task_id IN (${targetsOf('tasks')})`);
     target('attempt_progress', `SELECT 'attempt_progress', attempt_id || ':' || item_id FROM attempt_progress WHERE attempt_id IN (${targetsOf('attempts')})`);
     target('doc_proposals', `SELECT 'doc_proposals', id FROM doc_proposals WHERE work_id IN (${targetsOf('works')})`);
+    target('message_sources', `SELECT 'message_sources', message_id FROM message_sources WHERE message_id IN (${targetsOf('messages')})`);
+    target('tool_connections', `SELECT 'tool_connections', id FROM tool_connections WHERE bot_id = ? OR work_id IN (${targetsOf('works')})`, botId);
     tools.markPurge(botId, targetsOf('works'));
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
@@ -1586,11 +1611,13 @@ export function openStore(options: StoreOptions): Store {
   function startAttempt(lane: Lane, prepared: Prepared, frozen: {
     step: TaskStep; taskRevision: number; baseVersionId: string | null; eventsThrough: number; handoffId: string | null; continued: boolean;
   } | null, purpose: Claim['purpose'] = { kind: 'request' }): Claim {
-    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? tools.grantsFor(prepared.botId) : [];
+    const toolGrants = options.serviceTools && lane === 'chat' && purpose.kind === 'request' && prepared.source.chosen?.holds !== false
+      ? tools.grantsFor(prepared.botId) : [];
     const source: ContextSource = {
       ...prepared.source,
       ...(lane === 'chat' && prepared.source.orchestrator && options.missionContext ? { missions: options.missionContext() } : {}),
       ...(toolGrants.length ? { tools: { names: toolGrants.map(grant => grant.toolSlug) } } : {}),
+      ...(options.serviceTools && lane === 'chat' && purpose.kind === 'request' ? { connections: true as const } : {}),
     };
     const composed = composeContext(source);
     const bot = prepared.bot;
@@ -1651,6 +1678,7 @@ export function openStore(options: StoreOptions): Store {
         const state = ONGOING_LABELS[taskStatus(taskFacts(task))];
         return state ? [{ title: str(authorWork(task), 'title'), state }] : [];
       });
+    const source = sources.of(str(next, 'message_id'));
     const claim = startAttempt('chat', {
       workId, botId, bot, memories,
       source: {
@@ -1658,6 +1686,7 @@ export function openStore(options: StoreOptions): Store {
         memories,
         exchanges: threadExchanges(str(next, 'thread_bot_id'), int(next, 'seq')),
         request: { text: str(next, 'text'), ...triggerOf(next), attachments: requestAttachments(str(next, 'message_id')) },
+        ...(source ? { chosen: { title: source.title, n: source.versionN, headN: source.headN, body: sources.body(source), holds: sources.holds(source) } } : {}),
         ...(ongoing.length ? { ongoing } : {}),
         ...(botId === MINO_ID && str(next, 'thread_bot_id') === MINO_ID ? { orchestrator: true } : {}),
       },
@@ -1839,6 +1868,9 @@ export function openStore(options: StoreOptions): Store {
         const handoff = reportOf === null && str(work, 'bot_id') === MINO_ID && threadBot === MINO_ID ? outcome.reply.handoff ?? null : null;
         run(`INSERT INTO messages(id, bot_id, role, text, attempt_id, created_at, handoff) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
           newId('m'), str(work, 'bot_id'), outcome.reply.reply, claim.attemptId, at, handoff ? JSON.stringify(handoff) : null);
+        if (options.serviceTools && reportOf === null && outcome.reply.connection) {
+          connections.offer({ botId: str(work, 'bot_id'), workId: claim.workId, attemptId: claim.attemptId }, outcome.reply.connection.service);
+        }
         if (reportOf !== null) return { kind: 'recorded', state: tools.endReport(reportOf, 'done') };
         const deliverable = outcome.reply.deliverable;
         if (deliverable) {

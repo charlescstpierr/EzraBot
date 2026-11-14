@@ -32,7 +32,7 @@ Les tests navigateur démarrent un service temporaire sur 127.0.0.1:4399 avec de
 
 ## Services connectés (Composio)
 
-Un personnage peut proposer une action sur un service relié. Vous confirmez chaque action exacte sur le PC, puis le serveur l’envoie une seule fois. La clé se donne au serveur avec `COMPOSIO_API_KEY`. Sans clé, cette fonction est désactivée et le reste ne change pas. Voir [docs/composio.md](docs/composio.md) pour la configuration, les preuves simulées et ce qui n’est pas vérifié avec le vrai service.
+Un personnage peut proposer une action sur un service relié. Vous confirmez chaque action exacte sur le PC, puis le serveur l’envoie une seule fois. Quand un service manque, le personnage peut proposer une carte de connexion dans le fil ; relier un compte ne lui donne aucun droit. La clé se donne au serveur avec `COMPOSIO_API_KEY`. Sans clé, cette fonction est désactivée et le reste ne change pas. Voir [docs/composio.md](docs/composio.md) pour la configuration, les preuves simulées et ce qui n’est pas vérifié avec le vrai service.
 
 Les tests navigateur de cette fonction utilisent un second service temporaire sur 127.0.0.1:4398, avec un faux fournisseur et un faux moteur. Toutes ses données sont synthétiques.
 
@@ -46,6 +46,7 @@ Chaque appel Codex et chaque action Composio réserve sa place avant de partir. 
 - Brouillons isolés par espace et personnage, préservation pendant un envoi, reprise réseau avec le même identifiant, refus serveur explicites.
 - Projets avec dossier explicitement autorisé, propositions de mission avec leur message d’origine, choix de responsable pour la coordination, suivi et actions admises par le serveur.
 - Documents éditables, versions et restauration, publication exacte dans le carnet local avec confirmation.
+- Action sur un service connecté préparée depuis une version enregistrée d’un document. La carte nomme la version source. Une nouvelle version du document périme l’action avant l’envoi.
 - Vue « Tous mes résultats » avec versions exactes, publications et missions à examiner ou validées. Filtre par personnage et activité repliable. Les résultats proviennent des vues locales existantes.
 - Personnalisation des noms/couleurs et gestion des souvenirs de chaque personnage.
 - Interface adaptative, clavier IME, dialogues avec gestion du focus et navigation clavier.

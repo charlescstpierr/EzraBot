@@ -32,7 +32,7 @@ export const ToolCommandSchema = z.discriminatedUnion('type', [
 export type ToolCommand = z.infer<typeof ToolCommandSchema>;
 export type ToolCommandOf<T extends ToolCommand['type']> = Extract<ToolCommand, { type: T }>;
 
-export const STALE_REASONS = ['turn_failed', 'grant_changed', 'account_inactive', 'schema_changed'] as const;
+export const STALE_REASONS = ['turn_failed', 'grant_changed', 'account_inactive', 'schema_changed', 'source_changed'] as const;
 export type StaleReason = (typeof STALE_REASONS)[number];
 
 export const ToolResultSchema = z.discriminatedUnion('kind', [
@@ -79,6 +79,22 @@ export const LinkViewSchema = z.strictObject({
 });
 export type LinkView = z.infer<typeof LinkViewSchema>;
 
+/**
+ * A bot's proposal to connect a service, shown under its reply. It grants nothing and connects nothing by itself.
+ * `toolkit` is the name the bot wrote: it is only compared with the server's catalogue when the person starts the connection.
+ */
+export const ConnectionViewSchema = z.strictObject({
+  id: z.string(),
+  botId: z.string(),
+  /** The bot message that carries the proposal. */
+  messageId: z.string(),
+  toolkit: z.string(),
+  /** The link the person started from this card, as the provider last reported it. Null until then. */
+  link: LinkViewSchema.nullable(),
+  createdAt: z.string(),
+});
+export type ConnectionView = z.infer<typeof ConnectionViewSchema>;
+
 export const GrantViewSchema = z.strictObject({
   id: z.string(), botId: z.string(), toolkit: z.string(), accountId: z.string(), accountAlias: z.string(),
   toolSlug: z.string(), version: z.string(), description: z.string(), grantedAt: z.string(),
@@ -101,6 +117,22 @@ export const ExecutionViewSchema = z.strictObject({
 });
 export type ExecutionView = z.infer<typeof ExecutionViewSchema>;
 
+/** The saved document version a request was prepared from, as the server froze it. */
+export const SourceViewSchema = z.strictObject({
+  /** The request of the person that cites this version. */
+  messageId: z.string(),
+  workId: z.string(),
+  versionId: z.string(),
+  versionN: z.number(),
+  title: z.string(),
+  contentSha256: z.string(),
+  /** The newest version of the document when the request was sent. Greater than `versionN` when the person picked an older version. */
+  headN: z.number(),
+  /** `changed`: the document got a newer version since the request, or the frozen version is no longer readable as it was. */
+  state: z.enum(['holds', 'changed']),
+});
+export type SourceView = z.infer<typeof SourceViewSchema>;
+
 export const ToolProposalViewSchema = z.strictObject({
   id: z.string(),
   botId: z.string(),
@@ -119,6 +151,8 @@ export const ToolProposalViewSchema = z.strictObject({
   staleReason: z.enum(STALE_REASONS).nullable(),
   createdAt: z.string(),
   execution: ExecutionViewSchema.nullable(),
+  /** Null when the request cited no document version. */
+  source: SourceViewSchema.nullable(),
 });
 export type ToolProposalView = z.infer<typeof ToolProposalViewSchema>;
 
@@ -129,6 +163,10 @@ export const ToolsViewSchema = z.strictObject({
   /** Active rights by bot. A bot without an entry has no right. */
   grants: z.record(z.string(), z.array(GrantViewSchema)),
   proposals: z.array(ToolProposalViewSchema),
+  /** Every request prepared from a document version, with or without a proposal. */
+  sources: z.array(SourceViewSchema),
+  /** Connection requests of live bots. Empty without a provider key. */
+  connections: z.array(ConnectionViewSchema),
 });
 export type ToolsView = z.infer<typeof ToolsViewSchema>;
 
@@ -156,6 +194,8 @@ export type AvailableTool = z.infer<typeof AvailableToolSchema>;
 /** `alias` is the name the person gives this account. It is what an approval card later shows. */
 export const LinkRequestSchema = z.strictObject({ serviceId: providerId, alias: z.string().trim().min(1).max(40) });
 export const AvailableQuerySchema = z.strictObject({ accountId: providerId });
+/** `after` is the link the card shows, or null: a start that no longer matches it is a stale repeat and starts nothing. */
+export const ConnectionLinkSchema = z.strictObject({ alias: LinkRequestSchema.shape.alias, after: id.nullable() });
 
 export const ToolsReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('catalog'), services: z.array(ServiceOptionSchema) }),

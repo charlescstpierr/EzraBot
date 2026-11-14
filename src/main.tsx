@@ -36,6 +36,7 @@ import { ChatPage } from "./chat";
 import { storageWrite } from "./chat/pending";
 import { SearchBox } from "./search";
 import { TaskCard, DocumentPanel } from "./documents";
+import { sourceChoice } from "./documents/source";
 import { MissionProposal, MissionList, MissionPanel } from "./missions";
 import { ProjectsPage } from "./projects";
 import { CharacterPanel, CharacterCreate } from "./characters";
@@ -532,6 +533,12 @@ function App() {
             port={port}
             botId={route.botId}
             focusMessageId={route.messageId}
+            source={
+              route.source &&
+              sourceChoice(port, route.botId, route.source, () =>
+                go({ page: "chat", botId: route.botId }),
+              )
+            }
             drafts={drafts}
             slots={{
               task: (message) => <TaskCard port={port} message={message} />,
