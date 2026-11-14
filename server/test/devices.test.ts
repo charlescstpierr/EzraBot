@@ -169,7 +169,7 @@ test('a large snapshot cannot hide the receipt of a committed command', async ()
   } finally { await f.close(); }
 });
 
-test('a paired device cannot grant, approve, refuse or retry a service action, and its snapshot carries no tools field', async () => {
+test('a paired device cannot grant, approve, refuse or retry a service action, nor prepare one from a document version, and its snapshot carries no tools field', async () => {
   const f = await fixture();
   try {
     await f.pair();
@@ -183,6 +183,8 @@ test('a paired device cannot grant, approve, refuse or retry a service action, a
       const refused = await f.call('/m/commands', command, f.auth);
       assert.deepEqual([refused.status, z.object({ code: z.string() }).parse(refused.body).code], [422, 'invalid_command'], command.type);
     }
+    const sourced = await f.call('/m/commands', { type: 'message.send', requestId: 'mobile-source-1', botId: 'mino', text: 'Envoie cette version', attachments: [], source: { workId: 'w_1', versionId: 'v_1' } }, f.auth);
+    assert.deepEqual([sourced.status, z.object({ code: z.string() }).parse(sourced.body).code], [403, 'command_refused'], 'an action from a document version is prepared on the PC only');
     for (const path of ['/m/tools/commands', '/m/tools/catalog', '/api/tools/catalog']) assert.equal((await f.call(path, undefined, f.auth)).status, 404, path);
     assert.equal((await f.call('/m/tools/commands', { type: 'tools.refuse', requestId: 'mobile-tools-6', proposalId: 'tp_1' }, f.auth)).status, 404);
     const snapshot = z.record(z.string(), z.unknown()).parse((await f.call('/m/view', undefined, f.auth)).body);

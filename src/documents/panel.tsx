@@ -23,6 +23,7 @@ import {
   Progress,
   StepChain,
 } from "./task";
+import { PrepareAction } from "./source";
 import { History, Publication, Reader } from "./versions";
 import { AcceptButton, NonTaskWorkControls, workNote } from "./work";
 
@@ -169,6 +170,14 @@ function Panel({
       </div>
 
       <Publication port={port} work={work} blocked={blocked} />
+      {shown && (pinned || !versionId) && (
+        <PrepareAction
+          port={port}
+          work={work}
+          version={shown}
+          unsaved={blocked}
+        />
+      )}
       {work.versions.length > 0 && (
         <History
           port={port}

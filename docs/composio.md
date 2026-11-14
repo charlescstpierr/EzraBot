@@ -24,6 +24,7 @@ Aucune clé n’a été fournie pendant ce travail. Voir les sections 4 et 8.
 |---|---|
 | `server/src/tools-protocol.ts` | Contrat réservé au PC : commandes, vues et réponses. Il n’est pas copié vers le client mobile. |
 | `server/src/tool-ledger.ts` | Grand livre SQLite : comptes, liens, droits, propositions, reçus. Il utilise la base du store. Il ne fait aucun appel réseau. |
+| `server/src/source.ts` | Version de document figée avec une demande : relecture, empreinte du contenu, comparaison avec la dernière version. |
 | `server/src/composio.ts` | Seul fichier qui importe `@composio/core`. Il rend des données simples et des catégories d’erreur. |
 | `server/src/tool-desk.ts` | Guichet : il lit le fournisseur, puis il demande la décision au grand livre. Il porte les routes `/api/tools/*`. |
 | `server/src/child-env.ts` | Retire les variables `COMPOSIO_*` de l’environnement des processus Codex. |
@@ -40,6 +41,7 @@ Le paquet `@composio/core` est fixé à la version exacte `0.29.0`. `ajv` est fi
 | Page d’un personnage, section « Services connectés » | Choisir un compte et les outils que ce personnage peut proposer. Retirer un droit. |
 | Fil de conversation | Lire la carte exacte de l’action. Approuver ou refuser. Lire le reçu. Relancer un compte rendu en échec. |
 | Composeur | Le choix « Utiliser les services connectés » apparaît seulement si le personnage a des droits. |
+| Page d’un document | Préparer une action depuis la version que vous lisez. Voir la section 3. |
 
 ### Ce qui ne change pas
 
@@ -64,7 +66,7 @@ Le paquet `@composio/core` est fixé à la version exacte `0.29.0`. `ajv` est fi
 |---|---|
 | En attente de votre décision | Rien n’est envoyé. |
 | Refusée | Rien n’a été envoyé. |
-| Périmée | Le droit, le compte ou l’outil a changé. Rien n’a été envoyé. |
+| Périmée | Le droit, le compte, l’outil ou le document source a changé. Rien n’a été envoyé. |
 | Annulée avant l’envoi | Une vérification a échoué après l’approbation. Rien n’a été envoyé. |
 | Le service confirme l’exécution | Le fournisseur a répondu `completed`. |
 | Le service signale un échec | Le fournisseur a répondu `failed`. |
@@ -72,6 +74,34 @@ Le paquet `@composio/core` est fixé à la version exacte `0.29.0`. `ajv` est fi
 | Résultat inconnu | La réponse n’est pas arrivée, ou EzraBot s’est arrêté pendant l’envoi. L’action a peut-être eu lieu. EzraBot ne la renvoie jamais. |
 
 Un compte rendu en échec se relance avec un bouton. Ce bouton relance seulement le résumé. Il ne renvoie pas l’action.
+
+### Préparer une action depuis une version de document
+
+1. Ouvrez un document et lisez la version voulue. Une ancienne version convient : choisissez **Lire la version N** dans l’historique.
+2. Dans **Action sur un service connecté**, choisissez **Préparer une action avec la version N**. La conversation du document s’ouvre. Un bandeau nomme la version source.
+3. Écrivez votre demande et envoyez. Le serveur relit la version et la fige avec la demande : son identité, l’empreinte de son contenu et la dernière version du document à cet instant.
+4. Le personnage reçoit le texte complet de cette version, comme une donnée. La carte de l’action montre le service, le compte, l’action, le contenu exact et la version source.
+5. Vous approuvez. Le serveur relit la source à l’approbation, puis une dernière fois dans la transaction qui note l’envoi.
+
+Ce bouton ne donne aucun droit. Il utilise les droits que le personnage de la conversation a déjà. Sans clé, ou si ce personnage n’a aucun droit, le bouton est désactivé et la raison est écrite dessous. Le serveur refuse aussi la demande, et rien n’est créé.
+
+Seule une version enregistrée peut servir de source. La demande porte deux identifiants, jamais un texte. Une saisie non enregistrée désactive le bouton.
+
+Si vous choisissez la version 1 alors que la version 2 est la dernière, la carte le dit : « ancienne version : la version actuelle était la 2 ». Le serveur ne remplace jamais la version choisie par la dernière.
+
+Dès que le document reçoit une nouvelle version (modification, restauration, résultat adopté), toute action préparée depuis ce document et pas encore partie est fermée :
+
+- une proposition en attente devient **Périmée : le document source a changé depuis votre demande** ;
+- une action approuvée mais pas encore envoyée est **Annulée avant l’envoi**.
+
+Cela vaut aussi pour une ancienne version choisie exprès : son texte n’a pas changé, mais le document a avancé depuis votre décision. Préparez de nouveau l’action depuis le lecteur. Une action déjà envoyée, ou de résultat inconnu, ne change pas et ne repart jamais.
+
+Limites de ce parcours :
+
+- La version source et la demande sont dans la même conversation. Une source ne se combine pas avec des @ ni avec le mode document.
+- Le lien porte sur la demande et sur l’empreinte approuvée. Il ne prouve pas que le contenu de l’action recopie la version : le personnage peut la résumer ou la reformuler. Relisez le contenu exact sur la carte.
+- Une version enregistrée après que le serveur a noté l’envoi n’arrête pas cet envoi.
+- Le client mobile ne peut pas envoyer de version source. Le serveur des téléphones refuse la commande.
 
 ### Règles fixes
 
@@ -133,8 +163,10 @@ Tous ces tests utilisent des doublures. Tous les comptes, actions, adresses et r
 | `server/test/composio.test.ts` | Faux SDK avec les signatures du paquet publié | Session épinglée, contrôle du catalogue de la session qui exécute, un seul appel `execute`, catégories d’erreur. Un test construit le vrai client du SDK avec une clé synthétique et intercepte la requête : elle va à l’adresse fixe avec la clé explicite. |
 | `server/test/engine.test.ts` | Vrai moteur, faux Codex | Aller-retour `item/tool/call`, identifiant texte ou nombre, appel précoce, mauvais tour, mauvais fil, espace de noms, outil inconnu, demande native refusée. |
 | `server/test/tools-flow.test.ts` | Vrai store, vrai worker, vrai HTTP, vrai moteur, faux Codex, faux fournisseur | Toute la chaîne : 0 envoi avant l’approbation, 1 envoi après. Origine et jeton. Schéma périmé. Révocation. Arrêt pendant l’envoi. Compte rendu en échec. |
+| `server/test/source-flow.test.ts` | Les mêmes pièces, plus le vrai moteur de documents | Version source figée : 0 envoi avant l’approbation, 1 après. Ancienne version choisie exprès. Nouvelle version ou droit retiré après la préparation, puis après l’approbation : 0 envoi. Texte modifié ou source disparue hors d’EzraBot : 0 envoi. Budget épuisé. Arrêt et délai dépassé sans second envoi. Refus du serveur sans rien créer. |
 | `server/test/devices.test.ts` | Vrai serveur des téléphones | Un téléphone associé reçoit 422 pour chaque commande `tools.*`. Sa vue n’a pas de champ `tools`. |
 | `tests/composio-parcours.spec.ts` | Navigateur, serveur de recette 4398 | Parcours React complet, résultat inconnu, relance du compte rendu, reprise après rechargement, absence de clé (port 4399). |
+| `tests/source-parcours.spec.ts` | Navigateur, serveur de recette 4398 | Depuis le lecteur : état sans droit, saisie non enregistrée, ancienne version, bandeau du composeur, carte avec sa version source, approbation, carte périmée après une nouvelle version. |
 
 Commandes :
 
@@ -145,7 +177,7 @@ node server/mobile/scripts/sync-contract.mjs --check
 npm run test:ui
 ```
 
-La recette finale passe : typage, 279 tests serveur, quatre contrats mobiles identiques et 60 tests navigateur.
+La recette finale passe : typage, 338 tests serveur, quatre contrats mobiles identiques et 67 tests navigateur.
 
 ### Transport avec le vrai modèle
 

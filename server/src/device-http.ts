@@ -170,6 +170,7 @@ export function createDeviceHandler(options: Options) {
       if (!parsed.success) throw new DeviceError(422, 'invalid_command', 'Cette commande est invalide.');
       const command = parsed.data;
       if (command.type === 'storage.purge' || command.type === 'bot.select') throw new DeviceError(403, 'command_refused', 'Cette commande se fait sur l’ordinateur.');
+      if (command.type === 'message.send' && command.source) throw new DeviceError(403, 'command_refused', 'Une action depuis une version de document se prépare sur l’ordinateur.');
       if (command.type === 'bot.configure') {
         const catalog = await options.engine.catalog();
         if (catalog.state !== 'ready') throw new DeviceError(409, 'choice_unavailable', 'Le catalogue est indisponible.');

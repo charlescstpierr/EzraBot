@@ -9,6 +9,7 @@ import type {
   ToolProposalView,
 } from "../../server/src/tools-protocol";
 import { toolsRequest, uid } from "../api";
+import { SourceLine } from "../documents/source";
 import type { Port, ToolsOutcome } from "../port";
 import "./style.css";
 
@@ -651,6 +652,7 @@ const STALE_LABELS: Record<StaleReason, string> = {
   grant_changed: "le droit a été retiré ou remplacé",
   account_inactive: "le compte n’est plus actif",
   schema_changed: "le service a changé cet outil depuis la proposition",
+  source_changed: "le document source a changé depuis votre demande",
 };
 
 const VOID_LABELS: Record<string, string> = {
@@ -659,6 +661,7 @@ const VOID_LABELS: Record<string, string> = {
   provider_unavailable: "le fournisseur ne répondait pas",
   bot_deleted: "le personnage a été supprimé",
   work_changed: "le travail a changé",
+  source_changed: "le document source a changé depuis votre demande",
   session: "la session du fournisseur n’a pas pu s’ouvrir",
   tool_absent: "le service ne propose plus cet outil",
   version_missing: "le service n’annonce plus de version",
@@ -728,6 +731,14 @@ function ToolCard({
             {proposal.toolSlug} · version {proposal.version}
           </dd>
         </div>
+        {proposal.source && (
+          <div>
+            <dt>Source</dt>
+            <dd>
+              <SourceLine port={port} source={proposal.source} />
+            </dd>
+          </div>
+        )}
       </dl>
       <p className="ez-tools-arguments-title">Contenu exact</p>
       <pre className="ez-tools-arguments">
@@ -818,7 +829,16 @@ export function ToolCards({
   port: Port;
   message: MessageView;
 }) {
-  if (message.role !== "assistant") return null;
+  if (message.role !== "assistant") {
+    const source = port.view.tools.sources.find(
+      (candidate) => candidate.messageId === message.id,
+    );
+    return source ? (
+      <p className="ez-source-note">
+        Version source : <SourceLine port={port} source={source} />
+      </p>
+    ) : null;
+  }
   const proposals = port.view.tools.proposals.filter(
     (proposal) => proposal.messageId === message.id,
   );

@@ -46,6 +46,7 @@ Chaque appel Codex et chaque action Composio réserve sa place avant de partir. 
 - Brouillons isolés par espace et personnage, préservation pendant un envoi, reprise réseau avec le même identifiant, refus serveur explicites.
 - Projets avec dossier explicitement autorisé, propositions de mission avec leur message d’origine, choix de responsable pour la coordination, suivi et actions admises par le serveur.
 - Documents éditables, versions et restauration, publication exacte dans le carnet local avec confirmation.
+- Action sur un service connecté préparée depuis une version enregistrée d’un document. La carte nomme la version source. Une nouvelle version du document périme l’action avant l’envoi.
 - Vue « Tous mes résultats » avec versions exactes, publications et missions à examiner ou validées. Filtre par personnage et activité repliable. Les résultats proviennent des vues locales existantes.
 - Personnalisation des noms/couleurs et gestion des souvenirs de chaque personnage.
 - Interface adaptative, clavier IME, dialogues avec gestion du focus et navigation clavier.
