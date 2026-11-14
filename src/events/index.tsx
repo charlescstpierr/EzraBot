@@ -483,7 +483,8 @@ export function EventsPage({
             Réception configurée localement pour le transport{" "}
             <code>{events.reception.transport}</code>. Ce n’est pas la preuve
             que le fournisseur joint ce PC : seule une demande reçue le montre.{" "}
-            {events.receipts} identifiants gardés sur {EVENT_LIMITS.receipts}.
+            {events.receipts} identifiant{events.receipts > 1 ? "s" : ""} gardé
+            {events.receipts > 1 ? "s" : ""} sur {EVENT_LIMITS.receipts}.
             {events.ignored.n > 0 &&
               ` ${events.ignored.n} événement${events.ignored.n > 1 ? "s" : ""} authentifié${events.ignored.n > 1 ? "s" : ""} sans abonnement, ignoré${events.ignored.n > 1 ? "s" : ""}.`}
             {events.unavailable.n > 0 &&

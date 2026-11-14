@@ -469,7 +469,9 @@ function App() {
               <strong>
                 {route.page === "document"
                   ? "Document"
-                  : nav.find((n) => n.id === route.page)?.label}
+                  : route.page === "events"
+                    ? "Événements de service"
+                    : nav.find((n) => n.id === route.page)?.label}
               </strong>
             )}
           </div>
