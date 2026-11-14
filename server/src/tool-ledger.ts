@@ -576,7 +576,6 @@ export function createToolLedger(kit: LedgerKit, receipts: {
         voidApproved('id = ?', category, executionId);
         return null;
       }
-      // The send shares the daily ceiling of its capability. Its permit is used here, with the approval, before any network call.
       const target = { kind: 'service', id: executionId, revision: str(row, 'fingerprint') } as const;
       const reserved = admission.reserve({ capability: CAPABILITY, source: { kind: 'human', id: str(row, 'id') }, target });
       if (!reserved.ok || !admission.depart(CAPABILITY, target).ok) {

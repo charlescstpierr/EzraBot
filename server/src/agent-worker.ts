@@ -124,7 +124,6 @@ export function createAgentWorker(options: {
           onActivity: (activity, text) => missions.setLive(claim.attemptId, activity, text),
           onUsage: usage => guarded(() => missions.recordUsage(claim, usage)),
         }).catch((): Parameters<Missions['finish']>[1] => ({ kind: 'interrupted', message: 'L’exécutant a rencontré une erreur interne. Le résultat est inconnu.' }));
-      // A model turn that completes without its permit skipped the last check: its report is not taken as a result.
       const outcome: typeof ran = ran.kind === 'completed' && claim.kind !== 'final' && !departed
         ? { kind: 'failed', code: 'admission_refused', message: 'L’exécutant a répondu sans prendre son permis de départ.', effects: true } : ran;
       if (closed && outcome.kind !== 'stopped' && outcome.kind !== 'completed') return;

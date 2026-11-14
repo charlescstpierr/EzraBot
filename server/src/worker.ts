@@ -99,7 +99,6 @@ export function createWorker(options: {
           },
         } : {}),
       }).catch(() => engineFailure('engine_exited'));
-      // An engine that answers without having taken its permit skipped the last check: its answer is not recorded.
       const outcome = ran.kind === 'succeeded' && !departed ? engineFailure('admission_refused', 'Le moteur a répondu sans prendre son permis de départ. Mino n’a rien enregistré.') : ran;
       flush();
       active = null;
