@@ -804,7 +804,7 @@ test('a database of the previous version keeps its proposals and receipts throug
   }
   const after = new DatabaseSync(path);
   try {
-    assert.equal(after.prepare('PRAGMA user_version').get()?.user_version, 11);
+    assert.equal(after.prepare('PRAGMA user_version').get()?.user_version, 12);
     assert.deepEqual(after.prepare('PRAGMA foreign_key_check').all(), []);
     const kept = new Set(after.prepare(`SELECT name FROM sqlite_master WHERE type IN ('trigger','index')`).all().map(row => String(row.name)));
     assert.deepEqual(guards.filter(name => !kept.has(name)), [], 'every guard that named the proposals before the rebuild exists after it');

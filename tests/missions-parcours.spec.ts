@@ -263,6 +263,7 @@ test("la proposition conserve son origine et ouvre la mission dédupliquée", as
     createdAt: "2026-01-01",
     stamp: null,
     taskStep: null,
+    trigger: null,
     handoff: {
       goal: "Vérifier une proposition",
       coordinated: false,

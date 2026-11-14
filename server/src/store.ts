@@ -79,6 +79,7 @@ import { ADMISSION_MIGRATION, DEFAULT_POLICY, createAdmission, type Admission, t
 import { AdmitSchema, ORIGIN_KINDS, occurrenceOf, type AdmissionPolicy, type AutomaticOrigin, type Origin } from './admission-protocol.js';
 import { createMemoryLedger, type Candidate, type MemoryLedger, type RecallOutcome, type RecallPlan } from './memory-ledger.js';
 import { MEMORY_MIGRATION, MEMORY_PURGE_ORDER } from './memory-schema.js';
+import { ROUTINE_MIGRATION, ROUTINE_PURGE_ORDER, createRoutines, type MissionOrigin } from './routines.js';
 
 export type Claim = {
   lane: Lane;
@@ -113,6 +114,11 @@ export type Store = {
   readonly admission: Admission;
   /** The Honcho project of each character: consent, sources, mapping and one row per request, in this same database. */
   readonly memory: MemoryLedger;
+  /**
+   * Decides the routines whose slot came, and admits at most one request per routine. Views are told after the commits.
+   * `since`: when this server started. Returns how many requests were admitted.
+   */
+  tickRoutines(since: string): number;
   dispatch(input: unknown, context?: DispatchContext): DispatchOutcome;
   /**
    * Creates the work an automatic origin asks for. The same occurrence with the same content returns the first work;
@@ -633,6 +639,7 @@ CREATE TRIGGER works_admitted BEFORE INSERT ON works
   { rebuild: true, sql: SOURCE_MIGRATION + TOOL_SOURCE_MIGRATION },
   { sql: CONNECTION_MIGRATION },
   { sql: MEMORY_MIGRATION },
+  { sql: ROUTINE_MIGRATION },
 ];
 const SQLITE_COMPANIONS = ['', '-wal', '-shm', '-journal'] as const;
 export const managedBackupPaths = (path: string): string[] =>
@@ -640,6 +647,7 @@ export const managedBackupPaths = (path: string): string[] =>
 
 /** The rows erased with a bot, in an order that never leaves a dangling reference between statements. */
 const PURGE_ORDER = [
+  ...ROUTINE_PURGE_ORDER,
   ...MEMORY_PURGE_ORDER,
   ...TOOL_PURGE_ORDER,
   ['tool_connections', 'id'],
@@ -711,6 +719,8 @@ export type StoreOptions = {
   policy?: AdmissionPolicy;
   /** Set when the server has a Honcho configuration. Without it no character can get a Honcho project. */
   memory?: { workspacePrefix: string };
+  /** Missions opened from a reply, from the missions registry. Without it no mission can hold a routine back. */
+  missions?: () => readonly MissionOrigin[];
 };
 
 export function openStore(options: StoreOptions): Store {
@@ -854,6 +864,25 @@ export function openStore(options: StoreOptions): Store {
   };
   const tools = createToolLedger(kit, receipts, admission, sources, connections, { holds: attemptId => memory.holds(attemptId) });
   const memory = createMemoryLedger(kit, receipts, admission, options.memory ?? null, tools.memoryMoved);
+  const routines = createRoutines(kit, {
+    admit({ botId, text, routineId, date }) {
+      run('SAVEPOINT routine_admission');
+      try {
+        const admitted = admitWork({ botId, text, attachments: [], origin: { kind: 'routine', routineId, occurrence: date } });
+        run('RELEASE routine_admission');
+        return { ok: true, messageId: admitted.messageId, workId: admitted.workId };
+      } catch (error) {
+        run('ROLLBACK TO routine_admission');
+        run('RELEASE routine_admission');
+        if (error instanceof Refusal) return { ok: false, message: error.message };
+        throw error;
+      }
+    },
+    refuse(code, message) {
+      throw new Refusal(code, message);
+    },
+    missions: () => options.missions?.() ?? [],
+  });
   const HONCHO_OWNS_MEMORY = 'Ce personnage utilise la mémoire Honcho. Ses déclarations se gèrent sur l’ordinateur, dans sa page. Rien n’a été enregistré.';
 
   const requireBot = (botId: string, message = 'Ce bot n’existe pas ou a été supprimé.'): Row => {
@@ -1246,6 +1275,13 @@ export function openStore(options: StoreOptions): Store {
         run('UPDATE memories SET text = ?, updated_at = ? WHERE id = ?', command.text, nextUpdatedAt(current, now()), command.memoryId);
         return { kind: 'memory', memoryId: command.memoryId };
       }
+      case 'routine.create':
+      case 'routine.update':
+      case 'routine.activate':
+      case 'routine.pause':
+      case 'routine.resume':
+      case 'routine.delete':
+        return routines.apply(command);
       case 'memory.delete': {
         requireMemory(command.botId, command.memoryId);
         run('DELETE FROM memories WHERE id = ?', command.memoryId);
@@ -1362,7 +1398,7 @@ export function openStore(options: StoreOptions): Store {
       messages: int(row, 'messages'), files: int(row, 'files'), deliverables: int(row, 'deliverables'),
       publications: int(row, 'publications'), memories: int(row, 'memories') + memory.declarationCount(botId), waiting: int(row, 'waiting'),
       keptReplies: int(row, 'keptReplies'), keptDeliverables: int(row, 'keptDeliverables'), keptMentions: int(row, 'keptMentions'),
-      tasks: int(row, 'tasks'),
+      tasks: int(row, 'tasks'), routines: routines.count(botId),
     };
   }
 
@@ -1420,6 +1456,7 @@ export function openStore(options: StoreOptions): Store {
     target('tool_connections', `SELECT 'tool_connections', id FROM tool_connections WHERE bot_id = ? OR work_id IN (${targetsOf('works')})`, botId);
     tools.markPurge(botId, targetsOf('works'));
     memory.markPurge(botId, targetsOf('attempts'));
+    routines.markPurge(botId);
     const erasedWorkIds = all(`${targetsOf('works')} ORDER BY id`).map(row => str(row, 'id'));
 
     run(`UPDATE commands SET fingerprint = '',
@@ -2118,6 +2155,14 @@ export function openStore(options: StoreOptions): Store {
     return {schemaVersion:1,spaceId,rev,works,attempts};
   }
 
+  function triggerView(row: Row): MessageView['trigger'] {
+    const kind = oneOfOrNull(row, 'origin_kind', ORIGIN_KINDS);
+    if (kind === null || kind === 'human') return null;
+    if (kind !== 'routine') return { kind };
+    const [routineId = '', date = ''] = str(row, 'origin_occurrence').split('/');
+    return { kind, routineId, date };
+  }
+
   function view(): StoreView {
     const memoriesByBot = new Map<string, BotView['memories']>();
     for (const row of all('SELECT id, bot_id, text, updated_at FROM memories ORDER BY seq')) {
@@ -2149,8 +2194,9 @@ export function openStore(options: StoreOptions): Store {
       attachmentsByMessage.set(str(row, 'message_id'), list);
     }
     const messages: MessageView[] = all(
-      `SELECT m.*, COALESCE(request.bot_id, m.bot_id) AS thread_bot_id, COALESCE(a.work_id, w.id) AS work_id, a.model, a.effort, a.speed, a.thread_id, a.turn_id, a.step
-       FROM messages m LEFT JOIN attempts a ON a.id = m.attempt_id LEFT JOIN works w ON w.id = (SELECT first.id FROM works first WHERE first.request_message_id=m.id ORDER BY first.rowid LIMIT 1)
+      `SELECT m.*, COALESCE(request.bot_id, m.bot_id) AS thread_bot_id, COALESCE(a.work_id, w.id) AS work_id, a.model, a.effort, a.speed, a.thread_id, a.turn_id, a.step,
+         o.kind AS origin_kind, o.occurrence AS origin_occurrence
+       FROM messages m LEFT JOIN origins o ON o.message_id = m.id LEFT JOIN attempts a ON a.id = m.attempt_id LEFT JOIN works w ON w.id = (SELECT first.id FROM works first WHERE first.request_message_id=m.id ORDER BY first.rowid LIMIT 1)
        LEFT JOIN works actor ON actor.id=a.work_id LEFT JOIN messages request ON request.id=actor.request_message_id
        ORDER BY m.seq`,
     ).map(row => {
@@ -2172,6 +2218,7 @@ export function openStore(options: StoreOptions): Store {
         stamp: model && effort && speed && threadId && turnId ? { model, effort, speed, threadId, turnId } : null,
         taskStep: oneOfOrNull(row, 'step', TASK_STEPS),
         handoff: parseJsonColumn(row, 'handoff', HandoffSchema),
+        trigger: triggerView(row),
       };
     });
     const versionsByWork = new Map<string, VersionView[]>();
@@ -2259,7 +2306,7 @@ export function openStore(options: StoreOptions): Store {
       workIds: ledger.flatMap(row => z.array(z.string()).parse(JSON.parse(str(row, 'work_ids')))),
     };
     const erasure = erasurePending() ? 'incomplete' as const : 'complete' as const;
-    return { rev, spaceId, activeBotId, bots, retiredBotIds, purged, erasure, messages, works, tasks: taskViews(versionN), carnet };
+    return { rev, spaceId, activeBotId, bots, retiredBotIds, purged, erasure, messages, works, tasks: taskViews(versionN), carnet, routines: routines.views() };
   }
 
   function taskViews(versionN: ReadonlyMap<string, number>): TaskView[] {
@@ -2340,6 +2387,11 @@ export function openStore(options: StoreOptions): Store {
     tools,
     admission,
     memory,
+    tickRoutines(since) {
+      const ticked = routines.tick(since);
+      if (ticked.changed) changed();
+      return ticked.admitted;
+    },
     dispatch,
     admit,
     view,

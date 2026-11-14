@@ -25,6 +25,7 @@ test("le Markdown ne crée aucune image réseau dans la page parente", async ({
       createdAt: new Date().toISOString(),
       stamp: null,
       taskStep: null,
+      trigger: null,
       handoff: null,
     },
   ];

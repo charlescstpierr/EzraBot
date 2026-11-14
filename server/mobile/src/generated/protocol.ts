@@ -49,11 +49,49 @@ export const DeletionCountsSchema = z.strictObject({
   keptDeliverables: z.number().int().nonnegative(),
   keptMentions: z.number().int().nonnegative(),
   tasks: z.number().int().nonnegative(),
+  routines: z.number().int().nonnegative(),
 });
 export type DeletionCounts = z.infer<typeof DeletionCountsSchema>;
 
 export const MentionSpanSchema = z.strictObject({ botId: id, start: z.number().int().nonnegative(), end: z.number().int().positive() });
 export type MentionSpan = z.infer<typeof MentionSpanSchema>;
+
+export const ROUTINE_STATES = ['inactive', 'active', 'paused', 'held', 'ended'] as const;
+export type RoutineState = (typeof ROUTINE_STATES)[number];
+/**
+ * Product rules of a routine, chosen and shown to the person. None is a measured capacity, and none raises a budget:
+ * every admitted request still goes through the shared ceilings.
+ */
+export const ROUTINE_LIMITS = {
+  /** Admissions over the life of one routine. */
+  cap: 366,
+  /** The end date is at most this many days after today, in the routine's zone. */
+  horizonDays: 366,
+  /** A running server still admits a slot this late. Later, or while the PC was off, the date is skipped. */
+  lateMinutes: 5,
+  /** Real time between two admissions of one routine, whatever its edits and zones. */
+  cooldownMinutes: 60,
+  previewSlots: 5,
+  tickSeconds: 30,
+} as const;
+
+/**
+ * What a routine asks and when, as the person sets it. The zone, the end date and the remaining checks are validated
+ * again on the server with the real formatter: these shapes only bound the input.
+ */
+const routineSchedule = {
+  text: text(LIMITS.messageChars),
+  /** Local wall-clock time, HH:MM. */
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  /** ISO weekdays, 1 is Monday. */
+  weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7).refine(days => new Set(days).size === days.length),
+  zone: z.string().min(1).max(64),
+  /** Last local date with a slot, YYYY-MM-DD. */
+  endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Admissions over the whole life of the routine, edits included. */
+  cap: z.number().int().min(1).max(ROUTINE_LIMITS.cap),
+};
+const revision = z.number().int().positive();
 
 export const CommandSchema = z.discriminatedUnion('type', [
   z.strictObject({
@@ -177,6 +215,14 @@ export const CommandSchema = z.discriminatedUnion('type', [
     baseUpdatedAt: z.iso.datetime({ precision: 3 }).optional(),
   }),
   z.strictObject({ type: z.literal('memory.delete'), requestId, botId: id, memoryId: id }),
+  /** A new routine is inactive: nothing is asked before `routine.activate`. */
+  z.strictObject({ type: z.literal('routine.create'), requestId, botId: id, ...routineSchedule }),
+  z.strictObject({ type: z.literal('routine.update'), requestId, routineId: id, expectedRevision: revision, ...routineSchedule }),
+  z.strictObject({ type: z.literal('routine.activate'), requestId, routineId: id, expectedRevision: revision }),
+  z.strictObject({ type: z.literal('routine.pause'), requestId, routineId: id }),
+  /** From `held`, `confirmBlocker` must name the uncertain effect the routine waits on. */
+  z.strictObject({ type: z.literal('routine.resume'), requestId, routineId: id, confirmBlocker: z.string().min(1).max(200).optional() }),
+  z.strictObject({ type: z.literal('routine.delete'), requestId, routineId: id }),
 ]);
 
 export type Command = z.infer<typeof CommandSchema>;
@@ -229,6 +275,7 @@ export const CommandResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('memory'), memoryId: z.string() }),
   z.strictObject({ kind: z.literal('botDeleted'), botId: z.string(), nextBotId: z.string().nullable(), erased: z.boolean() }),
   z.strictObject({ kind: z.literal('purge'), erased: z.boolean() }),
+  z.strictObject({ kind: z.literal('routine'), routineId: z.string(), revision: z.number(), state: z.enum(ROUTINE_STATES) }),
 ]);
 export type CommandResult = z.infer<typeof CommandResultSchema>;
 
@@ -436,6 +483,8 @@ export type MessageView = {
   taskStep: TaskStep | null;
   /** Mino's proposal on its own reply, in its own thread. */
   handoff: Handoff | null;
+  /** Set on a request the person did not type. It names what asked, never who approved. */
+  trigger: { kind: 'routine'; routineId: string; date: string } | { kind: 'event' | 'voice' | 'checkin' } | null;
 };
 
 /** Derived from durable facts, never stored. */
@@ -561,6 +610,54 @@ export type BotView = {
   deletion: DeletionCounts;
 };
 
+/** The first instant of a scheduled date, or `missing` when that wall time does not exist that day. */
+export type RoutineSlotView =
+  | { kind: 'due'; date: string; at: string; offsetMinutes: number; repeated: boolean }
+  | { kind: 'missing'; date: string };
+
+/**
+ * A fact of an earlier occurrence that stops the next one. Read from the registries that own it, never copied.
+ * `open` skips the date; `uncertain` holds the routine until the person confirms this exact key.
+ */
+export type RoutineBlockerView = {
+  key: string;
+  state: 'open' | 'uncertain';
+  kind: 'work' | 'publication' | 'action' | 'call' | 'mission';
+  workId: string | null;
+  label: string;
+};
+
+export const ROUTINE_SKIP_REASONS = ['offline', 'late', 'cooldown', 'previous_open', 'uncertain'] as const;
+export type RoutineSkipReason = (typeof ROUTINE_SKIP_REASONS)[number];
+
+export type RoutineDecisionView = { date: string; revision: number; slotAt: string; offsetMinutes: number; decidedAt: string } & (
+  | { outcome: 'admitted'; messageId: string; workId: string | null }
+  | { outcome: 'skipped'; reason: RoutineSkipReason; blocker: string | null }
+  | { outcome: 'refused'; message: string });
+
+export type RoutineView = {
+  id: string;
+  botId: string;
+  revision: number;
+  text: string;
+  time: string;
+  weekdays: number[];
+  zone: string;
+  endsOn: string;
+  cap: number;
+  /** Admissions so far. An edit never lowers it. */
+  admitted: number;
+  state: RoutineState;
+  endedBecause: 'cap' | 'end_date' | null;
+  /** Set only while `held`. */
+  heldOn: RoutineBlockerView | null;
+  /** The next scheduled dates from now, as long as the routine can still admit. */
+  upcoming: RoutineSlotView[];
+  last: RoutineDecisionView | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StoreView = {
   rev: number;
   /** Random per database: browser markers from another database on the same origin never apply here. */
@@ -578,6 +675,7 @@ export type StoreView = {
   works: WorkView[];
   tasks: TaskView[];
   carnet: PublicationView[];
+  routines: RoutineView[];
 };
 
 export type CatalogModel = {
