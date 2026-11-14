@@ -304,7 +304,6 @@ export function createEvents(kit: Pick<LedgerKit, 'get' | 'all' | 'run' | 'trans
         return { status: 'unavailable' };
       }
       const subscriptionId = str(sub, 'id');
-      // A revoked subscription keeps no body digest, like the receipts its revocation already retired.
       const insert = (decision: { reason: EventRefusal } | { messageId: string }) => run(
         `INSERT INTO event_receipts(transport, webhook_id, subscription_id, revision, body_sha256, received_at, outcome, reason, message_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

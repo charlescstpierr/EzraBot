@@ -23,7 +23,9 @@ Sur les octets bruts, avant toute lecture du JSON :
 - un seul en-tête `webhook-id`, `webhook-timestamp`, `webhook-signature` et `x-composio-webhook-version` ;
 - une signature `v1` HMAC-SHA256 sur `id.horodatage.corps`, avec le secret courant ou le précédent, comparée en temps constant ;
 - un horodatage en secondes décimales, à 300 secondes au plus de l’horloge du PC ;
-- la version `V3`, un corps de 64 Kio au plus, reçu en 10 secondes au plus.
+- la version `V3`, un corps de 64 Kio au plus.
+
+Les seuils Node pour recevoir les en-têtes et le corps sont configurés à 10 secondes. Leur contrôle périodique peut retarder le rejet : [Node vérifie ces délais toutes les 30 secondes par défaut](https://nodejs.org/download/release/latest-v24.x/docs/api/http.html#httpcreateserveroptions-requestlistener). Le banc Node 24 a observé des rejets autour de 30 secondes.
 
 Puis : l’`id` du corps égal à `webhook-id`, le type `composio.trigger.message`, et l’utilisateur du fournisseur égal au propriétaire local des comptes. Le parseur du SDK n’est pas utilisé : il remplace l’identifiant de l’événement par celui du déclencheur.
 
@@ -34,7 +36,7 @@ Une signature fausse donne 401. Une forme, une portée ou une heure invalide don
 Chaque événement porte un `webhook-id`, stable entre les nouvelles tentatives du fournisseur. Mino garde un reçu par transport et identifiant, pour toujours.
 
 - Le reçu est lu avant l’abonnement. Le même identifiant reçoit la même réponse, même après une pause, une révocation, un redémarrage ou la perte d’un acquittement.
-- Le même identifiant avec un autre corps donne 409. Rien n’est remplacé ; un compteur le montre.
+- Tant que l’empreinte est conservée, le même identifiant avec un autre corps donne 409. Rien n’est remplacé ; un compteur le montre. Après révocation, l’empreinte est effacée : cet identifiant retrouve la décision gardée sans comparer les corps et ne crée aucun nouveau travail.
 - Un déclencheur qu’aucun abonnement ne nomme est acquitté et seulement compté.
 - Le reçu et la demande sont écrits dans la même transaction, avant la réponse HTTP. Un échec avant la fin n’écrit rien ; le fournisseur renvoie, et une seule demande naît.
 - Au-delà de 10 000 identifiants gardés pour un transport, un nouvel identifiant reçoit 503 sans rien écrire. Les identifiants déjà gardés répondent toujours.
@@ -47,7 +49,7 @@ Ces chiffres sont des règles produit, pas des capacités mesurées.
 
 Sur le PC, page « Événements de service », ouverte depuis la page Routines ou depuis une demande d’événement dans le fil. Le personnage, le compte, le déclencheur et le transport ne changent jamais. Un abonnement créé est inactif. L’activation exige la réception configurée et un compte dont le dernier état connu est `ACTIVE`.
 
-On règle la consigne, les champs copiés et la limite par jour (1 à 50, 20 au départ). Chaque modification, pause, reprise ou révocation fait avancer la révision. Un deuxième onglet resté sur l’ancienne révision est refusé.
+On règle la consigne, les champs copiés et la limite par jour (1 à 50, 20 au départ). Chaque changement fait avancer la révision. Modifier, activer ou reprendre exige la révision affichée ; un onglet périmé est refusé. Mettre en pause ou révoquer vise l’identité stable de l’abonnement sans exiger la révision affichée. Ces deux commandes arrêtent des départs, elles n’en autorisent aucun.
 
 Au plus 20 abonnements par transport, révoqués compris. Un déclencheur révoqué reste lié à son abonnement : pour un autre usage, configurez un nouveau déclencheur chez le fournisseur.
 

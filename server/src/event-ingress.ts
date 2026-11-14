@@ -125,7 +125,6 @@ export function verifyDelivery(raw: Buffer, headers: Readonly<Record<string, rea
     transport: config.transport, webhookId, triggerId, triggerSlug, accountId, data,
     bodySha256: createHash('sha256').update(raw).digest('hex'),
   };
-  // The one place a delivery is constructed: every field above was authenticated or checked.
   return { kind: 'verified', delivery: delivery as VerifiedDelivery };
 }
 
