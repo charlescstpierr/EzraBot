@@ -35,7 +35,9 @@ test("pull requests require no-mistakes without exemptions", () => {
 
 test("no-mistakes configures the local checks and main base", () => {
   assert.deepEqual(
-    parse(readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8")),
+    parse(
+      readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8"),
+    ),
     {
       commands: {
         prepare: "npm ci && npm ci --prefix server",
