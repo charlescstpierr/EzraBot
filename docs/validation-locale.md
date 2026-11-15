@@ -16,7 +16,7 @@ Assets React/SVG, création du canvas Three.js, navigation, brouillons après re
 
 ## Origine et limites
 
-Le ZIP de référence ne contenait pas test/fixtures/schema-v0.sql. Cette fixture a été restaurée depuis le dépôt source local mentionné dans PROVENANCE.json. Les 220 tests serveur sont une nouvelle exécution locale.
+Le ZIP de référence ne contenait pas test/fixtures/schema-v0.sql. Cette fixture a été restaurée depuis le dépôt source local. Le code source de référence est le commit `ac097512081dd2a2e73d81d42a7ffa3483a3a493`. Les 220 tests serveur sont une nouvelle exécution locale.
 
 Aucune réponse IA réelle, association HTTPS de téléphone, compilation native iPhone/Android ou interaction sur appareil physique n’a été vérifiée dans ce lot. Les fonctions avancées conservent le client historique sur /advanced ; voir README.md. Le port 4328 appartient à cette copie locale et ne modifie pas l’installation personnelle source.
 

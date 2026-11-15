@@ -65,7 +65,7 @@ Chaque appel Codex et chaque action Composio réserve sa place avant de partir. 
 - Personnalisation des noms/couleurs et gestion des souvenirs de chaque personnage.
 - Interface adaptative, clavier IME, dialogues avec gestion du focus et navigation clavier.
 
-Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Les adaptations serveur exposent la page React et le type de réponse de mission. La mémoire accepte une base de modification pour refuser les écritures concurrentes périmées. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source mentionné par PROVENANCE.json.
+Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Les adaptations serveur exposent la page React et le type de réponse de mission. La mémoire accepte une base de modification pour refuser les écritures concurrentes périmées. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source.
 
 ## Limites explicites
 
@@ -78,3 +78,5 @@ Les six parcours sont disponibles dans React : envoi et invitations par identit�
 Les réponses IA réelles, les appareils physiques et les accès externes restent hors de la recette automatique. Les commandes incertaines des panneaux restent reprenables tant que leur panneau est ouvert. Le composeur conserve aussi son envoi après rechargement. Une validation ne publie pas un résultat sur Internet.
 
 Les apports retenus et les exclusions sont décrits dans [Apports et reste à vérifier](docs/apports-et-reste.md). Le journal de cette reprise est dans [Décisions](docs/decisions.tsv).
+
+Licence : [MIT](LICENSE).
