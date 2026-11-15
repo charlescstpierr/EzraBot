@@ -2,7 +2,7 @@
   "name": "mino-native-client",
   "description": "Native Mino companion. Execution and persistence remain on the paired PC.",
   "license": "0BSD",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",
