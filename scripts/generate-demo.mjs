@@ -20,8 +20,8 @@ const width = 600, height = 375;
 const frames = [];
 let store, missions, server, browser;
 
-// Frequent clear codes keep the LZW dictionary below the 10-bit threshold.
 function encodeGif(images) {
+  const clear = 256, end = 257, literalsPerClear = 200;
   const word = (n) => Buffer.from([n & 255, n >> 8]);
   const palette = Buffer.from(Array.from({ length: 768 }, (_, i) => {
     const color = Math.floor(i / 3);
@@ -43,10 +43,10 @@ function encodeGif(images) {
       }
     };
     for (let i = 0; i < pixels.length; i++) {
-      if (i % 200 === 0) code(256);
+      if (i % literalsPerClear === 0) code(clear);
       code(pixels[i]);
     }
-    code(257);
+    code(end);
     if (count) bytes.push(bits & 255);
     for (let i = 0; i < bytes.length; i += 255) {
       const block = bytes.slice(i, i + 255);
