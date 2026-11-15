@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p web/tsconfig.json && esbuild web/app.ts web/device-admin.ts --bundle --format=esm --target=es2022 --legal-comments=eof --log-level=warning --outdir=dist/web && node ../scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json",
-    "test": "npm run build && node --test --test-concurrency=1 'dist/test/*.test.js'",
+    "test": "npm run build && npm run test:run -- 'dist/test/*.test.js'",
+    "test:run": "node --test --test-concurrency=1",
     "start": "npm run build && node dist/src/main.js",
     "verify:real": "npm run build && node tools/verify-real.mjs",
     "compare:context": "npm run build && node tools/compare-context.mjs"
