@@ -1,12 +1,13 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createAgentEngine } from '../src/agent-engine.js';
 import { childEnv, takeProviderKey } from '../src/child-env.js';
 import { createCodexEngine } from '../src/engine.js';
-import { tempDir } from './fixtures/temp.js';
 
 const SYNTHETIC_KEY = 'synthetic-test-key-not-a-secret';
 
@@ -27,7 +28,7 @@ test('the provider key is read once, trimmed, and removed from the server enviro
 });
 
 test('neither the chat engine child nor the mission executor child inherits a Composio or a Honcho variable', async () => {
-  const dir = tempDir('mino-child-env-');
+  const dir = mkdtempSync(join(tmpdir(), 'mino-child-env-'));
   const saved = { ...process.env };
   process.env.COMPOSIO_API_KEY = SYNTHETIC_KEY;
   process.env.COMPOSIO_BASE_URL = 'https://example.invalid';

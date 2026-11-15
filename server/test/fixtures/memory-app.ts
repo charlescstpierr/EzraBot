@@ -1,7 +1,9 @@
+import { mkdtempSync } from './temp.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_POLICY } from '../../src/admission.js';
@@ -17,7 +19,6 @@ import type { PcView } from '../../src/tools-protocol.js';
 import { createWorker } from '../../src/worker.js';
 import type { FakeProvider } from './fake-composio.js';
 import type { FakeHoncho } from './fake-honcho.js';
-import { tempDir } from './temp.js';
 
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const fixture = fileURLToPath(new URL('./fake-app-server.js', import.meta.url));
@@ -52,7 +53,7 @@ type Options = {
 
 /** The real store, worker, desk and HTTP server, in front of a fake Honcho and the fake App Server. */
 export async function startMemory(options: Options) {
-  const dir = tempDir('mino-memory-flow-');
+  const dir = mkdtempSync(join(tmpdir(), 'mino-memory-flow-'));
   const path = options.path ?? join(dir, 'mino.sqlite');
   const probe = join(dir, 'turn.json');
   const rpc = join(dir, 'rpc.log');

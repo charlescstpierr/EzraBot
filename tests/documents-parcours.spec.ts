@@ -302,7 +302,6 @@ async function openLab(page: Page, serviceTools = false) {
   };
 }
 
-// Removed after the file's last test, once each lab has closed its store, also for a lab that failed to open.
 const dirs: string[] = [];
 const ownedDir = (prefix: string) => {
   const dir = mkdtempSync(join(tmpdir(), prefix));

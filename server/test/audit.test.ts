@@ -1,12 +1,14 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
+
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
 import {engineFailure, loadMascots, type EngineOutcome} from '../src/domain.js';
 import {openStore, type Store, type Claim} from '../src/store.js';
 import type {Command, CommandResult} from '../src/protocol.js';
-import {tempDir} from './fixtures/temp.js';
 
 const mascots=loadMascots(new URL('../../assets/mascots.json',import.meta.url));
 type CommandInput = {[T in Command['type']]: Omit<Extract<Command,{type:T}>,'requestId'>}[Command['type']];
@@ -15,7 +17,7 @@ function accepted(store:Store, command:CommandInput):CommandResult {
   assert(result.ok,result.ok?'':result.message);
   return result.result;
 }
-function sandbox(){const path=join(tempDir('mino-audit-regression-'),'mino.sqlite');return {path,store:openStore({path,mascots})};}
+function sandbox(){const path=join(mkdtempSync(join(tmpdir(),'mino-audit-regression-')),'mino.sqlite');return {path,store:openStore({path,mascots})};}
 function request(store:Store,reviewerBotId:string|null=null){
   const sent=accepted(store,{type:'message.send',botId:'mino',text:'Prépare une note',attachments:[],document:{reviewerBotId}});
   assert(sent.kind==='message'&&sent.taskId);return {taskId:sent.taskId,workId:sent.workId};

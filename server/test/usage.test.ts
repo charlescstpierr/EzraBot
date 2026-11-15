@@ -1,4 +1,7 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
+
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,14 +11,13 @@ import { createCodexEngine, type Engine } from '../src/engine.js';
 import type { StoreView } from '../src/protocol.js';
 import { openStore, type Store } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
-import { tempDir } from './fixtures/temp.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-app-server.js', import.meta.url));
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 
 function engineFor(scenario: string): Engine {
   return createCodexEngine({
-    command: process.execPath, args: [fixture, scenario], workDir: tempDir('mino-usage-'),
+    command: process.execPath, args: [fixture, scenario], workDir: mkdtempSync(join(tmpdir(), 'mino-usage-')),
     clientVersion: 'test', turnTimeoutMs: 5000, requestTimeoutMs: 2000, interruptGraceMs: 500,
   });
 }
@@ -30,7 +32,7 @@ async function eventually<T>(read: () => T | null | undefined, label: string): P
 }
 
 function app(scenario: string): { store: Store; stop: () => Promise<void>; send: (text: string) => string; cancel: (workId: string) => void } {
-  const store = openStore({ path: join(tempDir('mino-usage-'), 'mino.sqlite'), mascots });
+  const store = openStore({ path: join(mkdtempSync(join(tmpdir(), 'mino-usage-')), 'mino.sqlite'), mascots });
   const engine = engineFor(scenario);
   const worker = createWorker({ store, engines: { chat: engine, doc: engine } });
   return {

@@ -1,5 +1,8 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
+
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +12,6 @@ import { createHttpServer } from '../src/http.js';
 import { DiagnosticsSchema, CommandResultSchema, type CommandResult, type AppView, type EngineStatus } from '../src/protocol.js';
 import { openStore } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
-import { tempDir } from './fixtures/temp.js';
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -71,7 +73,7 @@ async function freePort(): Promise<number> {
 
 async function start(longPollMs = 50) {
   const port = await freePort();
-  const store = openStore({ path: join(tempDir('mino-http-'), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
+  const store = openStore({ path: join(mkdtempSync(join(tmpdir(), 'mino-http-')), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
   const engine = fakeEngine();
   const worker = createWorker({ store, engines: { chat: engine, doc: engine } });
   const loggedTypes: string[] = [];
@@ -124,7 +126,7 @@ test('an invalid command cannot copy arbitrary client text into the log', async 
 });
 
 test('a storage failure stops the worker and reports a fatal failure', async () => {
-  const store = openStore({ path: join(tempDir('mino-worker-'), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
+  const store = openStore({ path: join(mkdtempSync(join(tmpdir(), 'mino-worker-')), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
   store.close();
   let fatal = 0;
   const events: string[] = [];
@@ -231,7 +233,6 @@ test('deleting a bot is refused while its call is still stopping, even once the 
   }
 });
 
-
 const previewFetch = (url: string) => fetch(url, {headers:{'sec-fetch-dest':'iframe'}});
 
 async function acceptedResult(response: Response): Promise<CommandResult> {
@@ -287,7 +288,6 @@ test('an old assistant HTML code block has a preview and a download; user messag
     assert.equal((await previewFetch(`${app.base}/api/versions/missing/preview`)).status,404);
   } finally {await app.stop();}
 });
-
 
 test('diagnostics expose only allowlisted metadata and keep late usage on the completed attempt', async () => {
   const app = await start();

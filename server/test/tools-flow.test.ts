@@ -1,4 +1,7 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
+
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { MobileSnapshotSchema } from '../src/mobile-protocol.js';
@@ -7,7 +10,6 @@ import { openStore } from '../src/store.js';
 import type { LiveFacts } from '../src/tool-ledger.js';
 import { ACCOUNT_A, SEND_EMAIL, createFakeProvider } from './fixtures/fake-composio.js';
 import { find, mascots, rid, start } from './fixtures/tools-app.js';
-import { tempDir } from './fixtures/temp.js';
 
 test('from a chat message to a real bot report: connect, grant, propose, approve exactly, send once, report in the same thread', async () => {
   const app = await start();
@@ -127,7 +129,7 @@ test('tool routes are PC-only: wrong origin or token is refused, and the synced 
 });
 
 test('without a provider key the view says so, every tools route refuses, and a bot with stored rights gets no tool', async () => {
-  const dir = tempDir('mino-tools-nokey-');
+  const dir = mkdtempSync(join(tmpdir(), 'mino-tools-nokey-'));
   const path = join(dir, 'mino.sqlite');
   const seeded = openStore({ path, mascots, serviceTools: true });
   const live: LiveFacts = { account: ACCOUNT_A, tools: [SEND_EMAIL] };

@@ -1,5 +1,7 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -7,10 +9,9 @@ import { createCodexEngine, type AgentText, type Engine, type ToolCall, type Too
 import { composeContext } from '../src/context.js';
 import type { EngineOutcome } from '../src/domain.js';
 import type { BotChoice } from '../src/protocol.js';
-import { tempDir } from './fixtures/temp.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-app-server.js', import.meta.url));
-const workDir = tempDir('mino-engine-');
+const workDir = mkdtempSync(join(tmpdir(), 'mino-engine-'));
 const { turn } = composeContext({
   bot: { name: 'Mino', title: 'test', instructions: '', replyStyle: 'concise', contextSize: 'short' },
   memories: [],

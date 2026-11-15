@@ -1,18 +1,19 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { engineFailure, loadMascots, type EngineOutcome } from '../src/domain.js';
 import type { CommandResult, DispatchOutcome, StoreView } from '../src/protocol.js';
 import { openStore, StoreLockedError, type Claim, type Store } from '../src/store.js';
-import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 
 function tempPath(): string {
-  return join(tempDir('mino-store-'), 'mino.sqlite');
+  return join(mkdtempSync(join(tmpdir(), 'mino-store-')), 'mino.sqlite');
 }
 
 function open(path = tempPath()): { store: Store; path: string } {

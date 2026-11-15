@@ -1,6 +1,7 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -391,7 +392,6 @@ test('through the engine, only the lead turn receives an outputSchema, and each 
     assert.equal(root?.can.accept, root?.synthesis?.final?.id);
   } finally { await worker.close(); await engine.close(); missions.close(); b.cleanup(); }
 });
-
 
 test('mission model selectors accept catalog names containing dots without widening mission identities', () => {
   const command = { type: 'mission.create', requestId: 'model-selector-0001', projectId: 'project_1', goal: 'Corriger le test', model: 'gpt-6.1-sol', effort: 'high' };

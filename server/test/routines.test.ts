@@ -1,9 +1,11 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -17,7 +19,6 @@ import { openStore, type Store } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
 import { startFakeHoncho } from './fixtures/fake-honcho.js';
 import { BOT, startMemory } from './fixtures/memory-app.js';
-import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 const rid = () => randomUUID();
@@ -27,7 +28,7 @@ const answered = (reply: string, deliverable: { title: string; body: string } | 
 
 /** One injected clock for the store and the tick; tests move it by hand. */
 function space(options: { path?: string; policy?: AdmissionPolicy; missions?: () => readonly MissionOrigin[]; at?: string } = {}) {
-  const path = options.path ?? join(tempDir('mino-routines-'), 'mino.sqlite');
+  const path = options.path ?? join(mkdtempSync(join(tmpdir(), 'mino-routines-')), 'mino.sqlite');
   const clock = { at: Date.parse(options.at ?? '2026-11-16T12:00:00Z') };
   const now = () => new Date(clock.at).toISOString();
   const store = openStore({ path, mascots, now, ...(options.policy ? { policy: options.policy } : {}), ...(options.missions ? { missions: options.missions } : {}) });

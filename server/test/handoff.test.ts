@@ -1,14 +1,16 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { composeContext, MINO_OUTPUT_SCHEMA, OUTPUT_SCHEMA, type ContextSource } from '../src/context.js';
 import { loadMascots, parseEngineReply, type EngineOutcome } from '../src/domain.js';
 import { openStore, type Store } from '../src/store.js';
-import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
-const open = () => openStore({ path: join(tempDir('mino-handoff-'), 'mino.sqlite'), mascots });
+const open = () => openStore({ path: join(mkdtempSync(join(tmpdir(), 'mino-handoff-')), 'mino.sqlite'), mascots });
 const REQUEST = 'Ajoute une fonction slugify avec tests,  puis documente-la dans le README.';
 const proposal = { goal: 'Ajoute une fonction slugify avec tests, puis documente-la dans le README.', coordinated: true, why: 'Deux étapes séparables.' };
 const reply = (handoff: typeof proposal | null): EngineOutcome => ({

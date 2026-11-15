@@ -1,14 +1,15 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { openMissions } from "../src/missions.js";
 import { admissionIn } from "./fixtures/admission.js";
-import { tempDir } from "./fixtures/temp.js";
 
 test("the agents view revision advances across process restarts", (t) => {
-  const base = tempDir("ezrabot-revision-");
+  const base = mkdtempSync(join(tmpdir(), "ezrabot-revision-"));
   const home = join(base, "home"),
     project = join(home, "project"),
     dataDir = join(base, "service", "data");
@@ -44,7 +45,7 @@ test("the agents view revision advances across process restarts", (t) => {
 });
 
 test("the first upgrade of a legacy database advances past an open browser revision", () => {
-  const base = tempDir("ezrabot-legacy-revision-");
+  const base = mkdtempSync(join(tmpdir(), "ezrabot-legacy-revision-"));
   const project = join(base, "home", "project");
   const dataDir = join(base, "service", "data");
   mkdirSync(project, { recursive: true });

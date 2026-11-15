@@ -1,6 +1,8 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -10,10 +12,9 @@ import { loadMascots, parseEngineReply, type EngineOutcome } from '../src/domain
 import { openStore, type Claim, type Store } from '../src/store.js';
 import type { LiveFacts } from '../src/tool-ledger.js';
 import { ACCOUNT_A, SEND_EMAIL } from './fixtures/fake-composio.js';
-import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
-const tempPath = () => join(tempDir('mino-connection-'), 'mino.sqlite');
+const tempPath = () => join(mkdtempSync(join(tmpdir(), 'mino-connection-')), 'mino.sqlite');
 const rid = () => randomUUID();
 const LIVE: LiveFacts = { account: ACCOUNT_A, tools: [SEND_EMAIL] };
 const SLACK_ACCOUNT = { id: 'ca_synthetique_slack', toolkit: 'slack', alias: 'Messagerie synthétique', status: 'ACTIVE' } as const;

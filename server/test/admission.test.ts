@@ -1,6 +1,8 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -12,11 +14,10 @@ import { createCodexEngine, type Engine, type RunInput } from '../src/engine.js'
 import type { DispatchOutcome, EngineStatus, StoreView } from '../src/protocol.js';
 import { openStore, type Store } from '../src/store.js';
 import { createWorker, type Worker } from '../src/worker.js';
-import { tempDir as ownedTempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/fake-app-server.js', import.meta.url));
-const tempDir = () => ownedTempDir('mino-admission-');
+const tempDir = () => mkdtempSync(join(tmpdir(), 'mino-admission-'));
 const rid = () => randomUUID();
 
 const CODEX_ONLY = (callsPerDay: number): AdmissionPolicy => ({ ...DEFAULT_POLICY, budgets: { ...DEFAULT_POLICY.budgets, codex: { callsPerDay } } });

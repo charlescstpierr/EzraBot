@@ -1,17 +1,18 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, mock } from 'node:test';
 import { engineFailure, loadMascots, type EngineOutcome } from '../src/domain.js';
 import type { CommandResult, DispatchOutcome, StoreView } from '../src/protocol.js';
 import { managedBackupPaths, openStore, type Claim, type DispatchContext, type Store } from '../src/store.js';
-import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 const rid = () => randomUUID();
-const tempPath = () => join(tempDir('mino-delete-'), 'mino.sqlite');
+const tempPath = () => join(mkdtempSync(join(tmpdir(), 'mino-delete-')), 'mino.sqlite');
 const open = (path: string) => openStore({ path, mascots });
 
 function ok(outcome: DispatchOutcome): CommandResult {
@@ -379,7 +380,6 @@ test('the delete guards only let through rows listed for the current deletion, a
     store.close();
   }
 });
-
 
 test('an anonymous witness disappears when the last thread retaining its guest contribution is erased', () => {
   const store = open(tempPath());

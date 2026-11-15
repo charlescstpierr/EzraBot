@@ -187,8 +187,9 @@ async function stop() {
     store.close();
     missions.close();
   } finally {
-    for (const path of [data, clockFile, ownerFile])
-      rmSync(path, { recursive: true, force: true });
+    rmSync(data, { recursive: true, force: true });
+    for (const path of [clockFile, ...(withEvents ? [ownerFile] : [])])
+      rmSync(path, { force: true });
   }
   process.exit(0);
 }

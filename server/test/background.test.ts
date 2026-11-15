@@ -1,5 +1,8 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
+
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +12,6 @@ import { createHttpServer } from '../src/http.js';
 import { DiagnosticsSchema, type AppView, type EngineStatus, type TaskView } from '../src/protocol.js';
 import { openStore } from '../src/store.js';
 import { createWorker } from '../src/worker.js';
-import { tempDir } from './fixtures/temp.js';
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const READY: EngineStatus = { state: 'ready', account: 'chatgpt', models: [{ id: 'fake', displayName: 'Fake', isDefault: true, efforts: ['low'], defaultEffort: 'low', speeds: [] }] };
@@ -70,7 +72,7 @@ async function start() {
   const address = probe.address();
   await new Promise<void>(r => probe.close(() => r()));
   const port = typeof address === 'object' && address ? address.port : 0;
-  const store = openStore({ path: join(tempDir('mino-bg-'), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
+  const store = openStore({ path: join(mkdtempSync(join(tmpdir(), 'mino-bg-')), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
   const chat = scripted('chat');
   const doc = scripted('doc');
   const worker = createWorker({ store, engines: { chat, doc }, progressIntervalMs: 15 });
@@ -217,8 +219,8 @@ test('over HTTP: cancelling a task stops its physical call, and deletion waits f
 test('with the real adapter, official deltas become persisted states, and a cut answer stays partial and unvalidated', async () => {
   const fixture = fileURLToPath(new URL('./fixtures/fake-app-server.js', import.meta.url));
   for (const scenario of ['stream', 'stream-cut'] as const) {
-    const store = openStore({ path: join(tempDir('mino-real-'), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
-    const engineFor = () => createCodexEngine({ command: process.execPath, args: [fixture, scenario], workDir: tempDir('mino-cwd-'), clientVersion: 'test', requestTimeoutMs: 2000, interruptGraceMs: 300 });
+    const store = openStore({ path: join(mkdtempSync(join(tmpdir(), 'mino-real-')), 'mino.sqlite'), mascots: loadMascots(join(root, 'assets/mascots.json')) });
+    const engineFor = () => createCodexEngine({ command: process.execPath, args: [fixture, scenario], workDir: mkdtempSync(join(tmpdir(), 'mino-cwd-')), clientVersion: 'test', requestTimeoutMs: 2000, interruptGraceMs: 300 });
     const engines = { chat: engineFor(), doc: engineFor() };
     const worker = createWorker({ store, engines, progressIntervalMs: 10 });
     try {
