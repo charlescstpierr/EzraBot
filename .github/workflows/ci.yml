@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: charles-ubuntu
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +31,8 @@ jobs:
         run: npm ci
       - name: Install server dependencies
         run: npm ci --prefix server
+      - name: Check CI runners
+        run: npm run test:ci-runners
       - name: Check TypeScript
         run: npm run typecheck
       - name: Verify mobile protocol
