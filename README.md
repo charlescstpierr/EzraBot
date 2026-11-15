@@ -1,4 +1,10 @@
-# EzraBot · React + Three.js
+# EzraBot
+
+EzraBot est un assistant personnel sur votre PC. Discutez avec des personnages, organisez vos projets et retrouvez vos documents dans une interface web locale. Les réponses réelles utilisent votre session Codex.
+
+![Démo EzraBot : accueil, brouillon, projets et personnages](docs/demo.gif)
+
+Cette animation montre le vrai client React avec un espace temporaire synthétique. Elle présente la navigation et un brouillon, sans réponse IA ni connexion externe.
 
 Client web React 19 et TypeScript, servi par le moteur PC fourni dans le dossier de spécifications. Les personnages utilisent les SVG originaux ; Three.js anime une texture issue des mêmes tracés, avec repli SVG sans WebGL. Les animations s’arrêtent en arrière-plan et suivent le mouvement réduit du système.
 
@@ -7,6 +13,8 @@ Client web React 19 et TypeScript, servi par le moteur PC fourni dans le dossier
 Node.js 24 ou supérieur et la commande officielle `codex` avec une session locale autorisée sont nécessaires pour les réponses réelles.
 
 ```bash
+git clone https://github.com/charlescstpierr/EzraBot.git
+cd EzraBot
 npm ci
 npm ci --prefix server
 npm start
@@ -79,4 +87,20 @@ Les réponses IA réelles, les appareils physiques et les accès externes resten
 
 Les apports retenus et les exclusions sont décrits dans [Apports et reste à vérifier](docs/apports-et-reste.md). Le journal de cette reprise est dans [Décisions](docs/decisions.tsv).
 
-Licence : [MIT](LICENSE).
+## Refaire la démo
+
+Après avoir installé les dépendances racine et serveur, installez Chromium une fois avec Playwright. Aucun accès administrateur ni secret n'est nécessaire.
+
+```bash
+npx playwright install chromium
+node scripts/generate-demo.mjs
+node scripts/test-readme.mjs
+```
+
+Le générateur compile le projet, ouvre le vrai client dans Chromium et capture cinq scènes dans un espace SQLite temporaire. Le moteur IA est désactivé et le navigateur bloque les requêtes externes. Le script ferme le navigateur et le service, puis efface les données temporaires. Il remplace `docs/demo.gif` par une animation en boucle de 600 × 375 pixels, inférieure à 2 Mo. Le mouvement réduit fixe les mascottes pendant les captures. Aucun serveur personnel n'est utilisé.
+
+Node.js 24 et les bibliothèques système nécessaires à Chromium doivent être disponibles. Le script n'installe pas ces bibliothèques. L'installation des dépendances et de Chromium demande un accès réseau ; la génération fonctionne ensuite hors ligne.
+
+## Licence
+
+EzraBot est distribué sous licence [MIT](LICENSE). Les dépendances conservent leurs licences respectives.
