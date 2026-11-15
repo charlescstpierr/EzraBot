@@ -1,6 +1,7 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -379,7 +380,6 @@ test('the delete guards only let through rows listed for the current deletion, a
     store.close();
   }
 });
-
 
 test('an anonymous witness disappears when the last thread retaining its guest contribution is erased', () => {
   const store = open(tempPath());

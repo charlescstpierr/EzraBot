@@ -1,7 +1,7 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import { build } from "esbuild";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import type { Server } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -135,10 +135,7 @@ const freePort = () =>
 
 async function openLab(page: Page, serviceTools = false) {
   const store: Store = openStore({
-    path: join(
-      mkdtempSync(join(tmpdir(), "ezrabot-documents-")),
-      "mino.sqlite",
-    ),
+    path: join(ownedDir("ezrabot-documents-"), "mino.sqlite"),
     mascots: loadMascots(join(root, "server/assets/mascots.json")),
     serviceTools,
   });
@@ -305,12 +302,26 @@ async function openLab(page: Page, serviceTools = false) {
   };
 }
 
+const dirs: string[] = [];
+const ownedDir = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(dir);
+  return dir;
+};
+base.afterAll(() => {
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
+});
+
 const test = base.extend<{ lab: Awaited<ReturnType<typeof openLab>> }>({
   lab: async ({ page }, use) => {
     const lab = await openLab(page);
-    await use(lab);
-    expect(lab.errors).toEqual([]);
-    await lab.close();
+    try {
+      await use(lab);
+      expect(lab.errors).toEqual([]);
+    } finally {
+      await lab.close();
+    }
   },
 });
 

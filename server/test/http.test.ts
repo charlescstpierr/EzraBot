@@ -1,5 +1,6 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -232,7 +233,6 @@ test('deleting a bot is refused while its call is still stopping, even once the 
   }
 });
 
-
 const previewFetch = (url: string) => fetch(url, {headers:{'sec-fetch-dest':'iframe'}});
 
 async function acceptedResult(response: Response): Promise<CommandResult> {
@@ -288,7 +288,6 @@ test('an old assistant HTML code block has a preview and a download; user messag
     assert.equal((await previewFetch(`${app.base}/api/versions/missing/preview`)).status,404);
   } finally {await app.stop();}
 });
-
 
 test('diagnostics expose only allowlisted metadata and keep late usage on the completed attempt', async () => {
   const app = await start();

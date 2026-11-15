@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openStore } from "../server/src/store";
@@ -9,6 +9,17 @@ import { createServer } from "node:net";
 import { createHttpServer } from "../server/src/http";
 import { createWorker } from "../server/src/worker";
 import type { Engine } from "../server/src/engine";
+
+const dirs: string[] = [];
+const ownedDir = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(dir);
+  return dir;
+};
+test.afterAll(() => {
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
+});
 
 const testResults = test.extend<{ lab: Awaited<ReturnType<typeof openLab>> }>({
   lab: async ({ page }, use) => {
@@ -34,7 +45,7 @@ const testResults = test.extend<{ lab: Awaited<ReturnType<typeof openLab>> }>({
 
 async function openLab() {
   const store = openStore({
-    path: join(mkdtempSync(join(tmpdir(), "ezra-results-")), "store.sqlite"),
+    path: join(ownedDir("ezra-results-"), "store.sqlite"),
     mascots: loadMascots(resolve("server/assets/mascots.json")),
   });
   const engine: Engine = {

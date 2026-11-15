@@ -1,5 +1,6 @@
+import { mkdtempSync } from './fixtures/temp.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';

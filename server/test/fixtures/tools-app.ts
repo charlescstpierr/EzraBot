@@ -1,6 +1,7 @@
+import { mkdtempSync } from './temp.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -15,7 +16,6 @@ import { createActionDesk, type DeskEvent } from '../../src/tool-desk.js';
 import { ToolsReplySchema, type PcView, type ToolProposalView, type ToolsReply, type ToolsReplyOf } from '../../src/tools-protocol.js';
 import { createWorker } from '../../src/worker.js';
 import { createFakeProvider, type FakeProvider } from './fake-composio.js';
-
 
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const fixture = fileURLToPath(new URL('./fake-app-server.js', import.meta.url));
