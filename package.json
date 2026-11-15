@@ -9,6 +9,7 @@
     "start": "npm run build && node server/dist/src/main.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && npm run typecheck --prefix server",
     "test": "npm test --prefix server",
+    "test:ci-runners": "node --test scripts/test-ci-runners.mjs",
     "test:ui": "npm run build && playwright test"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "@types/three": "^0.181.0",
     "esbuild": "^0.25.0",
     "prettier": "^3.10.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "yaml": "^2.9.1"
   }
 }
