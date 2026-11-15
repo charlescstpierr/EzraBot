@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -22,6 +21,7 @@ import { createFakeProvider } from './fixtures/fake-composio.js';
 import { startFakeHoncho } from './fixtures/fake-honcho.js';
 import { BOT, startMemory } from './fixtures/memory-app.js';
 import { distinct, eventBody, signHeaders, type EventInput } from './fixtures/signed-event.js';
+import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/fake-app-server.js', import.meta.url));
@@ -35,7 +35,7 @@ const answered = (reply: string, extra: Record<string, unknown> = {}): EngineOut
   ({ kind: 'succeeded', reply: { reply, deliverable: null, ...extra }, used: { model: 'fake', effort: 'low', speed: 'standard' }, threadId: 'thread', turnId: 'turn' }) as EngineOutcome;
 
 function space(options: { path?: string; transport?: string | null; serviceTools?: boolean } = {}) {
-  const path = options.path ?? join(mkdtempSync(join(tmpdir(), 'mino-events-')), 'mino.sqlite');
+  const path = options.path ?? join(tempDir('mino-events-'), 'mino.sqlite');
   const transport = options.transport === undefined ? TRANSPORT : options.transport;
   const store = openStore({ path, mascots, ...(options.serviceTools ? { serviceTools: true } : {}), ...(transport ? { events: { transport } } : {}) });
   return { path, store };

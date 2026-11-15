@@ -1,8 +1,19 @@
 import { test, expect } from "@playwright/test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppView } from "../server/src/protocol";
+
+const projects: string[] = [];
+const projectDir = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  projects.push(dir);
+  return dir;
+};
+test.afterEach(() => {
+  for (const dir of projects.splice(0))
+    rmSync(dir, { recursive: true, force: true });
+});
 
 test("le Markdown ne crée aucune image réseau dans la page parente", async ({
   page,
@@ -41,7 +52,7 @@ test("le Markdown ne crée aucune image réseau dans la page parente", async ({
 test("un ajout de projet incertain reste récupérable après fermeture et rechargement", async ({
   page,
 }, info) => {
-  const path = mkdtempSync(join(tmpdir(), "ezrabot-projet-reprise-"));
+  const path = projectDir("ezrabot-projet-reprise-");
   const sent: unknown[] = [];
   await page.route("**/api/agents/commands", async (route) => {
     const command = route.request().postDataJSON();
@@ -98,7 +109,7 @@ test("une mission déjà acceptée mais non confirmée ne se duplique pas après
   page,
   request,
 }) => {
-  const path = mkdtempSync(join(tmpdir(), "ezrabot-mission-reprise-"));
+  const path = projectDir("ezrabot-mission-reprise-");
   await page.goto("/");
   const project = await page.evaluate(async (path) => {
     const response = await fetch("/api/agents/commands", {

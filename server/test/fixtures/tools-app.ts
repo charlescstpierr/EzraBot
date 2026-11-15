@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -15,6 +13,7 @@ import { createActionDesk, type DeskEvent } from '../../src/tool-desk.js';
 import { ToolsReplySchema, type PcView, type ToolProposalView, type ToolsReply, type ToolsReplyOf } from '../../src/tools-protocol.js';
 import { createWorker } from '../../src/worker.js';
 import { createFakeProvider, type FakeProvider } from './fake-composio.js';
+import { tempDir } from './temp.js';
 
 
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
@@ -34,7 +33,7 @@ async function freePort(): Promise<number> {
 type Options = { path?: string; scenario?: string; provider?: FakeProvider | null; policy?: AdmissionPolicy };
 
 export async function start(options: Options = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'mino-tools-flow-'));
+  const dir = tempDir('mino-tools-flow-');
   const path = options.path ?? join(dir, 'mino.sqlite');
   const provider = options.provider === undefined ? createFakeProvider() : options.provider;
   const store = openStore({ path, mascots, serviceTools: provider !== null, ...(options.policy ? { policy: options.policy } : {}) });

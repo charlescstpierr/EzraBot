@@ -2,7 +2,7 @@
 // With MINO_QA_TOOLS=1 the chat lane runs the real engine against the fake App Server process,
 // and connected services use the fake provider: every account, action and result is synthetic.
 import { missionOrigins } from "../server/dist/src/routines.js";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:http";
@@ -38,6 +38,7 @@ if (honcho)
       : undefined;
 // Routine slots follow a clock a spec can move: a shift in milliseconds, read from this file at each reading.
 const clockFile = join(tmpdir(), `mino-qa-clock-${port}`);
+const ownerFile = join(tmpdir(), `mino-qa-owner-${port}`);
 writeFileSync(clockFile, "0");
 const now = () => {
   let shift = 0;
@@ -147,7 +148,7 @@ if (withEvents) {
     alias: "Compte GitHub synthétique",
     status: "ACTIVE",
   });
-  writeFileSync(join(tmpdir(), `mino-qa-owner-${port}`), store.tools.ownerId);
+  writeFileSync(ownerFile, store.tools.ownerId);
 }
 const ingress = withEvents
   ? createEventIngress({
@@ -176,14 +177,19 @@ server.listen(port, "127.0.0.1", () =>
   console.log(`QA http://127.0.0.1:${port} — isolated, no AI calls`),
 );
 async function stop() {
-  clearInterval(routineClock);
-  server.closeAllConnections();
-  server.close();
-  await Promise.all([worker.close(), desk.close(), memoryDesk?.close()]);
-  await chat.close();
-  await honcho?.close();
-  store.close();
-  missions.close();
+  try {
+    clearInterval(routineClock);
+    server.closeAllConnections();
+    server.close();
+    await Promise.all([worker.close(), desk.close(), memoryDesk?.close()]);
+    await chat.close();
+    await honcho?.close();
+    store.close();
+    missions.close();
+  } finally {
+    for (const path of [data, clockFile, ownerFile])
+      rmSync(path, { recursive: true, force: true });
+  }
   process.exit(0);
 }
 process.on("SIGTERM", stop);

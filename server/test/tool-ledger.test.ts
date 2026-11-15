@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -13,9 +12,10 @@ import { ACCOUNT_A, ACCOUNT_B, FETCH_EMAILS, META_TOOL, SEND_EMAIL, UNVERSIONED,
 import { DEFAULT_POLICY } from '../src/admission.js';
 import type { AdmissionPolicy } from '../src/admission-protocol.js';
 import { createActionDesk, type DeskEvent } from '../src/tool-desk.js';
+import { tempDir } from './fixtures/temp.js';
 
 const mascots = loadMascots(new URL('../../assets/mascots.json', import.meta.url));
-const tempPath = () => join(mkdtempSync(join(tmpdir(), 'mino-tools-')), 'mino.sqlite');
+const tempPath = () => join(tempDir('mino-tools-'), 'mino.sqlite');
 const rid = () => randomUUID();
 const LIVE: LiveFacts = { account: ACCOUNT_A, tools: [SEND_EMAIL, FETCH_EMAILS, UNVERSIONED, META_TOOL] };
 const MAIL = { to: 'personne@exemple.invalid', subject: 'Bonjour', body: 'Texte synthétique.' };
