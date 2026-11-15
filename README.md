@@ -103,6 +103,4 @@ Node.js 24 et les bibliothèques système nécessaires à Chromium doivent être
 
 ## Licence
 
-La licence MIT et la provenance sont prévues dans la [PR #53](https://github.com/charlescstpierr/EzraBot/pull/53), encore ouverte. Le texte de licence sera disponible après sa fusion. Les dépendances conservent leurs licences respectives.
-
-Licence : [MIT](LICENSE).
+EzraBot est distribué sous licence [MIT](LICENSE). Les dépendances conservent leurs licences respectives.
