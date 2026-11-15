@@ -1,0 +1,12 @@
+# no-mistakes : porte locale avant chaque push (https://kunchenguid.github.io/no-mistakes/reference/repo-config/)
+# Lu depuis main seulement : ce fichier ne compte qu une fois fusionné.
+# Le dépôt utilise npm (package-lock.json racine + server/).
+commands:
+  prepare: "npm ci && npm ci --prefix server"
+  # Vérification locale ciblée ; la CI « Compile and test EzraBot » garde la suite complète (Playwright compris).
+  lint: "npm run typecheck"
+ignore_patterns:
+  - "package-lock.json"
+  - "server/package-lock.json"
+pr:
+  base_branch: main
