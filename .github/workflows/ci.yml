@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             server/package-lock.json
+            desktop/package-lock.json
       - name: Install React dependencies
         run: npm ci
       - name: Install server dependencies
@@ -39,6 +40,16 @@ jobs:
         run: npm run build
       - name: Test server with controlled engines
         run: node --test --test-concurrency=1 'server/dist/test/*.test.js'
+      - name: Install desktop dependencies and the official Electron runtime
+        run: |
+          npm ci --prefix desktop
+          node desktop/node_modules/electron/install.js
+      - name: Check desktop TypeScript
+        run: npm run typecheck --prefix desktop
+      - name: Test the desktop guardian and the real server under the Electron runtime
+        run: npm test --prefix desktop
+        env:
+          EZRABOT_TEST_RUNTIME: ${{ github.workspace }}/desktop/node_modules/electron/dist/electron
       - name: Install browser for interface tests
         run: npx playwright install --with-deps chromium
       - name: Test interface without provider calls
