@@ -73,7 +73,7 @@ Chaque appel Codex et chaque action Composio réserve sa place avant de partir. 
 - Personnalisation des noms/couleurs et gestion des souvenirs de chaque personnage.
 - Interface adaptative, clavier IME, dialogues avec gestion du focus et navigation clavier.
 
-Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Les adaptations serveur exposent la page React et le type de réponse de mission. La mémoire accepte une base de modification pour refuser les écritures concurrentes périmées. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source mentionné par PROVENANCE.json.
+Le serveur, SQLite, les règles d’autorisation et les moteurs Codex proviennent du code `ac097512081dd2a2e73d81d42a7ffa3483a3a493` fourni. Les adaptations serveur exposent la page React et le type de réponse de mission. La mémoire accepte une base de modification pour refuser les écritures concurrentes périmées. La fixture historique `schema-v0.sql`, absente du ZIP, a été récupérée dans le dépôt local source.
 
 ## Limites explicites
 
@@ -104,3 +104,5 @@ Node.js 24 et les bibliothèques système nécessaires à Chromium doivent être
 ## Licence
 
 La licence MIT et la provenance sont prévues dans la [PR #53](https://github.com/charlescstpierr/EzraBot/pull/53), encore ouverte. Le texte de licence sera disponible après sa fusion. Les dépendances conservent leurs licences respectives.
+
+Licence : [MIT](LICENSE).
