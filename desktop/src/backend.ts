@@ -15,7 +15,6 @@ export type BackendSpec = {
   generation: string;
   env: Record<string, string>;
   log: number;
-  afterUnconfirmed: boolean;
   startupMs?: number;
   stopTimings?: { coopMs: number; termMs: number; killMs: number };
 };
@@ -62,7 +61,6 @@ export function launchOwnedBackend(spec: BackendSpec): OwnedBackend {
   const timings = spec.stopTimings;
   const child = spawn(spec.guardian, [
     '--lock', join(spec.lifecycleDir, 'guardian.lock'), '--receipt', join(spec.lifecycleDir, 'guardian.receipt'),
-    ...(spec.afterUnconfirmed ? ['--after-unconfirmed'] : []),
     ...(timings ? ['--coop-ms', String(timings.coopMs), '--term-ms', String(timings.termMs), '--kill-ms', String(timings.killMs)] : []),
     '--', spec.runtime, spec.serverEntry,
   ], { env: spec.env, cwd: spec.dataDir, stdio: ['pipe', 'pipe', spec.log, 'pipe'] });

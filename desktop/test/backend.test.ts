@@ -67,7 +67,7 @@ os.execv(${JSON.stringify(process.execPath)}, [${JSON.stringify(process.execPath
   const spec = (overrides: Partial<BackendSpec> = {}): BackendSpec => {
     const generation = randomBytes(16).toString('hex');
     return {
-      guardian: GUARDIAN, runtime: RUNTIME, serverEntry: SERVER, lifecycleDir, dataDir, origin: ORIGIN, generation, log: 2, afterUnconfirmed: false,
+      guardian: GUARDIAN, runtime: RUNTIME, serverEntry: SERVER, lifecycleDir, dataDir, origin: ORIGIN, generation, log: 2,
       env: serverEnvironment(session, { dataDir, port: PORT, codex, codexExec: CODEX_EXEC, generation }), ...overrides,
     };
   };

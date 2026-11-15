@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, openSync, readdirSync, readFileSync, closeSync } from 'node:fs';
+import { existsSync, mkdtempSync, openSync, readFileSync, closeSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -120,18 +120,19 @@ test('a killed guardian leaves an unconfirmed state that a free lock does not hi
       assert.ok(inTree.has(ppid) || mine.includes(ppid), `${id.pid} has parent ${ppid}: an orphan must be adopted by this test's own subreaper, not by systemd; run through npm test`);
     }
     assert.ok(mine.includes(parentOf(Number(spawned.pid))!), 'the orphaned runtime went to the outer test guardian');
-    const next = guardian('serve', { dir: run.dir });
-    assert.equal((await next.next('previous-unconfirmed')).event, 'previous-unconfirmed');
-    assert.equal(await next.exit, 76);
-    assert.equal(next.events.some(e => e.event === 'spawned'), false, 'nothing starts over an unconfirmed stop');
-    const acknowledged = guardian('serve', { dir: run.dir, flags: ['--after-unconfirmed'] });
-    await acknowledged.next('spawned');
-    assert.ok(readdirSync(run.dir).some(name => name.startsWith('guardian.receipt.unconfirmed-')), 'the unconfirmed receipt is kept');
-    acknowledged.child.stdin!.end('stop\n');
-    assert.equal((await acknowledged.next('cleanup')).result, 'clean');
-    assert.equal(await acknowledged.exit, 0);
+    const receiptBefore = readFileSync(run.receipt, 'utf8');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const next = guardian('serve', { dir: run.dir });
+      assert.equal((await next.next('previous-unconfirmed')).event, 'previous-unconfirmed');
+      assert.equal(await next.exit, 76);
+      assert.equal(next.events.some(e => e.event === 'spawned'), false, 'nothing starts over an unconfirmed stop');
+      assert.equal(readFileSync(run.receipt, 'utf8'), receiptBefore, 'a refused launch writes no new attestation');
+      assert.equal(existsSync(next.report), false, 'no runtime ran');
+    }
+    assert.equal(alive({ pid: Number(spawned.pid), start: String(spawned.start) }), true, 'the old tree still runs while every launch is refused');
   } finally {
     cleanupOwn(tree);
+    rmSync(run.dir, { recursive: true, force: true });
   }
 });
 

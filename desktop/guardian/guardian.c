@@ -7,7 +7,7 @@
  * then every remaining descendant, and waits until it has no child left. Only then does it write a
  * clean receipt. It never reads what the runtime does: no URL, no budget, no work.
  *
- * Usage: ezrabot-guardian --lock FILE --receipt FILE [--after-unconfirmed]
+ * Usage: ezrabot-guardian --lock FILE --receipt FILE
  *                         [--coop-ms N] [--term-ms N] [--kill-ms N] -- RUNTIME [ARG...]
  *
  * Files the tree creates are private: the umask is 077.
@@ -288,14 +288,12 @@ static long long parse_ms(const char *value) {
 
 int main(int argc, char **argv) {
   const char *lock_path = NULL;
-  int after_unconfirmed = 0;
   long long coop_ms = 10000, term_ms = 2000, kill_ms = 3000;
   int i = 1;
   for (; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) { i++; break; }
     if (strcmp(argv[i], "--lock") == 0 && i + 1 < argc) lock_path = argv[++i];
     else if (strcmp(argv[i], "--receipt") == 0 && i + 1 < argc) receipt_path = argv[++i];
-    else if (strcmp(argv[i], "--after-unconfirmed") == 0) after_unconfirmed = 1;
     else if (strcmp(argv[i], "--coop-ms") == 0 && i + 1 < argc) coop_ms = parse_ms(argv[++i]);
     else if (strcmp(argv[i], "--term-ms") == 0 && i + 1 < argc) term_ms = parse_ms(argv[++i]);
     else if (strcmp(argv[i], "--kill-ms") == 0 && i + 1 < argc) kill_ms = parse_ms(argv[++i]);
@@ -321,13 +319,8 @@ int main(int argc, char **argv) {
     return 70;
   }
 
-  int previous = previous_receipt();
-  if (previous < 0 && !after_unconfirmed) { emit("{\"event\":\"previous-unconfirmed\"}"); return 76; }
-  if (previous < 0) {
-    char kept[PATH_MAX];
-    snprintf(kept, sizeof kept, "%s.unconfirmed-%lld", receipt_path, (long long)time(NULL));
-    if (rename(receipt_path, kept) != 0 && errno != ENOENT) { emit("{\"event\":\"error\",\"step\":\"keep-previous\",\"errno\":%d}", errno); return 70; }
-  }
+  /* A receipt that is not clean means a tree may still run unowned; nothing starts over it. */
+  if (previous_receipt() < 0) { emit("{\"event\":\"previous-unconfirmed\"}"); return 76; }
 
   umask(077);
   if (prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0) { emit("{\"event\":\"error\",\"step\":\"subreaper\",\"errno\":%d}", errno); return 70; }
