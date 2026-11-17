@@ -24,6 +24,7 @@ import { createActionDesk } from './tool-desk.js';
 import { BudgetConfigError, policyFromEnv } from './admission.js';
 import { ROUTINE_LIMITS } from './protocol.js';
 import { EventIngressConfigError, createEventIngress, takeEventIngressConfig } from './event-ingress.js';
+import { DesktopChannelError, announceReady, takeDesktopChannel } from './desktop-channel.js';
 
 const VERSION = '0.1.0';
 const startedAt = new Date().toISOString();
@@ -38,6 +39,14 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+const desktopGeneration = (() => {
+  try {
+    return takeDesktopChannel(process.env);
+  } catch (error) {
+    if (error instanceof DesktopChannelError) fail(error.message);
+    throw error;
+  }
+})();
 const providerKey = takeProviderKey(process.env);
 const honcho = (() => {
   try {
@@ -168,6 +177,13 @@ let routineClock: NodeJS.Timeout | undefined;
 server.on('error', error => fail(`Le serveur n’a pas pu démarrer sur 127.0.0.1:${port} (${'code' in error ? String(error.code) : 'erreur'}).`));
 server.listen(port, '127.0.0.1', () => {
   log({ event: 'ready', url: `http://127.0.0.1:${port}`, dataDir });
+  if (desktopGeneration) {
+    try {
+      announceReady(desktopGeneration, { url: `http://127.0.0.1:${port}`, dataDir });
+    } catch {
+      fail('L’application de bureau ne reçoit plus l’état du serveur. Mino est arrêté.');
+    }
+  }
   void engine.catalog().then(status => log({ event: 'engine', state: status.state }));
   worker.kick();
   agentWorker.kick();
