@@ -91,6 +91,7 @@ export function createWorker(options: {
         onStage: stage => guarded(() => store.setStage(claim, stage)),
         onThread: threadId => guarded(() => store.bindThread(claim, threadId)),
         onTurn: turnId => guarded(() => store.bindTurn(claim, turnId)),
+        prepare: () => store.prepare(claim),
         depart: () => {
           const departure = closed ? { ok: false as const, reason: 'Mino s’arrête. L’appel n’est pas parti.' } : store.depart(claim);
           departed = departure.ok;

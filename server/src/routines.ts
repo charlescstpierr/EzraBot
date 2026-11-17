@@ -112,7 +112,7 @@ type Fields = Omit<CommandOf<'routine.create'>, 'type' | 'requestId' | 'botId'>;
 type Revision = Schedule & { n: number; text: string; cap: number };
 
 const OPEN_MISSIONS: readonly MissionStatus[] = ['queued', 'running', 'stopping', 'review', 'outdated', 'waiting'];
-export type MissionOrigin = { missionId: string; originMessageId: string; status: MissionStatus; interruptions: readonly string[] };
+export type MissionOrigin = { missionId: string; originMessageId: string; status: MissionStatus; interruptions: readonly string[]; goalRev: number; latestAttemptId: string | null; updatedAt: string };
 
 export function missionOrigins(registry: Pick<Missions, 'view' | 'detail'>): MissionOrigin[] {
   return registry.view().missions.flatMap(m => {
@@ -121,18 +121,20 @@ export function missionOrigins(registry: Pick<Missions, 'view' | 'detail'>): Mis
     const seen = new Set<string>();
     const interruptions = new Set<string>();
     let uncertain = false;
+    let latestAttemptId: string | null = null;
     while (pending.length) {
       const id = pending.pop();
       if (id === undefined || seen.has(id)) continue;
       seen.add(id);
       const detail = registry.detail(id);
       if (!detail) continue;
+      if (id === m.id) latestAttemptId = detail.attempts.at(-1)?.id ?? null;
       for (const attempt of detail.attempts) if (attempt.state === 'interrupted') interruptions.add(attempt.id);
       uncertain ||= detail.status === 'interrupted' || detail.attempts.at(-1)?.state === 'interrupted';
       pending.push(...detail.children.map(child => child.id));
     }
     const status = uncertain && OPEN_MISSIONS.includes(m.status) ? 'interrupted' : m.status;
-    return [{ missionId: m.id, originMessageId: m.originMessageId, status, interruptions: [...interruptions].sort() }];
+    return [{ missionId: m.id, originMessageId: m.originMessageId, status, interruptions: [...interruptions].sort(), goalRev: m.goalRev, latestAttemptId, updatedAt: m.updatedAt }];
   });
 }
 
