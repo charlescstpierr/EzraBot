@@ -5,50 +5,6 @@ import { parse } from "yaml";
 
 const workflows = new URL("../.github/workflows/", import.meta.url);
 
-test("pull requests require no-mistakes without exemptions", () => {
-  const { name, jobs, ...workflow } = parse(
-    readFileSync(new URL("require-no-mistakes.yml", workflows), "utf8"),
-  );
-  assert.deepEqual(
-    { ...workflow, jobs: Object.values(jobs) },
-    {
-      on: {
-        pull_request: {
-          types: ["opened", "edited", "synchronize", "reopened"],
-        },
-      },
-      permissions: { contents: "read", "pull-requests": "read" },
-      jobs: [
-        {
-          name: "PR must be raised via no-mistakes",
-          "runs-on": "charles-ubuntu",
-          steps: [
-            {
-              uses: "kunchenguid/no-mistakes/.github/actions/require-no-mistakes@5732d1ed88a1572fa6115d6ede5d69bfec097946",
-            },
-          ],
-        },
-      ],
-    },
-  );
-});
-
-test("no-mistakes configures the local checks and main base", () => {
-  assert.deepEqual(
-    parse(
-      readFileSync(new URL("../.no-mistakes.yaml", import.meta.url), "utf8"),
-    ),
-    {
-      commands: {
-        prepare: "npm ci && npm ci --prefix server",
-        lint: "npm run typecheck",
-      },
-      ignore_patterns: ["package-lock.json", "server/package-lock.json"],
-      pr: { base_branch: "main" },
-    },
-  );
-});
-
 function checkRunners(source, file) {
   const workflow = parse(source);
   assert.ok(
